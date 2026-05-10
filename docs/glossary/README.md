@@ -2,6 +2,22 @@
 
 Per-term file convention. 각 term은 `docs/glossary/<term-slug>.md`로 단일 파일.
 
+## Index
+
+| Term | Type | Defined in | Status |
+|---|---|---|---|
+| [`document`](document.md) | capability | ADR-0003 | active |
+| [`snapshot`](snapshot.md) | capability | ADR-0003 | active |
+| [`claim`](claim.md) | lifecycle | ADR-0003 | active |
+| [`dossier`](dossier.md) | capability | ADR-0003 | active |
+| [`scenario`](scenario.md) | capability | ADR-0003 | active |
+| [`content_draft`](content-draft.md) | lifecycle | ADR-0003 | active |
+| [`publication`](publication.md) | lifecycle | ADR-0003 | active |
+| [`edge`](edge.md) | capability | ADR-0007 | active |
+| [`reliability_tier`](reliability-tier.md) | capability | ADR-0005 | active |
+| [`extraction_confidence`](extraction-confidence.md) | capability | ADR-0005 | active |
+| [`evidence_quote`](evidence-quote.md) | capability | ADR-0008 | active |
+
 ## 규칙
 
 - 한 term 한 파일. 파일명은 lowercase, 공백은 `-`로.

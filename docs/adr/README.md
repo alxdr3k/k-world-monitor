@@ -28,7 +28,16 @@
 
 | ADR | 제목 | 상태 | 날짜 |
 |---|---|---|---|
-| 0001 | Example architecture decision | proposed | — |
+| 0001 | Example architecture decision (boilerplate placeholder) | rejected | 2026-05-11 |
+| 0002 | Cross-document invariant tracking system | accepted | 2026-05-09 |
+| 0003 | 7-stage pipeline object model with 3-tier source layer | accepted | 2026-05-11 |
+| 0004 | Storage tiers — Markdown / SQLite+FTS5 / R2 | accepted | 2026-05-11 |
+| 0005 | Confidence decomposition | accepted | 2026-05-11 |
+| 0006 | LLM routing — Haiku 1차 + Sonnet escalate | accepted | 2026-05-11 |
+| 0007 | Edge ledger — supports / contradicts / qualifies / updates / supersedes | accepted | 2026-05-11 |
+| 0008 | Evidence quote and cite check coverage | accepted | 2026-05-11 |
+| 0009 | Scenario validate and revisions ledger | accepted | 2026-05-11 |
+| 0010 | Stale triggers and review queue throttling | accepted | 2026-05-11 |
 
 ## Template
 

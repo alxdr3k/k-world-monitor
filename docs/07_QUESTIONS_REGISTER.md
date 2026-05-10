@@ -26,6 +26,6 @@
 validator는 legacy entry를 ID 추적만 하고 invariant scope에서 제외 (warning suppressed).
 사용자가 Phase 2 마이그레이션을 트리거하면 LLM이 entry 단위로 per-file로 분할.
 
-마이그레이션 절차는 hub note의 [Migration Phases — Phase 2](../README.md) 참조 (or actwyn의 경우 second-brain `05. Projects/boilerplate-invariant-tracking.md`).
+마이그레이션 절차는 [`adr/0002-invariant-tracking-system.md`](adr/0002-invariant-tracking-system.md) "Migration phases" 결정 (Phase 0~3) 참조. 본 repo는 greenfield라 legacy entry 없음.
 
 (아래에 legacy inline entry가 있다면 마이그레이션 시 제거)

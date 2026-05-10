@@ -19,7 +19,27 @@ Then  <기대 결과>
 
 | ID | REQ/NFR | 시나리오 | 검증 방법 | Status |
 |---|---|---|---|---|
-| AC-001 | REQ-001 | Given … When … Then … | manual / automated TEST-001 | defined |
+| AC-001 | REQ-001 | Given 신규 fetch된 Snapshot. When extractor가 claim을 추출. Then Document → Snapshot → Claim 3-tier에 row가 생기고 Dossier/Scenario/Draft/Publication 단계는 미생성 상태로 trace anchor가 보존된다 | manual + automated TEST-001 | defined |
+| AC-002 | REQ-002 | Given research.db. When 1만 건 candidate claim과 5천 건 snapshot 메타가 적재. Then SELECT + FTS5 keyword 검색이 cold cache p95 < 1초 (NFR-001) | TEST-002 (bench) | defined |
+| AC-003 | REQ-003 | Given Snapshot row. When r2_key가 가리키는 객체를 fetch. Then sha256이 일치하고 mime이 일치한다 | TEST-003 | defined |
+| AC-004 | REQ-004 | Given 1만 건 candidate claim. When 그 중 50건이 promoted. Then Markdown vault에는 50건만 존재하고 나머지는 SQLite에만 존재한다 | TEST-004 + manual | defined |
+| AC-005 | REQ-005 | Given 신규 객체 생성. When ID 발급. Then 접두 + 단조 증가 식별자(`doc_/snap_/clm_/dos_/scn_/drf_/pub_/edge_/run_`) 규칙을 따른다 | TEST-005 | defined |
+| AC-006 | REQ-006 | Given Document, Claim, Scenario row. When 단일 confidence 필드 검사. Then 어떤 row에도 단일 confidence 필드가 없고 reliability_tier / extraction_confidence / claim_status / scenario assumption weight가 분리되어 있다 | TEST-006 | defined |
+| AC-007 | REQ-007 + NFR-005 | Given Claim row. When evidence quote 길이 검사. Then quote ≤ 200자 + locator + quote_hash가 모두 채워져 있다. 비면 invalid | TEST-007 | defined |
+| AC-008 | REQ-008 | Given claim/scenario/publication frontmatter. When supports[]/contradicts[]/qualifies[] 배열 검색. Then 검색 결과 0건 (모든 관계는 edges 테이블) | TEST-008 (lint) | defined |
+| AC-009 | REQ-009 | Given 신규 source type(article/dataset/report). When extractor 호출. Then article/report는 LLM 호출, dataset은 parser 경로로 분기한다 | TEST-009 | defined |
+| AC-010 | REQ-010 | Given reliability_tier=high + extraction_confidence ≥ 0.85 claim. When extractor 결과 처리. Then auto-confirm으로 claim_status=confirmed, reviewer queue 미진입 | TEST-010 | defined |
+| AC-011 | REQ-011 | Given 빈 repo. When 구현 순서대로 진행. Then 04_IMPLEMENTATION_PLAN의 INFRA → INFRA-1B → ... 순서대로 slice가 landed (역순 금지) | manual review | defined |
+| AC-012 | REQ-012 | Given Scenario row. When scenario validate 호출. Then assumption weight / branch / falsifier / counterclaim / monitoring 누락 시 reject. 모두 채워졌을 때만 pass | TEST-012 | defined |
+| AC-013 | REQ-013 | Given ContentDraft + 인용 claim. When cite check 호출. Then stale / retracted / horizon mismatch / unit mismatch / overclaim 5종을 모두 검사하고, 하나라도 fail이면 ContentDraft state=reviewing | TEST-013 | defined |
+| AC-014 | REQ-014 | Given Scenario 변경. When 적용. Then scenario_revisions에 새 row가 append되고 in-place mutation이 발생하지 않는다. 이전 revision은 supersedes/updates edge로 lineage 유지 | TEST-014 | defined |
+| AC-015 | REQ-015 | Given 신규 추출 100건 (mix of reliability + confidence). When review queue에 적재. Then auto-confirm 비율과 수동 review 큐 크기가 ADR-0006 INV-0006-4 룰과 일치 | TEST-015 | defined |
+| AC-016 | REQ-016 | Given confirmed claim. When (a) snapshot 갱신 (b) 시간 경과 (c) counterclaim 등록 중 하나 발생. Then claim_status: confirmed → stale 전이 + 인용 ContentDraft/Publication에 cascade | TEST-016 | defined |
+| AC-017 | NFR-002 | Given 동일 source set + scenario revision id. When 다른 운영자가 cite check + scenario validate 재실행. Then 동일 promoted claim set + 동일 branches 결론에 도달 | manual reproducibility test | defined |
+| AC-018 | NFR-003 | Given Publication. When 인용 trace 추출. Then Publication → ContentDraft → Claim → Snapshot → R2 bytes 5단계로 한 문장이 역추적 가능 | TEST-018 | defined |
+| AC-019 | NFR-004 | Given 일별 LLM 비용 상한 (TBD). When run ledger 합산. Then 누적 비용이 상한 미만, 초과 시 큐 throttling 동작 | TEST-019 | defined |
+| AC-020 | NFR-006 | Given Snapshot row. When R2에서 객체 삭제 시도. Then 정책 위반(public bucket이 아니므로 차단)이거나 sha256 + r2_key로 회수 가능 | TEST-020 | defined |
+| AC-021 | NFR-007 | Given 신규 source type 추가 의도. When extractor interface 확장. Then 기존 article/dataset/report 분기에 영향 없이 dry-run 1건 추가 가능 | TEST-021 + manual | defined |
 
 ## Status vocabulary
 
@@ -38,7 +58,25 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 
 | ID | 이름 | 위치 | 커버하는 AC |
 |---|---|---|---|
-| TEST-001 |  | `tests/...` | AC-001 |
+| TEST-001 | 7-stage object trace anchor | `tests/pipeline/object_model_test.ts` (planned) | AC-001 |
+| TEST-002 | FTS5 1만 건 검색 bench | `tests/bench/fts5_search_bench.ts` (planned) | AC-002 |
+| TEST-003 | R2 sha256 round-trip | `tests/storage/r2_integrity_test.ts` (planned) | AC-003 |
+| TEST-004 | promoted only markdown | `tests/storage/markdown_promoted_only_test.ts` (planned) | AC-004 |
+| TEST-005 | ID prefix lint | `tests/lint/id_prefix_test.ts` (planned) | AC-005 |
+| TEST-006 | confidence 분해 lint | `tests/lint/no_single_confidence_test.ts` (planned) | AC-006 |
+| TEST-007 | evidence quote 200자 + 3-tuple | `tests/extraction/evidence_test.ts` (planned) | AC-007 |
+| TEST-008 | frontmatter 관계 배열 lint | `tests/lint/no_frontmatter_relation_array_test.ts` (planned) | AC-008 |
+| TEST-009 | extractor type 분기 | `tests/extraction/router_test.ts` (planned) | AC-009 |
+| TEST-010 | auto-confirm threshold | `tests/review/auto_confirm_test.ts` (planned) | AC-010 |
+| TEST-012 | scenario validate 5종 | `tests/scenario/validate_test.ts` (planned) | AC-012 |
+| TEST-013 | cite check 5종 | `tests/cite_check/coverage_test.ts` (planned) | AC-013 |
+| TEST-014 | scenario revisions append-only | `tests/scenario/revisions_test.ts` (planned) | AC-014 |
+| TEST-015 | review queue throttling | `tests/review/throttling_test.ts` (planned) | AC-015 |
+| TEST-016 | stale 트리거 3종 | `tests/stale/triggers_test.ts` (planned) | AC-016 |
+| TEST-018 | 5-step trace | `tests/pipeline/trace_test.ts` (planned) | AC-018 |
+| TEST-019 | run ledger cost throttling | `tests/cost/ledger_test.ts` (planned) | AC-019 |
+| TEST-020 | R2 durability | `tests/storage/r2_durability_test.ts` (planned) | AC-020 |
+| TEST-021 | extractor interface dry-run | `tests/extraction/interface_test.ts` (planned) | AC-021 |
 
 ## CI/CD gates
 
@@ -47,11 +85,12 @@ requirement, non-functional requirement, release gate, or operational gate.
 
 | Gate | Environment | Verified by | Required? | Notes |
 |---|---|---|---|---|
-| PR validation | CI | TEST-### / workflow job | yes / no |  |
-| MVP hands-on | realistic environment | target user / manual / TEST-### | yes / no | Core workflow end-to-end |
-| Staging smoke | staging | TEST-### / manual | yes / no |  |
-| Production smoke | production | TEST-### / manual | yes / no |  |
-| Rollback validation | staging / production | TEST-### / runbook drill | yes / no |  |
+| PR validation | CI | invariant-check workflow + (planned) bun test | yes | 코드 도입 전: invariant-check만 |
+| invariant doc check | CI | `bun run invariant:check` | no (warning only) | ADR-0002 INV-0002-1 |
+| MVP hands-on | local | 운영자가 1주제 dossier → scenario → draft → publication 1건 end-to-end 실행 | yes | P0-M6 milestone gate |
+| Staging smoke | n/a | n/a | no | 단일 운영자, staging 환경 미정의 (P1 검토) |
+| Production smoke | n/a | n/a | no | publish는 외부 publisher (블로그/유튜브) 책임 |
+| Rollback validation | n/a | n/a | no | data rollback은 SQLite + R2 백업 정책으로 (RUNBOOK 추가 예정) |
 
 ## Definition of Done
 
@@ -59,12 +98,13 @@ requirement, non-functional requirement, release gate, or operational gate.
 
 - 모든 `must` REQ의 AC가 `passing`
 - 모든 required gate가 `passing` 또는 명시적으로 `waived`
-- 모든 NFR이 측정 가능한 방식으로 검증됨
-- 주요 운영 시나리오가 Runbook에 문서화
+- 모든 NFR이 측정 가능한 방식으로 검증됨 (AC-002 / AC-018 / AC-019 / AC-020 등)
+- 주요 운영 시나리오가 Runbook에 문서화 (`docs/05_RUNBOOK.md`)
 - required CI/CD gates are passing or explicitly waived
-- Traceability matrix가 최신
+- Traceability matrix가 최신 (`docs/09_TRACEABILITY_MATRIX.md`)
 
 ## Notes
 
 - AC가 없는 REQ는 verify 불가 → PRD로 돌려보냄.
 - 실패 시 회귀 방지를 위해 TEST로 승격.
+- TEST 파일은 모두 `(planned)` 상태 — 코드 도입과 함께 실제 위치 commit.

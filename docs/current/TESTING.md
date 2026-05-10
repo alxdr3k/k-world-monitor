@@ -1,6 +1,6 @@
 # Testing
 
-Status: template.
+> Last verified against code: n/a (no implementation yet — 2026-05-11)
 
 ## Testing policy
 
@@ -14,11 +14,20 @@ Status: template.
 
 ## Install
 
+> **현재 상태 (2026-05-11)**: `package.json` / Bun runtime / `scripts/validate_invariants.ts`는
+> 아직 commit되지 않았다 (`INFRA-1A.2` slice 진입 시 도입 예정). 아래 `bun run ...`
+> 명령들은 그 시점부터 실행 가능. 그 전까지는 **현재 실행 가능한 lint**:
+>
+> ```bash
+> ruby scripts/check-doc-governance.rb           # default mode (CI에서 실행)
+> ruby scripts/check-doc-governance.rb --strict  # placeholder remnant 검출 (옵션)
+> ```
+
 ```bash
-bun install
+bun install   # INFRA-1A.2 slice 도입 후 사용 가능
 ```
 
-## Invariant validator (primary check)
+## Invariant validator (primary check) — INFRA-1A.2 이후
 
 ```bash
 # Read-only validation — exits 0 by design (warning level only)
@@ -32,7 +41,7 @@ bun run invariant:fixture:glossary-drift
 bun run invariant:regen
 ```
 
-## Foreground recovery (write mode)
+## Foreground recovery (write mode) — INFRA-1A.2 이후
 
 ```bash
 # Foreground LLM only — persists unresolved_warnings into doc frontmatter
@@ -40,7 +49,10 @@ bun run invariant:regen
 bun run invariant:write
 ```
 
-## CI / required checks
+## Code tests (planned)
+
+> 코드 도입 전이라 모든 TEST는 (planned) 상태. INFRA-1A.2 slice 진입 시
+> `tests/` 디렉토리 + bun test 러너 commit.
 
 | Check | Local command | CI workflow / job | Required? | Notes |
 |---|---|---|---|---|
@@ -48,22 +60,32 @@ bun run invariant:write
 | invariant validation | `bun run invariant:check` | invariant-check job | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:*` | (manual / pre-PR) | recommended | covers Case 1 + Case 2 |
 | regenerate artifacts | `bun run invariant:regen` | invariant-check job (post-validate) | yes | uploads docs/_generated/ as PR artifact |
+| unit tests | `bun test` | (planned, INFRA-1A.2 이후) | yes (after code lands) | TEST-001 ~ TEST-021 |
+| FTS5 bench | `bun run bench:fts5` | (manual, SPIKE-001) | spike only | 1만 건 fixture 검색 p95 |
+| reproducibility manual | n/a (manual) | n/a | yes (P0-M5 gate) | AC-017 NFR-002 |
+
+## CI / required checks
+
+| Check | Local command | CI workflow / job | Required? | Notes |
+|---|---|---|---|---|
+| install | `bun install` | invariant-check job | yes | bun is mandatory runtime |
+| invariant validation | `bun run invariant:check` | invariant-check job | no (warning only) | ADR-0002 INV-0002-1 |
+| fixture regression | `bun run invariant:fixture:*` | (manual / pre-PR) | recommended | |
+| regenerate artifacts | `bun run invariant:regen` | invariant-check job | yes | uploads docs/_generated/ as PR artifact |
 
 ## CI notes
 
 - Workflow files: `.github/workflows/invariant-check.yml.example` (rename to `.yml` to activate)
-- Required branch protection checks: none — validator is warning-level by contract
+- Required branch protection checks: none — validator는 warning-level by contract
 - Non-blocking / advisory checks: invariant-check (annotations only, exit 0)
-- Known flaky checks: detect_pattern regex evaluation rare ReDoS — caught by
-  isLikelyCatastrophicRegex heuristics + length cap, but extreme inputs may
-  hit the workflow timeout. Authors should use literal patterns where possible.
+- 코드 테스트(`bun test`)는 INFRA-1A.2 slice 도입과 함께 required check 후보
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR
 
-- run typecheck if available
-- run tests if available
-- run lint if available
+- run typecheck if available (`bun run typecheck` — INFRA-1A.2 이후)
+- run tests if available (`bun test` — INFRA-1A.2 이후)
+- run lint if available (`bun run lint` — INFRA-1A.2 이후)
 - update relevant docs if behavior/schema/runtime changed
 
 ---
