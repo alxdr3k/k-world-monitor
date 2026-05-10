@@ -13,7 +13,7 @@ Question ↔ Decision ↔ Requirement ↔ Gate/Test ↔ Milestone/Track/Phase/Sl
 
 | TRACE-ID | Question | Decision / ADR | Requirement | Gate / Test | Milestone | Track | Phase | Slice | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| TRACE-001 | Q-001 | DEC-001 | REQ-001 | AC-001 / TEST-001 | P0-M1 | TRK | TRK-1A | TRK-1A.1 |  |
+| TRACE-### | Q-### | DEC-### | REQ-### | AC-### / TEST-### | P#-M# | TRK | TRK-#A | TRK-#A.# |  |
 | TRACE-002 |  |  |  |  |  |  |  |  |  |
 
 ## Invariants

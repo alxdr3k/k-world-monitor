@@ -15,7 +15,7 @@ canonical view만 유지한다. 구현 단계의 얇은 문서 레이어
 | Track | 기술 영역 또는 큰 구현 흐름 | `TRK` | api, data, runtime, ops 같은 영역 |
 | Phase | track 안의 구현 단계 | `TRK-1B` | 같은 track 안에서 순서가 있는 단계 |
 | Slice | 커밋 가능한 구현/검증 단위 | `TRK-1B.5` | PR / commit / issue와 연결 가능한 크기 |
-| Gate | 검증 / acceptance 기준 | `AC-012` / `TEST-018` | `06_ACCEPTANCE_TESTS.md` 또는 테스트 위치로 연결 |
+| Gate | 검증 / acceptance 기준 | `AC-###` / `TEST-###` | `06_ACCEPTANCE_TESTS.md` 또는 테스트 위치로 연결 |
 | Evidence | 완료를 뒷받침하는 근거 | PR, code, tests, current docs | 본문 복제 대신 링크 / ID로 남김 |
 
 ## Thin-doc boundary

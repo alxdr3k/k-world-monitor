@@ -101,7 +101,7 @@ accepted — 2026-05-09
 
 boilerplate template의 Q-ADR-DEC 문서 체계가 진화하면서 LLM이 cross-document invariant 위반을 감지하지 못하는 두 사례가 actwyn-q069 작업 중 발견됐다.
 
-**Case 1 (scope creep)**: ADR-0012가 critic_loop의 scope를 control-plane으로 한정하고 cheap inference model 권고를 그 위에 세움. Q-069 working draft가 paraphrase로 critic_loop을 judgment-plane.promotion까지 silent하게 확장. ADR-0012의 전제가 깨졌으나 본문 prose에만 정의된 scope는 자동 검출 불가능.
+**Case 1 (scope creep)**: ``ADR-0012``가 critic_loop의 scope를 control-plane으로 한정하고 cheap inference model 권고를 그 위에 세움. ``Q-069`` working draft가 paraphrase로 critic_loop을 judgment-plane.promotion까지 silent하게 확장. ``ADR-0012``의 전제가 깨졌으나 본문 prose에만 정의된 scope는 자동 검출 불가능.
 
 **Case 2 (glossary drift)**: Glossary "pending" 정의가 release_paths에 critic_loop을 잘못 가지고 있음. 별도 (a3) DEC가 critic_loop 제거를 결정했으나 본문 prose에만 적혀 있어 glossary 파일 미반영. 같은 개념이 두 문서에 별도 진술되어 drift 발생.
 
