@@ -1,0 +1,63 @@
+# relation_enum.yaml
+#
+# Boilerplate-owned. Closed enum for `touches[].relation` in Q frontmatter.
+# Each value carries a required payload schema so that the relation is not
+# just a label, but evidence-bearing.
+#
+# Validator (`scripts/validate_invariants.ts`) consumes this file to check
+# that every Q's touches[] entry has the right payload for its relation.
+#
+# Local extension: projects MAY add new relations via
+# `docs/templates/relation_enum.local.yaml` (additive only — adding new
+# relations OK, narrowing existing ones via tighter required[] OK,
+# removing relations or relaxing required[] is rejected as a hard warning).
+
+schema_version: 1
+
+relations:
+  complies:
+    description: |
+      This Q honors the existing scope/invariant unchanged. No upstream
+      change is being proposed; the touches[] entry is informational.
+    required: []
+    optional:
+      - statement   # one-line summary of what is being honored
+
+  extends_scope:
+    description: |
+      This Q proposes extending an existing ADR's scope (in[]) to cover a
+      new namespace. Detects scope creep (Case 1).
+    required:
+      - extended_to       # list of new namespaces (path-style)
+      - parent_invariant  # INV-### or "ADR-####.section" being extended
+    optional:
+      - rationale
+
+  challenges_invariant:
+    description: |
+      This Q proposes that an existing invariant should change. Mutually
+      exclusive with `complies` for the same target.
+    required:
+      - challenged_refs       # list of [INV-###]
+      - proposed_resolution   # one of: supersede | narrow | deprecate
+    optional:
+      - rationale
+
+  depends_on:
+    description: |
+      This Q's premise depends on an existing decision/invariant. If that
+      upstream changes, this Q must be re-reviewed.
+    required:
+      - depended_refs    # list of [INV-### | ADR-####.section]
+    optional:
+      - rationale
+
+  supersedes:
+    description: |
+      This Q's resolution will supersede a prior decision. After resolution,
+      the prior decision's frontmatter must set superseded_by.
+    required:
+      - superseded_id      # DEC-### or ADR-####
+      - successor_section  # path where the new decision will live
+    optional:
+      - rationale

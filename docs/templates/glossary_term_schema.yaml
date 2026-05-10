@@ -1,0 +1,59 @@
+# glossary_term_schema.yaml
+#
+# Boilerplate-owned. Schema for per-term glossary file frontmatter.
+# Each term file (`docs/glossary/<term>.md`) declares a `term_type`
+# which selects the relevant required fields.
+#
+# Validator consumes this to check term file frontmatter completeness.
+#
+# Local extension: projects MAY add new term_types via
+# `docs/templates/glossary_term_schema.local.yaml` (additive only).
+
+schema_version: 1
+
+# Common fields required for ALL term files regardless of term_type.
+common_required:
+  - term              # canonical name
+  - term_type         # one of term_types keys
+  - defined_in        # ADR-#### that holds definition rights
+  - last_changed_by   # ADR-#### / DEC-### / Q-### that last changed semantics
+  - status            # active | deprecated
+
+common_optional:
+  - aliases           # synonym list
+  - detect_patterns   # regex hints for paraphrase detection
+  - related_invariants # list of [INV-###]
+
+term_types:
+  lifecycle:
+    description: |
+      A term that names a state in a lifecycle (e.g., "pending", "active",
+      "resolved"). Has explicit transition rules and release_paths.
+      Common drift source — see Case 2 (glossary drift).
+    required:
+      - states  # list of state objects
+    state_schema:
+      required:
+        - name
+        - release_paths     # how this state can be exited
+        - forbidden_paths   # what MUST NOT be a release path
+      optional:
+        - transitions_from
+        - transitions_to
+
+  role:
+    description: |
+      A term naming a role/persona/actor (e.g., "operator", "reviewer").
+      Carries capabilities and forbidden actions.
+    required:
+      - capabilities    # list of allowed actions
+      - forbidden_paths # list of disallowed actions
+
+  capability:
+    description: |
+      A term naming a capability/feature (e.g., "critic_loop").
+      Often scope-restricted — must declare which planes/namespaces it
+      applies to. Common scope-creep target — see Case 1.
+    required:
+      - applies_to_planes  # list of namespaces (path-style) where this capability is in scope
+      - forbidden_paths    # list of namespaces where this capability MUST NOT appear

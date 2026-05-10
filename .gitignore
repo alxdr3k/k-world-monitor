@@ -1,0 +1,18 @@
+# Dev harness deps for the boilerplate invariant validator. Adopting repos
+# install yaml as their own devDependency.
+node_modules/
+
+# Bun runtime
+.bun-cache/
+
+# Generated invariant artifacts. Always rebuilt by the validator; never
+# trusted as source of truth (see ADR-0002 INV-0002-1: warning-level only).
+# CI uploads them as run artifacts for PR inspection; we never commit them.
+# Round 54: glob applies to fixture trees too (docs/_examples/*/docs/_generated)
+# so first-run bootstrap inside fixtures doesn't accidentally check in
+# generated state.
+**/docs/_generated/*.yaml
+# Exception: orphan warnings sidecar IS committed. Glossary/schema/overlay
+# findings have no Q/DEC/ADR home for unresolved_warnings, so this file
+# carries them across runs to enable timeout escalation (round 38).
+!**/docs/_generated/orphan_warnings.yaml
