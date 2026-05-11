@@ -19,7 +19,7 @@ Then  <기대 결과>
 
 | ID | REQ/NFR | 시나리오 | 검증 방법 | Status |
 |---|---|---|---|---|
-| AC-001 | REQ-001 | Given 신규 fetch된 Snapshot. When extractor가 claim을 추출. Then Document → Snapshot → Claim 3-tier에 row가 생기고 Dossier/Scenario/Draft/Publication 단계는 미생성 상태로 trace anchor가 보존된다 | manual + automated TEST-001 | defined |
+| AC-001 | REQ-001 | Given 신규 fetch된 Snapshot. When extractor가 claim을 추출 → dossier 합성 → scenario revision → **EditorialIntent 운영자 명시 lock** → thesis → contentdraft → publication 까지 진행. Then **10-stage object model 안에서 각 stage 의 노드가 정확한 순서로 생성** (Source → Document → Snapshot → Claim → Dossier → Scenario → EditorialIntent → Thesis → ContentDraft → Publication) + **EditorialIntent 노드의 `decided_by_operator = true` flag 확인** (ADR-0025 INV-0025-4) + Thesis 의 `:HAS_INTENT` relationship → EditorialIntent 정확히 1개 link 확인 (INV-0025-2) + ContentDraft 의 `:USES_INTENT` relationship 확인. 9-stage 의 stage skip path 도 valid (INV-0025-5 trace path 옵션) — 단 stage 자체는 schema 에 정의되어 있어야 함 | manual + automated TEST-001 | defined |
 | AC-002 | REQ-002 | Given Neo4j Community 인스턴스. When 1만 graph object(Claim + Snapshot + Source + Document + Edge) 적재. Then Neo4j native FTS keyword 검색 + 1-hop traversal이 cold cache p95 < 1초 (NFR-001, SPIKE-001) | TEST-002 (bench) | defined |
 | AC-003 | REQ-003 | Given Snapshot row. When r2_key가 가리키는 객체를 fetch. Then sha256이 일치하고 mime이 일치한다 | TEST-003 | defined |
 | AC-004 | REQ-004 | Given 1만 건 candidate claim. When 그 중 50건이 promoted. Then Markdown vault에는 50건만 존재하고 나머지는 SQLite에만 존재한다 | TEST-004 + manual | defined |
@@ -44,7 +44,7 @@ Then  <기대 결과>
 | AC-023 | REQ-018 | Given fetch / extract / cache / embed / cloud upload 단계. When source_policy 3 필드(archive/raw_cloud/external_llm) + 8 위험 행동 트리거 검사. Then 위험 행동은 어느 mode에서도 inline_block 되고 모든 결정이 policy_decisions ledger에 기록된다 | TEST-023 | defined |
 | AC-024 | REQ-019 | Given 시나리오·콘텐츠 제작 세션. When 막힌 source N건 발생. Then access_interventions 노드 N건 누적되고 세션 종료 시 batch report 생성, severity 자동 산정(deterministic default), unresolved HIGH/CRITICAL은 publication 핵심 근거로 사용 시 cite check inline_block | TEST-024 | defined |
 | AC-025 | REQ-020 | Given access_intervention review. When `pipeline intervention review <id>` 호출. Then 3-option (ignore / manual_claim / temp_text) 중 하나 선택 가능. manual_claim 선택 시 `pipeline feedback add` 진입 후 user_written_claim / user_opinion / referenced_quote 3-way 중 하나만 채워진 manual_claim_entry 생성. raw_text_stored=false 강제 | TEST-025 | defined |
-| AC-026 | REQ-021 | Given Scenario 작성. When validate. Then impact_targets[] + impact_direction_by_target dict + transmission_channels[]이 채워졌고 (summary_valence는 optional). Thesis는 stance ∈ {constructive, cautionary, neutral, mixed, asymmetric, exploratory} + market_stance (optional v0 / 필수 v1) ∈ {bullish, bearish, range_bound, volatility_up, volatility_down, neutral} 보유 | TEST-026 | defined |
+| AC-026 | REQ-021 | Given Scenario 작성 + EditorialIntent 운영자 명시 lock. When validate + Thesis compose. Then (a) Scenario 의 impact_targets[] + impact_direction_by_target dict + transmission_channels[] 채움 (summary_valence optional), (b) Thesis 가 stance ∈ {constructive, cautionary, neutral, mixed, asymmetric, exploratory} + market_stance (optional v0 / 필수 v1) ∈ {bullish, bearish, range_bound, volatility_up, volatility_down, neutral} 보유, (c) **Thesis 가 `editorial_intent_id` field 와 `:HAS_INTENT` relationship 로 정확히 1 개 EditorialIntent 와 link (ADR-0025 INV-0025-2)**, (d) **Thesis stance + market_stance 가 EditorialIntent `bidirectional_weight_intent` 와 align — divergence 발견 시 manual review trigger 또는 v1+ cite check 5+1 의 one-sided thesis warning (INV-0025-6)**, (e) **EditorialIntent `decided_by_operator = true` flag** (INV-0025-4) — false 면 Thesis composer reject | TEST-026 | defined |
 | AC-027 | REQ-022 | Given Tier A seed set 전체 (size 무관 — Q-021 가 upper cap 폐기, 누적 가능). When source_perspective 분포 검사. Then **전체 seed 기준** risk_observer ≤ 50% + opportunity_observer ≥ 25% + neutral ≥ 15% 충족 (mixed 는 valid value 이나 ratio 분모에서 제외하지 않음 — 의무 ratio 는 4 dim 중 3 dim 에 대해서만 적용). 카테고리 subset compliance 는 reference only — 의무 아님 | TEST-027 + manual review | defined |
 | AC-028 | REQ-023 | Given build_evidence_pack 호출 (mode=balanced). When output 구조 검사. Then v0에서 4 section (supporting / opposing / mitigating·amplifying / monitoring) 모두 채워졌거나 명시 "no evidence found". LLM synthesis prompt에 "한쪽 방향 evidence만으로 결론 금지 / winners·losers 분리" 제약 포함 | TEST-028 | defined |
 | AC-029 | REQ-024 | Given pipeline run 종료. When metrics_run 기록 + daily aggregation. Then 6 카테고리 metrics 모두 row 생성. v0 9+ metrics (unsupported_sentence_rate / counterclaim_presence_rate / stale_violation_rate / policy_block_count / manual_claim_entry_rate / db_size_growth_rate / upside_claim_presence_rate / downside_claim_presence_rate / one_sided_warning_rate) 측정됐다 | TEST-029 | defined |
@@ -72,7 +72,7 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 
 | ID | 이름 | 위치 | 커버하는 AC |
 |---|---|---|---|
-| TEST-001 | 9-stage object trace anchor | `tests/pipeline/object_model_test.ts` (planned) | AC-001 |
+| TEST-001 | **10-stage object trace anchor** + EditorialIntent stage 존재 + `:HAS_INTENT` / `:USES_INTENT` relationship + `decided_by_operator = true` flag (ADR-0025) | `tests/pipeline/object_model_test.ts` (planned) | AC-001 |
 | TEST-002 | Neo4j native FTS 1만 graph object 검색 bench | `tests/bench/neo4j_fts_search_bench.ts` (planned) | AC-002 |
 | TEST-003 | R2 sha256 round-trip | `tests/storage/r2_integrity_test.ts` (planned) | AC-003 |
 | TEST-004 | promoted only markdown | `tests/storage/markdown_promoted_only_test.ts` (planned) | AC-004 |
@@ -95,7 +95,7 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-023 | policy gate mode-aware + 8 위험 행동 | `tests/policy/gate_test.ts` (planned) | AC-023 |
 | TEST-024 | access_intervention batch report + severity | `tests/intervention/batch_test.ts` (planned) | AC-024 |
 | TEST-025 | manual_claim_entry 3-way 분리 CLI | `tests/feedback/cli_test.ts` (planned) | AC-025 |
-| TEST-026 | Scenario impact_targets + Thesis stance/market_stance | `tests/scenario/bidirectional_test.ts` (planned) | AC-026 |
+| TEST-026 | Scenario impact_targets + Thesis stance/market_stance + **Thesis↔EditorialIntent linkage + intent.bidirectional_weight_intent ↔ thesis.stance align + EditorialIntent.decided_by_operator = true** (ADR-0025 INV-0025-2/-4/-6) | `tests/scenario/bidirectional_test.ts` (planned) | AC-026 |
 | TEST-027 | Tier A seed source_perspective 분포 | `tests/source/perspective_distribution_test.ts` (planned) | AC-027 |
 | TEST-028 | EvidencePack v0 4-section + LLM mode prompt | `tests/rag/evidence_pack_test.ts` (planned) | AC-028 |
 | TEST-029 | metrics 6 카테고리 + v0 9+ metrics 측정 | `tests/metrics/v0_metrics_test.ts` (planned) | AC-029 |
