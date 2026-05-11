@@ -50,14 +50,16 @@ Question ↔ Decision ↔ Requirement ↔ Gate/Test ↔ Milestone/Track/Phase/Sl
 | TRACE-034 | Q-026 → DEC-006 | ADR-0022 + DEC-005 + DEC-006 + DEC-012 (Editorial Quality Rubric) | REQ-027, NFR-010 | AC-013, AC-018, AC-028, AC-034, AC-035, **AC-036, AC-037, AC-038, AC-039, AC-040, AC-041, AC-042** / TEST-034, TEST-035, TEST-036~042 | P0-M6 | PUB | PUB-1A | PUB-1A.4 / PUB-1A.5 | 자체 사이트 publishing site build (Astro 5.0 + Cloudflare Pages) + vault publications/ single source + Zod schema build-time cite gate (AC-035) + cite/retraction/correction 컴포넌트 + **Editorial Quality Rubric editorial gate (AC-036~042, DEC-012) — PUB-1A.5 accept 시 운영자 manual verify 의무. Editorial gate (DEC-012) vs Technical gate (ADR-0015 cite check 5+1) 분리** |
 | TRACE-035 | — | ADR-0022 + DEC-005 + DEC-009 | REQ-027, NFR-010 | AC-034 / TEST-034 | P0-M6 | PUB | PUB-1A | PUB-1A.5 | external cross-post canonical cite anchor lint (모든 외부 플랫폼 발행물의 footnote가 자체 사이트 도메인 URL을 가리킴) + 첫 publication blog_long 1건 = 경제 카테고리 (v0 turn-key MVP gate) |
 | TRACE-036 | Q-027 → DEC-007 | DEC-007 | NFR-006, NFR-008 | AC-020, AC-032 / TEST-020, TEST-032 | P0-M1 ~ M3 | INFRA / OPS | INFRA-1A / OPS-1A | INFRA-1A.8 / OPS-1A.4 | retention / R2 lifecycle / backup schedule lock. expire 3개 + transition 6개 + 의미적 GC batch 3개 + soft-delete → tombstone → hard-delete + RETENTION_PROTECTED_KINDS 상수. raw_cache TTL 24h~7d ceiling enforce (ADR-0021 INV-0021-6) |
-| TRACE-037 | Q-031, Q-032, Q-033, Q-034 | DEC-005 (v0 deferred boundary) | REQ-013 (v1+ warning), REQ-021, ADR-0011 | (v1+ AC pending) | v1+ | PUB / OPS | PUB-1B / OPS-1B | (v1+ slices) | v0 deferred items (TTS / 4-format auto-generate / 외부 플랫폼 auto cross-post / auto retraction trigger) — v1 PUB-1B 트랙 진입 시점에 별도 ADR/DEC lock |
+| TRACE-037 | Q-031, Q-032, Q-033, Q-034 | DEC-005 (v0 deferred boundary) | REQ-013 (v1+ warning), REQ-021, ADR-0025 (supersedes ADR-0011 object model) | (v1+ AC pending) | v1+ | PUB / OPS | PUB-1B / OPS-1B | (v1+ slices) | v0 deferred items (TTS / 4-format auto-generate / 외부 플랫폼 auto cross-post / auto retraction trigger) — v1 PUB-1B 트랙 진입 시점에 별도 ADR/DEC lock. object model = ADR-0025 10-stage (EditorialIntent 포함) 그대로 |
 
 ## Invariants
 
 - 모든 `must` REQ는 최소 한 개의 AC를 가져야 한다. ✓ (REQ-001~REQ-027 모두
   AC-001~AC-031 + AC-034 + AC-035 매핑; NFR-008 → AC-032, NFR-009 → AC-033,
   NFR-010 → AC-034. REQ-027 의 build-time Zod schema gate (ADR-0022
-  INV-0022-3) 는 AC-035)
+  INV-0022-3) 는 AC-035 + AC-036~042 (Editorial Quality Rubric, DEC-012)
+  manual verify 의무 추가. **REQ-023 (EvidencePack 4-section) 의 evidence_
+  role minimum coverage (ADR-0027) 는 AC-044**)
 - 모든 accepted DEC/ADR은 영향받는 REQ/HLD/Runbook을 갖는다. ✓ (ADR-0003~0021
   전부 REQ + HLD 컴포넌트 매핑; 0003/0004/0007/0008은 superseded, 0011~0021로
   대체)

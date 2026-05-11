@@ -165,6 +165,17 @@ GPT 답변 (10 섹션 요약):
 - weekly_dossier_count
 - weekly_publication_count
 
+### Part 3.5 — GPT round 2 메타 리뷰 (commit `499cad2` 이후) + 사용자 confirm
+
+GPT round 2 메타 리뷰 (사용자 paste, 2026-05-11) 핵심 권고 3 항 + 사용자
+confirm 결과:
+
+| GPT round 2 권고 | 사용자 confirm | 처리 |
+|---|---|---|
+| **Q1**: v0 LLM routing 을 단일 vendor thin path 로 축소 (multi-vendor + cross-vendor review 강제 는 v1+ 로) | **기각** | DEC-010 + ADR-0023 INV-0023-4 의 cross-vendor 강제 3 종 단계 그대로 유지. v0 부터 multi-vendor 구현 의무. 사용자 의도 = vendor 분산 + cross-vendor 신뢰성 보험을 v0 부터 인프라화 |
+| **Q2**: 모델명 lock 위험 → ADR 본문은 capability tier 만 lock + 실제 model snapshot 은 operational config 로 분리 | **수용 (a)** | ADR-0023 INV-0023-2 / INV-0023-3 갱신 — capability tier 표현 보강 + 실제 model snapshot 은 `data/llm_routing.yaml` 신규 operational config. ADR 본문은 stable invariant, vendor catalog 변경 시 config 만 갱신. INV-0023-3 에 reference 추가 |
+| **Q3**: 첫 글 = 단일 axis (가계부채 + DSR/LTV) 권고. 5 axis 깊이 의문 | **사용자 발화 반론** — 5 axis 결합이 단일 axis 보다 더 깊이 있는 인사이트 가능 (각 axis 가 다른 axis 의 evidence 로 층층이 근거 형성) | DEC-011 의 5 axis lock 유지. 단 PUB-1A.5 진입 시 narrative arc 옵션 (A 전체 그림 series 진입글 / B deep-dive long-form / C intersection 단일 글) 본문 추가 — 5 axis 모두 본문 포함 의무, 분량 trade-off 는 narrative arc 선택의 trade-off 일 뿐 |
+
 ### Part 4 — 첫 발행 전 의무 잔여 작업
 
 본 batch 이후 첫 발행 (PUB-1A.5) 차단 항목만 lock 의무. 그 외는 retrospective
