@@ -30,14 +30,25 @@
 |---|---|---|---|
 | 0001 | Example architecture decision (boilerplate placeholder) | rejected | 2026-05-11 |
 | 0002 | Cross-document invariant tracking system | accepted | 2026-05-09 |
-| 0003 | 7-stage pipeline object model with 3-tier source layer | accepted | 2026-05-11 |
-| 0004 | Storage tiers — Markdown / SQLite+FTS5 / R2 | accepted | 2026-05-11 |
+| 0003 | 7-stage pipeline object model with 3-tier source layer | superseded by 0011 | 2026-05-11 |
+| 0004 | Storage tiers — Markdown / SQLite+FTS5 / R2 | superseded by 0012 | 2026-05-11 |
 | 0005 | Confidence decomposition | accepted | 2026-05-11 |
 | 0006 | LLM routing — Haiku 1차 + Sonnet escalate | accepted | 2026-05-11 |
-| 0007 | Edge ledger — supports / contradicts / qualifies / updates / supersedes | accepted | 2026-05-11 |
-| 0008 | Evidence quote and cite check coverage | accepted | 2026-05-11 |
+| 0007 | Edge ledger — supports / contradicts / qualifies / updates / supersedes | superseded by 0013 | 2026-05-11 |
+| 0008 | Evidence quote and cite check coverage | superseded by 0015 | 2026-05-11 |
 | 0009 | Scenario validate and revisions ledger | accepted | 2026-05-11 |
 | 0010 | Stale triggers and review queue throttling | accepted | 2026-05-11 |
+| 0011 | 9-stage pipeline object model with Source + Thesis (supersedes 0003) | accepted | 2026-05-11 |
+| 0012 | Non-archival storage — Neo4j / SQLite / R2; raw cloud upload prohibited (supersedes 0004) | accepted | 2026-05-11 |
+| 0013 | Edge ledger via Neo4j (supersedes 0007) | accepted | 2026-05-11 |
+| 0014 | Neo4j-native feature adoption (APOC + GDS + native vector + native FTS) + intentional lock-in | accepted | 2026-05-11 |
+| 0015 | Evidence (nullable + quote_reason + storage_level) and cite check 5+1 (supersedes 0008) | accepted | 2026-05-11 |
+| 0016 | Collection realism — Tier A-D + collectability_score + no bot bypass | accepted | 2026-05-11 |
+| 0017 | Source policy gate — mode-aware (inline_block / inline_warn / batch_report) + access_interventions | accepted | 2026-05-11 |
+| 0018 | Manual feedback inbound — manual_claim_entries 3-way + CLI `pipeline feedback` / `intervention review` | accepted | 2026-05-11 |
+| 0019 | Bidirectional framing — scenario impact_targets, thesis stance+market_stance, EvidencePack multi-layer | accepted | 2026-05-11 |
+| 0020 | System metrics framework (6 categories + evaluation harness, staged v0/v1/v2) | accepted | 2026-05-11 |
+| 0021 | Policy learning framework (rule-based, auto-tighten allowed, auto-relax prohibited) | accepted | 2026-05-11 |
 
 ## Template
 

@@ -25,7 +25,7 @@ ai_include: true
 applies_to_planes:
   - pipeline.aggregation_layer
   - storage.markdown.dossier
-  - storage.sqlite.dossier_table
+  - storage.neo4j.dossier_node      # ADR-0012 supersede
 forbidden_paths:
   - storage.markdown.candidate_claim   # Dossier는 promoted claim만 인용
   - pipeline.scenario_layer.bypass     # Scenario는 Dossier를 거쳐야 한다 (Source → Claim → Scenario 직행 금지)

@@ -16,7 +16,7 @@ scope:
     - storage.sqlite.run_table.cost_ledger
     - pipeline.extraction_layer.parser_split
   out:
-    - storage.sqlite.claim_table.fields    # claim 필드 자체는 ADR-0005
+    - storage.neo4j.claim_node.fields    # claim 필드 자체는 ADR-0005; ADR-0012 Claim moved to Neo4j
     - pipeline.scenario_layer.validate     # scenario validate는 ADR-0009
     - pipeline.cite_check_layer            # cite check는 ADR-0008
 
@@ -61,7 +61,7 @@ reviewed_scopes:
   - pipeline.extraction_layer.review_throttling
   - storage.sqlite.run_table.cost_ledger
   - pipeline.extraction_layer.parser_split
-  - storage.sqlite.claim_table.fields
+  - storage.neo4j.claim_node.fields
   - pipeline.scenario_layer.validate
   - pipeline.cite_check_layer
 

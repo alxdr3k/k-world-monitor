@@ -25,10 +25,10 @@ ai_include: true
 applies_to_planes:
   - pipeline.source_layer
   - storage.markdown.document_hub
-  - storage.sqlite.document_table
+  - storage.neo4j.document_node       # ADR-0012 supersede — Document moved to Neo4j
 forbidden_paths:
-  - storage.r2.bytes              # Document는 메타 entity, 원본 bytes는 Snapshot.r2_key가 가리킨다
-  - pipeline.publication_layer    # Document는 publication 단계에 직접 쓰이지 않는다 (Claim → Dossier → Scenario → Draft → Publication 경유)
+  - storage.r2.bytes              # Document는 메타 entity, 원본 bytes는 Snapshot.r2_key가 가리킨다 (permitted artifact만)
+  - pipeline.publication_layer    # Document는 publication 단계에 직접 쓰이지 않는다 (Claim → Dossier → Scenario → Thesis → Draft → Publication 경유)
 ---
 
 # document

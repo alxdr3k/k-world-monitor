@@ -2,12 +2,12 @@
 id: adr-0008
 type: adr
 title: Evidence quote (≤200자 + locator + quote_hash) and cite check coverage
-status: accepted
+status: superseded
 created_at: 2026-05-11
 updated_at: 2026-05-11
 deciders: [user, claude-opus-4-7, gpt]
 supersedes: []
-superseded_by: []
+superseded_by: [adr-0015]
 
 scope:
   in:
@@ -33,7 +33,7 @@ invariants:
     statement: cite check는 다음 5종을 검출한다 — stale, retracted, horizon mismatch, unit mismatch, overclaim. cite check 실패 ContentDraft는 Publication으로 승격되지 않는다
     status: active
   - id: INV-0008-4
-    statement: "원문 인용 전면 금지" 정책은 폐기됐다 (검증성을 파괴) — 짧은 quote + hash로 검증 가능하게 한다
+    statement: '"원문 인용 전면 금지" 정책은 폐기됐다 (검증성을 파괴) — 짧은 quote + hash로 검증 가능하게 한다'
     status: active
 
 preconditions:
@@ -74,7 +74,7 @@ ai_include: true
 
 ## Status
 
-accepted — 2026-05-11
+superseded by ADR-0015 (2026-05-11). 이 문서는 Round 3 lock 시점의 evidence + cite check 정책을 기록한다. ideation Round 10/Q5에서 quote 기본 허용을 nullable + quote_reason enum 필수로 강화하고 storage_level 4단계를 신설했으며, Round 18에서 publication preflight를 5-check로 확장(unresolved HIGH/CRITICAL access_intervention 차단), Round 23/R25에서 6번째 warning(one-sided thesis)을 추가했다. 현 canonical은 ADR-0015.
 
 ## Context
 

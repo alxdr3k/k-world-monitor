@@ -23,7 +23,7 @@ retention: long_term
 ai_include: true
 
 applies_to_planes:
-  - storage.sqlite.edge_table
+  - storage.neo4j.edges                # ADR-0013 supersede — Neo4j typed relationships
   - pipeline.scenario_layer.edge_query
 forbidden_paths:
   - storage.markdown.frontmatter.supports_array     # `supports[]/contradicts[]` frontmatter 배열 금지

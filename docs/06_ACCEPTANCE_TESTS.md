@@ -20,7 +20,7 @@ Then  <기대 결과>
 | ID | REQ/NFR | 시나리오 | 검증 방법 | Status |
 |---|---|---|---|---|
 | AC-001 | REQ-001 | Given 신규 fetch된 Snapshot. When extractor가 claim을 추출. Then Document → Snapshot → Claim 3-tier에 row가 생기고 Dossier/Scenario/Draft/Publication 단계는 미생성 상태로 trace anchor가 보존된다 | manual + automated TEST-001 | defined |
-| AC-002 | REQ-002 | Given research.db. When 1만 건 candidate claim과 5천 건 snapshot 메타가 적재. Then SELECT + FTS5 keyword 검색이 cold cache p95 < 1초 (NFR-001) | TEST-002 (bench) | defined |
+| AC-002 | REQ-002 | Given Neo4j Community 인스턴스. When 1만 graph object(Claim + Snapshot + Source + Document + Edge) 적재. Then Neo4j native FTS keyword 검색 + 1-hop traversal이 cold cache p95 < 1초 (NFR-001, SPIKE-001) | TEST-002 (bench) | defined |
 | AC-003 | REQ-003 | Given Snapshot row. When r2_key가 가리키는 객체를 fetch. Then sha256이 일치하고 mime이 일치한다 | TEST-003 | defined |
 | AC-004 | REQ-004 | Given 1만 건 candidate claim. When 그 중 50건이 promoted. Then Markdown vault에는 50건만 존재하고 나머지는 SQLite에만 존재한다 | TEST-004 + manual | defined |
 | AC-005 | REQ-005 | Given 신규 객체 생성. When ID 발급. Then 접두 + 단조 증가 식별자(`doc_/snap_/clm_/dos_/scn_/drf_/pub_/edge_/run_`) 규칙을 따른다 | TEST-005 | defined |
@@ -36,10 +36,22 @@ Then  <기대 결과>
 | AC-015 | REQ-015 | Given 신규 추출 100건 (mix of reliability + confidence). When review queue에 적재. Then auto-confirm 비율과 수동 review 큐 크기가 ADR-0006 INV-0006-4 룰과 일치 | TEST-015 | defined |
 | AC-016 | REQ-016 | Given confirmed claim. When (a) snapshot 갱신 (b) 시간 경과 (c) counterclaim 등록 중 하나 발생. Then claim_status: confirmed → stale 전이 + 인용 ContentDraft/Publication에 cascade | TEST-016 | defined |
 | AC-017 | NFR-002 | Given 동일 source set + scenario revision id. When 다른 운영자가 cite check + scenario validate 재실행. Then 동일 promoted claim set + 동일 branches 결론에 도달 | manual reproducibility test | defined |
-| AC-018 | NFR-003 | Given Publication. When 인용 trace 추출. Then Publication → ContentDraft → Claim → Snapshot → R2 bytes 5단계로 한 문장이 역추적 가능 | TEST-018 | defined |
+| AC-018 | NFR-003 | Given Publication. When 인용 trace 추출. Then 9-stage anchor를 따라 Publication → ContentDraft → (Thesis →) Scenario revision → (Dossier →) promoted Claim → Snapshot fingerprint → Source 경로로 한 문장이 5단계 이내 역추적 가능 (선택적 단계 skip 허용, ADR-0011 INV-0011-8). R2 bytes는 permitted artifact일 때만 trace 종착점이며 raw third-party text는 미보관 (ADR-0012 INV-0012-3) | TEST-018 | defined |
 | AC-019 | NFR-004 | Given 일별 LLM 비용 상한 (TBD). When run ledger 합산. Then 누적 비용이 상한 미만, 초과 시 큐 throttling 동작 | TEST-019 | defined |
-| AC-020 | NFR-006 | Given Snapshot row. When R2에서 객체 삭제 시도. Then 정책 위반(public bucket이 아니므로 차단)이거나 sha256 + r2_key로 회수 가능 | TEST-020 | defined |
+| AC-020 | NFR-006 | Given Snapshot fingerprint row. When 원문이 변경/소실됨. Then (a) 모든 Snapshot은 content_hash(sha256) diff로 변경 감지 가능 + claim_status가 source_changed / source_unavailable로 자동 전이 (ADR-0011 INV-0011-5, ADR-0012). (b) r2_key가 NULL이 아닌 permitted artifact (open-license dataset / 공식 API / 자체 산출물)만 R2 round-trip으로 회수 가능 — content_hash + r2_key 무결성 verify. (c) raw third-party text는 r2_key=NULL이므로 R2 회수 대상 아님 (raw_cloud_policy=always_prohibited, NFR-008) | TEST-020 | defined |
 | AC-021 | NFR-007 | Given 신규 source type 추가 의도. When extractor interface 확장. Then 기존 article/dataset/report 분기에 영향 없이 dry-run 1건 추가 가능 | TEST-021 + manual | defined |
+| AC-022 | REQ-017 | Given Source registry row. When Tier 분류 / collectability_score / access_method / source_perspective 필드 검사. Then 모든 source가 4 dimension collectability + access_method + Tier (A/B/C/D) + source_perspective tag를 보유한다. source_reliability와 collectability는 독립 입력됐다 (Reuters case 검증) | TEST-022 | defined |
+| AC-023 | REQ-018 | Given fetch / extract / cache / embed / cloud upload 단계. When source_policy 3 필드(archive/raw_cloud/external_llm) + 8 위험 행동 트리거 검사. Then 위험 행동은 어느 mode에서도 inline_block 되고 모든 결정이 policy_decisions ledger에 기록된다 | TEST-023 | defined |
+| AC-024 | REQ-019 | Given 시나리오·콘텐츠 제작 세션. When 막힌 source N건 발생. Then access_interventions 노드 N건 누적되고 세션 종료 시 batch report 생성, severity 자동 산정(deterministic default), unresolved HIGH/CRITICAL은 publication 핵심 근거로 사용 시 cite check inline_block | TEST-024 | defined |
+| AC-025 | REQ-020 | Given access_intervention review. When `pipeline intervention review <id>` 호출. Then 3-option (ignore / manual_claim / temp_text) 중 하나 선택 가능. manual_claim 선택 시 `pipeline feedback add` 진입 후 user_written_claim / user_opinion / referenced_quote 3-way 중 하나만 채워진 manual_claim_entry 생성. raw_text_stored=false 강제 | TEST-025 | defined |
+| AC-026 | REQ-021 | Given Scenario 작성. When validate. Then impact_targets[] + impact_direction_by_target dict + transmission_channels[]이 채워졌고 (summary_valence는 optional). Thesis는 stance ∈ {constructive, cautionary, neutral, mixed, asymmetric, exploratory} + market_stance (optional v0 / 필수 v1) ∈ {bullish, bearish, range_bound, volatility_up, volatility_down, neutral} 보유 | TEST-026 | defined |
+| AC-027 | REQ-022 | Given Q21 Tier A seed 30~50개. When source_perspective 분포 검사. Then risk_observer ≤ 50% + opportunity_observer ≥ 25% + neutral ≥ 15% 충족 | TEST-027 + manual review | defined |
+| AC-028 | REQ-023 | Given build_evidence_pack 호출 (mode=balanced). When output 구조 검사. Then v0에서 4 section (supporting / opposing / mitigating·amplifying / monitoring) 모두 채워졌거나 명시 "no evidence found". LLM synthesis prompt에 "한쪽 방향 evidence만으로 결론 금지 / winners·losers 분리" 제약 포함 | TEST-028 | defined |
+| AC-029 | REQ-024 | Given pipeline run 종료. When metrics_run 기록 + daily aggregation. Then 6 카테고리 metrics 모두 row 생성. v0 9+ metrics (unsupported_sentence_rate / counterclaim_presence_rate / stale_violation_rate / policy_block_count / manual_claim_entry_rate / db_size_growth_rate / upside_claim_presence_rate / downside_claim_presence_rate / one_sided_warning_rate) 측정됐다 | TEST-029 | defined |
+| AC-030 | REQ-025 | Given 사용자가 같은 source ignore 3회. When policy_learning_events 검사. Then Pattern 1 rule_candidate 생성 (active=false), 사용자에게 confirm prompt 제시. 사용자 accept 시 rule active=true. 완화 방향 rule은 terms_url + license_url 입력 필수 | TEST-030 | defined |
+| AC-031 | REQ-026 | Given v0 카테고리 enum. When Source registry / Dossier topic 입력. Then core 7 (macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai) + secondary 1 (digital_assets) = 8개 + tag 5개 외 값은 reject (또는 manual review tag) | TEST-031 + manual | defined |
+| AC-032 | NFR-008 | Given 모든 R2 upload + 모든 외부 LLM 호출. When policy_decisions ledger + source_material_policy 검사. Then raw_cloud_policy=always_prohibited 위반 0건, 모든 upload에 archive_policy 통과 audit log 존재, raw third-party text의 클라우드 저장 0건 | TEST-032 | defined |
+| AC-033 | NFR-009 | Given trailing 50개 publication. When thesis_polarity_distribution 측정. Then 한 방향(direction 6값 중 하나) ≥ 70% 쏠림 0건 (v1+ 활성화) | TEST-033 (v1+) | defined |
 
 ## Status vocabulary
 
@@ -58,8 +70,8 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 
 | ID | 이름 | 위치 | 커버하는 AC |
 |---|---|---|---|
-| TEST-001 | 7-stage object trace anchor | `tests/pipeline/object_model_test.ts` (planned) | AC-001 |
-| TEST-002 | FTS5 1만 건 검색 bench | `tests/bench/fts5_search_bench.ts` (planned) | AC-002 |
+| TEST-001 | 9-stage object trace anchor | `tests/pipeline/object_model_test.ts` (planned) | AC-001 |
+| TEST-002 | Neo4j native FTS 1만 graph object 검색 bench | `tests/bench/neo4j_fts_search_bench.ts` (planned) | AC-002 |
 | TEST-003 | R2 sha256 round-trip | `tests/storage/r2_integrity_test.ts` (planned) | AC-003 |
 | TEST-004 | promoted only markdown | `tests/storage/markdown_promoted_only_test.ts` (planned) | AC-004 |
 | TEST-005 | ID prefix lint | `tests/lint/id_prefix_test.ts` (planned) | AC-005 |
@@ -73,10 +85,22 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-014 | scenario revisions append-only | `tests/scenario/revisions_test.ts` (planned) | AC-014 |
 | TEST-015 | review queue throttling | `tests/review/throttling_test.ts` (planned) | AC-015 |
 | TEST-016 | stale 트리거 3종 | `tests/stale/triggers_test.ts` (planned) | AC-016 |
-| TEST-018 | 5-step trace | `tests/pipeline/trace_test.ts` (planned) | AC-018 |
+| TEST-018 | 9-stage 5-step trace (Publication → Source) | `tests/pipeline/trace_test.ts` (planned) | AC-018 |
 | TEST-019 | run ledger cost throttling | `tests/cost/ledger_test.ts` (planned) | AC-019 |
-| TEST-020 | R2 durability | `tests/storage/r2_durability_test.ts` (planned) | AC-020 |
+| TEST-020 | Snapshot fingerprint durability + content_hash diff + permitted artifact R2 round-trip | `tests/storage/snapshot_fingerprint_test.ts` (planned) | AC-020 |
 | TEST-021 | extractor interface dry-run | `tests/extraction/interface_test.ts` (planned) | AC-021 |
+| TEST-022 | Source registry Tier + collectability + perspective | `tests/source/registry_test.ts` (planned) | AC-022 |
+| TEST-023 | policy gate mode-aware + 8 위험 행동 | `tests/policy/gate_test.ts` (planned) | AC-023 |
+| TEST-024 | access_intervention batch report + severity | `tests/intervention/batch_test.ts` (planned) | AC-024 |
+| TEST-025 | manual_claim_entry 3-way 분리 CLI | `tests/feedback/cli_test.ts` (planned) | AC-025 |
+| TEST-026 | Scenario impact_targets + Thesis stance/market_stance | `tests/scenario/bidirectional_test.ts` (planned) | AC-026 |
+| TEST-027 | Tier A seed source_perspective 분포 | `tests/source/perspective_distribution_test.ts` (planned) | AC-027 |
+| TEST-028 | EvidencePack v0 4-section + LLM mode prompt | `tests/rag/evidence_pack_test.ts` (planned) | AC-028 |
+| TEST-029 | metrics 6 카테고리 + v0 9+ metrics 측정 | `tests/metrics/v0_metrics_test.ts` (planned) | AC-029 |
+| TEST-030 | policy learning Pattern 1 rule_candidate | `tests/policy_learning/pattern_1_test.ts` (planned) | AC-030 |
+| TEST-031 | 카테고리 8개 enum + tag 5개 | `tests/lint/category_enum_test.ts` (planned) | AC-031 |
+| TEST-032 | raw cloud upload 0건 audit | `tests/policy/raw_cloud_zero_test.ts` (planned) | AC-032 |
+| TEST-033 | thesis_polarity_distribution v1+ | `tests/metrics/polarity_distribution_test.ts` (planned, v1+) | AC-033 |
 
 ## CI/CD gates
 

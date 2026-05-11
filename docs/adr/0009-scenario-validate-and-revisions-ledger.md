@@ -12,8 +12,8 @@ superseded_by: []
 scope:
   in:
     - pipeline.scenario_layer.validate
-    - storage.sqlite.scenario_table
-    - storage.sqlite.scenario_revisions
+    - storage.neo4j.scenario_node   # ADR-0012 Scenario moved to Neo4j
+    - storage.neo4j.scenario_revision_node   # ADR-0012 ScenarioRevision moved to Neo4j
     - pipeline.scenario_layer.edge_query
   out:
     - pipeline.cite_check_layer            # cite check는 ADR-0008
@@ -52,8 +52,8 @@ reviewed_terms:
   - edge
 reviewed_scopes:
   - pipeline.scenario_layer.validate
-  - storage.sqlite.scenario_table
-  - storage.sqlite.scenario_revisions
+  - storage.neo4j.scenario_node
+  - storage.neo4j.scenario_revision_node
   - pipeline.scenario_layer.edge_query
   - pipeline.cite_check_layer
   - pipeline.extraction_layer.routing
