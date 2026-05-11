@@ -150,7 +150,11 @@ ADR-0011~0021로 supersede됐다.
   Cloudflare Pages git integration)
 - ~~Q-027~~ **resolved by DEC-007** (retention / R2 lifecycle / backup
   schedule)
-- ~~Q-028~~ **resolved by DEC-008** (LLM cost / quality discipline)
+- ~~Q-028~~ **resolved by DEC-008 → re-resolved by DEC-010** (LLM routing v2
+  multi-vendor + Data Science Module + cost ceiling 재산정. DEC-008 의
+  Anthropic-only 라우팅은 supersede 됨 — DEC-010 의 GPT default + Anthropic
+  dual-vendor + Google exploration-only + minimal cross-vendor review 가
+  canonical)
 - Q-029 ImpactAssessment v0 embedded vs v1 노드
 - Q-030 counterclaim multi-relation v1 도입 우선순위
 - Q-031 TTS v1 timing + provider (DEC-005 v0 TTS deferred 연장)

@@ -142,7 +142,7 @@ collectability_score:
   차원. Q21 Tier A seed 작성 시 두 차원 분리 입력.
 
 **Q21 Tier A seed 가이드** (size cap 폐기 — DEC-009 reflow 후 누적 자유.
-v0 entry 50 source `docs/research/source-seed-list-2026-05.md`. 분포는
+v0 entry 72 source `docs/research/source-seed-list-2026-05.md` (경제 22 + 정책 17 + 사회 18 + 대중문화 15, 한국 24개 + 글로벌 48개). 분포는
 enforcement 유지):
 - domain: DEC-004 4 메타 카테고리 (정책 / 경제 / 사회 / 대중문화) +
   subtopic_tags[] 로 강등된 기존 8 enum 보존 — Q-022 historical reference
