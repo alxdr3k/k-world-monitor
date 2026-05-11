@@ -157,7 +157,7 @@ ADR-0019).
 | NFR-007 | maintainability | 새로운 source type을 LLM/parser 분리 원칙 안에서 추가 가능 | extractor interface contract + 1개 신규 type 추가 dry-run | AC-021 | R2, R3 | ADR-0006 |
 | NFR-008 | legal_safety | 모든 cloud 업로드 객체에 archive_policy 통과 audit log, raw third-party text 0건 cloud 저장 | policy_decisions ledger 검사 (block 케이스 빈도 + 모든 R2 upload의 source_material_policy check) | AC-032 | R8, R14 | ADR-0012, ADR-0017 |
 | NFR-009 | bidirectional_balance | publication 콘텐츠가 한 방향(direction 6값 중 하나)으로 trailing 50개 ≥ 70% 쏠리면 alert (v1+) | thesis_polarity_distribution metric | AC-033 | R23, R25 | ADR-0019, ADR-0020 |
-| NFR-010 | publish_traceability | 자체 사이트의 모든 publication URL은 canonical cite anchor — 외부 플랫폼 발행물 100%가 자체 사이트 URL을 cite footnote로 가리킨다 (cross-post lint 검사) | cross-post lint (ADR-0022 INV-0022-2) | AC-018 | R25 + v0 turn-key | ADR-0022 |
+| NFR-010 | publish_traceability | 자체 사이트의 모든 publication URL은 canonical cite anchor — 외부 플랫폼 발행물 100%가 자체 사이트 URL을 cite footnote로 가리킨다 (cross-post lint 검사) | cross-post lint (ADR-0022 INV-0022-2) | AC-034 | R25 + v0 turn-key | ADR-0022 |
 
 ## Assumptions
 
@@ -228,9 +228,12 @@ Q-<NNN>.md`로 이동.
   DEC-005 v0 manual 연장
 - Q-034: Auto retraction trigger 정책 v1+ (manual approve → auto 전환 기준)
   — DEC-005 v0 manual approve 연장
-- Q-027: 백업 schedule + R2 lifecycle (Neo4j dump 일간 30d / SQLite snapshot
-  일간 90d / JSONL audit 월간 1y / R2 derived 무기한 / open-license versioned)
-- Q-028: LLM API cost 통제 정책 (prompt caching + batch + per-day ceiling)
+- ~~Q-027~~: **resolved by DEC-007** (retention / R2 lifecycle 3 expire
+  rule + 의미적 GC batch 3개 + soft-delete tombstone 14d grace +
+  RETENTION_PROTECTED_KINDS 상수 + raw_cache 24h~7d ceiling)
+- ~~Q-028~~: **resolved by DEC-008** (3계층 LLM 라우팅 + prompt caching
+  layering 5단계 + 이중 TTL + batch API + cost ceiling soft $5/hard $7.5/
+  weekly $25 + backfill bucket + KPI 5개)
 - Q-029: ImpactAssessment v0 embedded dict vs v1 별도 Neo4j 노드
 - Q-030: counterclaim multi-relation v1 도입 우선순위 (weakens/strengthens/
   mitigates/amplifies)

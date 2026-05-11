@@ -52,6 +52,13 @@ ADR-0011~0021로 supersede됐다.
   + vault publications/ single source — v0 turn-key 결정)
 - **DEC-004 / DEC-005 / DEC-006** (v0 4 메타 카테고리 / v0 turn-key publish
   scope / vault sync trigger 단일화)
+- **DEC-007 / DEC-008 / DEC-009** (retention/R2 lifecycle policy lock /
+  LLM cost/quality discipline lock / v0 첫 발행 카테고리 = 경제)
+- **AC-031 갱신 + AC-034 + TEST-034 신규** (4 메타 카테고리 validation +
+  cross-post canonical cite anchor lint)
+- **09_TRACEABILITY_MATRIX TRACE-030/034/035/036/037 갱신 / 신규**
+- **`docs/research/source-seed-list-2026-05.md`** (Tier A 30 source list
+  proposed — Q-021 reflow)
 - project delivery artifacts(PRD/HLD/Implementation Plan/Acceptance Tests/
   Glossary/Questions/Decisions/Traceability)
 
@@ -71,7 +78,11 @@ ADR-0011~0021로 supersede됐다.
   counterclaim(polarity-symmetric) / impact_targets / transmission_channels
   검증 + scenario_revisions ledger
 - Thesis & Content (`P0-M6`): Thesis(stance + market_stance) → ContentDraft
-  4-format → Publication + cite check 5+1
+  **v0 blog_long only** (DEC-005, 나머지 3 format은 v1+ phasing Q-032) →
+  Publication + cite check 5+1 + **자체 사이트 Astro skeleton(ADR-0022) +
+  첫 publication = 경제 카테고리(DEC-009) v0 turn-key MVP gate**.
+  Substack/YouTube/X manual cross-post (cite footnote는 자체 사이트
+  canonical URL anchor — AC-034)
 - Manual Feedback & Policy Learning (cross-cutting): `pipeline feedback` CLI,
   access_interventions batch report, policy_learning Pattern 1
 
@@ -109,15 +120,17 @@ ADR-0011~0021로 supersede됐다.
 - Q-012 Neo4j ↔ SQLite sync (CDC vs batch)
 - Q-020 Neo4j GPL v3 boundary
 - Q-021 Tier A source seed 30~50개 + perspective 분포 균형 (4 메타 카테고리
-  분포로 reflow — DEC-004)
+  분포로 reflow — DEC-004 + DEC-009). 30 source proposed 
+  `docs/research/source-seed-list-2026-05.md` — 사용자 list review 후 lock
 - ~~Q-022~~ **resolved by DEC-004** (v0 4 메타 카테고리: 정책 / 경제 / 사회
   / 대중문화)
 - Q-024 Neo4j-specific 기능 활용 boundary
 - Q-025 외부 repo 부트스트랩 cadence
 - ~~Q-026~~ **resolved by DEC-006** (vault sync trigger = git push 단일,
   Cloudflare Pages git integration)
-- Q-027 백업 schedule + R2 lifecycle
-- Q-028 LLM API cost 통제 정책
+- ~~Q-027~~ **resolved by DEC-007** (retention / R2 lifecycle / backup
+  schedule)
+- ~~Q-028~~ **resolved by DEC-008** (LLM cost / quality discipline)
 - Q-029 ImpactAssessment v0 embedded vs v1 노드
 - Q-030 counterclaim multi-relation v1 도입 우선순위
 - Q-031 TTS v1 timing + provider (DEC-005 v0 TTS deferred 연장)

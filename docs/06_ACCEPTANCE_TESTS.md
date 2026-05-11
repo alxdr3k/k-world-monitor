@@ -49,9 +49,10 @@ Then  <기대 결과>
 | AC-028 | REQ-023 | Given build_evidence_pack 호출 (mode=balanced). When output 구조 검사. Then v0에서 4 section (supporting / opposing / mitigating·amplifying / monitoring) 모두 채워졌거나 명시 "no evidence found". LLM synthesis prompt에 "한쪽 방향 evidence만으로 결론 금지 / winners·losers 분리" 제약 포함 | TEST-028 | defined |
 | AC-029 | REQ-024 | Given pipeline run 종료. When metrics_run 기록 + daily aggregation. Then 6 카테고리 metrics 모두 row 생성. v0 9+ metrics (unsupported_sentence_rate / counterclaim_presence_rate / stale_violation_rate / policy_block_count / manual_claim_entry_rate / db_size_growth_rate / upside_claim_presence_rate / downside_claim_presence_rate / one_sided_warning_rate) 측정됐다 | TEST-029 | defined |
 | AC-030 | REQ-025 | Given 사용자가 같은 source ignore 3회. When policy_learning_events 검사. Then Pattern 1 rule_candidate 생성 (active=false), 사용자에게 confirm prompt 제시. 사용자 accept 시 rule active=true. 완화 방향 rule은 terms_url + license_url 입력 필수 | TEST-030 | defined |
-| AC-031 | REQ-026 | Given v0 카테고리 enum. When Source registry / Dossier topic 입력. Then core 7 (macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai) + secondary 1 (digital_assets) = 8개 + tag 5개 외 값은 reject (또는 manual review tag) | TEST-031 + manual | defined |
+| AC-031 | REQ-026 | Given v0 카테고리 enum (DEC-004로 4 메타 카테고리로 축소). When Source registry / Dossier topic 입력. Then **`topic` 필드는 4 메타 enum (`policy` / `economy` / `society` / `pop_culture`) 외 값 reject**. **`subtopic_tags[]` 는 기존 8 enum (macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai / digital_assets) + tag 5개 (social_stability_information / demographics_migration / food_water_security / governance_institutions / critical_infrastructure) 외 값 reject**. 8 enum + 5 tag 가 4 메타 카테고리 안에서 의미 있게 매핑 (예 `digital_assets ∈ economy`, `geopolitics_security ∈ policy`, `health_biosecurity ∈ society` 등 — `data/categories.yaml` 의 매핑 표가 권위) | TEST-031 + manual | defined |
 | AC-032 | NFR-008 | Given 모든 R2 upload + 모든 외부 LLM 호출. When policy_decisions ledger + source_material_policy 검사. Then raw_cloud_policy=always_prohibited 위반 0건, 모든 upload에 archive_policy 통과 audit log 존재, raw third-party text의 클라우드 저장 0건 | TEST-032 | defined |
 | AC-033 | NFR-009 | Given trailing 50개 publication. When thesis_polarity_distribution 측정. Then 한 방향(direction 6값 중 하나) ≥ 70% 쏠림 0건 (v1+ 활성화) | TEST-033 (v1+) | defined |
+| AC-034 | NFR-010 + REQ-027 | Given 자체 사이트 publish + 외부 플랫폼 cross-post (Substack / YouTube / X). When cross-post 게시물의 cite footnote anchor URL 추출. Then **외부 플랫폼 발행물의 모든 cite footnote가 자체 사이트 도메인 URL을 가리킨다** (외부 임의 URL 0건). v0 manual cross-post에서는 사람 검증, v1+ auto cross-post 도입 시 link transform + lint 자동 (ADR-0022 INV-0022-2). vault `publications/` 외 디렉토리(documents/, dossiers/, scenarios/, theses/, content_drafts/, promoted_claims/) URL을 cite anchor로 사용 시 reject (internal canonical 비노출, ADR-0022 INV-0022-4) | TEST-034 | defined |
 
 ## Status vocabulary
 
@@ -98,9 +99,10 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-028 | EvidencePack v0 4-section + LLM mode prompt | `tests/rag/evidence_pack_test.ts` (planned) | AC-028 |
 | TEST-029 | metrics 6 카테고리 + v0 9+ metrics 측정 | `tests/metrics/v0_metrics_test.ts` (planned) | AC-029 |
 | TEST-030 | policy learning Pattern 1 rule_candidate | `tests/policy_learning/pattern_1_test.ts` (planned) | AC-030 |
-| TEST-031 | 카테고리 8개 enum + tag 5개 | `tests/lint/category_enum_test.ts` (planned) | AC-031 |
+| TEST-031 | 4 메타 카테고리 enum + 8 subtopic + tag 5개 enum (DEC-004) | `tests/lint/category_enum_test.ts` (planned) | AC-031 |
 | TEST-032 | raw cloud upload 0건 audit | `tests/policy/raw_cloud_zero_test.ts` (planned) | AC-032 |
 | TEST-033 | thesis_polarity_distribution v1+ | `tests/metrics/polarity_distribution_test.ts` (planned, v1+) | AC-033 |
+| TEST-034 | cross-post cite anchor canonical lint (외부 플랫폼 footnote가 자체 사이트 도메인 URL만) + internal vault path leakage 차단 | `tests/publishing/cross_post_anchor_lint_test.ts` (planned) | AC-034 |
 
 ## CI/CD gates
 
