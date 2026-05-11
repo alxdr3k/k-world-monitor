@@ -128,8 +128,8 @@ trend / 디지털 콘텐츠 생태` 흡수.
 | 44 | Stanford HAI AI Index Report | Stanford HAI | RSS + manual | neutral | technology_cyber_ai |
 | 45 | MIT Technology Review | MIT | RSS | opportunity_observer | technology_cyber_ai |
 | 46 | OECD AI Policy Observatory | OECD AI | RSS | neutral | technology_cyber_ai / governance_institutions |
-| 47 | **KOCCA 콘텐츠산업 동향** | 한국콘텐츠진흥원 | RSS | opportunity_observer | technology_cyber_ai / cultural |
-| 48 | **KOFIC 영상산업 통계** | 영화진흥위원회 | RSS | opportunity_observer | cultural |
+| 47 | **KOCCA 콘텐츠산업 동향** | 한국콘텐츠진흥원 | RSS | opportunity_observer | technology_cyber_ai / social_stability_information |
+| 48 | **KOFIC 영상산업 통계** | 영화진흥위원회 | RSS | opportunity_observer | social_stability_information |
 | 49 | **KISDI 정보통신정책분석** | 정보통신정책연구원 | RSS | mixed | technology_cyber_ai / governance_institutions |
 | 50 | **CISA Cybersecurity Advisories** | US CISA | RSS | risk_observer | technology_cyber_ai |
 

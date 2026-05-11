@@ -69,7 +69,9 @@ ADR-0011~0021로 supersede됐다.
 - Schema & Bulk Store Bootstrap (`P0-M1`): Neo4j Community Edition + SQLite
   스키마, R2 permitted-artifact 정책 lock, Source policy gate + access_intervention
   스키마 lock
-- Source Registry & Collection Queue (`P0-M2`): Tier A 30~50 seed +
+- Source Registry & Collection Queue (`P0-M2`): Tier A seed (size cap 폐기
+  — DEC-009 reflow, v0 entry 50 source `docs/research/source-seed-list-
+  2026-05.md`) +
   collectability_score (Q21), Discovery → 큐 적재 → fetch / fingerprint
   snapshot / chunk
 - Extraction & Review (`P0-M3`): Haiku 1차 + Sonnet escalate, auto-accept
@@ -106,7 +108,8 @@ ADR-0011~0021로 supersede됐다.
    access_intervention, manual_claim_entry, collectability_score, policy_gate,
    raw_cloud_policy, impact_target, transmission_channel, source_perspective)
    glossary entry 추가
-2. Q-020 (Neo4j GPL v3 boundary) + Q-021 (Tier A seed 30~50개 분포 균형) 결정
+2. Q-020 (Neo4j GPL v3 boundary) + Q-021 (Tier A seed — size cap 폐기,
+   v0 entry 50 source 분포 균형) 결정
 3. INFRA-1A.2: Neo4j Cypher schema v1 + SQLite relational schema v1 +
    마이그레이션 commit
 4. SPIKE-001 재정의: Neo4j Community + native FTS 1만 graph object < 1초 p95
