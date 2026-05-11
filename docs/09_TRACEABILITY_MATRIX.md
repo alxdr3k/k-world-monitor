@@ -34,12 +34,12 @@ Question ↔ Decision ↔ Requirement ↔ Gate/Test ↔ Milestone/Track/Phase/Sl
 | TRACE-018 | — | ADR-0006 | NFR-007 | AC-021 / TEST-021 | P0-M3 | EXTR | EXTR-1A | EXTR-1A.1 | extractor interface 확장 |
 | TRACE-019 | Q-003 | ADR-0015 (supersedes 0008) | REQ-013 | AC-013 / TEST-013 | P0-M6 | PUB | PUB-1A | PUB-1A.3 | publication cascade — Q-003 결정 후 활성 |
 | TRACE-020 | — | ADR-0012 (supersedes 0004) | NFR-006 | AC-020 / TEST-020 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.3 | Snapshot fingerprint + content_hash + R2 permitted artifact durability |
-| TRACE-021 | Q-021 (reflow by DEC-004 + DEC-009; pending `data/sources_seed.yaml` commit in **this repo**) | ADR-0016 + DEC-004 + DEC-009 | REQ-017 | AC-022 / TEST-022 | P0-M2 | INFRA | INFRA-1B | INFRA-1A.6 / INFRA-1B.1 | Tier A-D + collectability_score + access_method. size cap 없음 — v0 entry 50 source proposed (경제 18 + 정책 12 + 사회 11 + 대중문화 9, 한국 소스 포함) `docs/research/source-seed-list-2026-05.md` |
+| TRACE-021 | Q-021 (reflow by DEC-004 + DEC-009; pending `data/sources_seed.yaml` commit in **this repo**) | ADR-0016 + DEC-004 + DEC-009 | REQ-017 | AC-022 / TEST-022 | P0-M2 | INFRA | INFRA-1B | INFRA-1A.6 / INFRA-1B.1 | Tier A-D + collectability_score + access_method. size cap 없음 — v0 entry 72 source proposed (경제 22 + 정책 17 + 사회 18 + 대중문화 15, 한국 24개 + 글로벌 48개) `docs/research/source-seed-list-2026-05.md` |
 | TRACE-022 | — | ADR-0017 | REQ-018 | AC-023 / TEST-023 | P0-M2 | INFRA | INFRA-1B | INFRA-1B.1 | source_policy 3 필드 + mode-aware policy gate + 8 위험 행동 트리거 |
 | TRACE-023 | — | ADR-0017, ADR-0015 | REQ-019 | AC-024 / TEST-024 | P0-M2 | INFRA | INFRA-1B | INFRA-1B.5 | access_intervention Neo4j 노드 + severity 자동 산정 + batch report |
 | TRACE-024 | — | ADR-0018 | REQ-020 | AC-025 / TEST-025 | P0-M3 | INFRA | INFRA-1B | INFRA-1B.6 | Manual feedback CLI + 3-way 분리 + 3-option intervention review |
 | TRACE-025 | Q-029, Q-030 | ADR-0019 | REQ-021 | AC-026 / TEST-026 | P0-M5 ~ M6 | AGG | AGG-1A | AGG-1A.2 / AGG-1A.4 / INFRA-1A.7 | Scenario impact_targets + Thesis stance/market_stance |
-| TRACE-026 | Q-021 (reflow by DEC-004 + DEC-009) | ADR-0019 + DEC-004 + DEC-009 | REQ-022 | AC-027 / TEST-027 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.6 | source_perspective 분포 균형은 **Tier A seed set 전체** 에 적용 (size cap 없음, REQ-022 / AC-027). 현재 `docs/research/source-seed-list-2026-05.md` 50 source 분포: risk_observer 9 (18%) ≤50% ✓ / **opportunity_observer 15 (30%) ≥25% ✓** / neutral 23 (46%) ≥15% ✓ — **AC-027 통과 (안전 마진 5%)**. 카테고리 subset 분포는 reference only (의무 아님): 경제 18 (4/6/8), 정책 12 (3/3/5+1mixed), 사회 11 (1/3/6+1mixed), 대중문화 9 (1/3/4+1mixed) |
+| TRACE-026 | Q-021 (reflow by DEC-004 + DEC-009) | ADR-0019 + DEC-004 + DEC-009 | REQ-022 | AC-027 / TEST-027 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.6 | source_perspective 분포 균형은 **Tier A seed set 전체** 에 적용 (size cap 없음, REQ-022 / AC-027). 현재 `docs/research/source-seed-list-2026-05.md` 72 source 분포: risk_observer 14 (19%) ≤50% ✓ / **opportunity_observer 21 (29%) ≥25% ✓** / neutral 30 (42%) ≥15% ✓ / mixed 7 (10%) — **AC-027 통과 (안전 마진 4%)**. 카테고리 subset 분포는 reference only (의무 아님): 경제 22 (4/6/8/0), 정책 17 (4/4/6/3), 사회 18 (1/5/10/2), 대중문화 15 (1/6/6/2) |
 | TRACE-027 | — | ADR-0019 | REQ-023 | AC-028 / TEST-028 | P0-M6 | PUB | PUB-1A | PUB-1A.2 | EvidencePack v0 4-section + LLM synthesis mode 분리 |
 | TRACE-028 | — | ADR-0020 | REQ-024 | AC-029 / TEST-029 | P0-M3+ | OPS | OPS-1A | OPS-1A.3 | metrics 6 카테고리 + v0 9+ metrics + evaluation harness |
 | TRACE-029 | — | ADR-0021 | REQ-025 | AC-030 / TEST-030 | P0-M3 | OPS | OPS-1A | OPS-1A.4 | Policy learning rule-based Pattern 1 v0 + auto-tighten/auto-relax 분리 |
@@ -77,7 +77,7 @@ Question ↔ Decision ↔ Requirement ↔ Gate/Test ↔ Milestone/Track/Phase/Sl
 - Q-012 (Neo4j ↔ SQLite sync 정책) 미해결 → INFRA-1A.2 commit 전 lock 권고
 - Q-020 (Neo4j GPL v3 boundary) 미해결 → INFRA-1A.2 commit 전 lock 권고
 - Q-021 (Tier A seed — size cap 없음) — `docs/research/source-seed-list-
-  2026-05.md` 50 source proposed (경제 18 + 정책 12 + 사회 11 + 대중문화 9,
+  2026-05.md` 72 source proposed (경제 22 + 정책 17 + 사회 18 + 대중문화 15,
   한국 소스 보강 포함). 분포 충족: risk 18% / opportunity 30% / neutral
   46% — AC-027 통과. 사용자 list review + accept 후 **이 repo** `data/
   sources_seed.yaml` 또는 SQLite migration INSERT commit 시 resolved
@@ -90,7 +90,9 @@ Question ↔ Decision ↔ Requirement ↔ Gate/Test ↔ Milestone/Track/Phase/Sl
 - ~~Q-026~~ **resolved by DEC-006** (vault sync trigger = git push 단일)
 - ~~Q-027~~ **resolved by DEC-007** (retention / R2 lifecycle / backup
   schedule)
-- ~~Q-028~~ **resolved by DEC-008** (LLM cost / quality discipline)
+- ~~Q-028~~ **resolved by DEC-008 → re-resolved by DEC-010** (LLM routing v2
+  multi-vendor + Data Science Module + cost ceiling 재산정. DEC-008 의
+  Anthropic-only 라우팅 supersede)
 - Q-029 (ImpactAssessment v0 embedded vs v1 노드) 미해결 → AGG-1A.2
   진입 전 lock
 - Q-030 (counterclaim multi-relation v1 도입 우선순위) 미해결 → v1 진입

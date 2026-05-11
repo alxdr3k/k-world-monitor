@@ -244,9 +244,12 @@ Q-<NNN>.md`로 이동.
 - ~~Q-027~~: **resolved by DEC-007** (retention / R2 lifecycle 3 expire
   rule + 의미적 GC batch 3개 + soft-delete tombstone 14d grace +
   RETENTION_PROTECTED_KINDS 상수 + raw_cache 24h~7d ceiling)
-- ~~Q-028~~: **resolved by DEC-008** (3계층 LLM 라우팅 + prompt caching
-  layering 5단계 + 이중 TTL + batch API + cost ceiling soft $5/hard $7.5/
-  weekly $25 + backfill bucket + KPI 5개)
+- ~~Q-028~~: **resolved by DEC-008 → re-resolved by DEC-010** (LLM routing
+  v2 multi-vendor — OpenAI GPT default + Anthropic dual-vendor + Google
+  exploration-only + minimal cross-vendor review at preflight + Data
+  Science Module (ADR-0024) for dataset + cost ceiling soft $5/hard $7.5/
+  weekly $25 + Tier 0 일일 cap 5회 + backfill bucket + KPI 6개. DEC-008
+  의 Anthropic-only 라우팅은 supersede 됨)
 - Q-029: ImpactAssessment v0 embedded dict vs v1 별도 Neo4j 노드
 - Q-030: counterclaim multi-relation v1 도입 우선순위 (weakens/strengthens/
   mitigates/amplifies)
