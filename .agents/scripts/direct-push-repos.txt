@@ -4,4 +4,3 @@ boilerplate
 devdeck
 statistics-for-data-science
 second-brain
-k-world-monitor
