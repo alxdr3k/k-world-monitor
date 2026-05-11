@@ -121,8 +121,8 @@ ADR-0011~0021로 supersede됐다.
 
 - 문서 invariant validator (`bun run invariant:check`) — warning level only
   (ADR-0002 INV-0002-1)
-- 코드 acceptance gate는 아직 없음 — `06_ACCEPTANCE_TESTS.md` AC 정의만 완료
-  (Round 25 canonical 반영 펜딩)
+- 코드 acceptance gate는 아직 없음 — `06_ACCEPTANCE_TESTS.md` AC 정의는 Round
+  25 canonical(AC-022~AC-033 포함) 반영 완료, 코드 도입 후 자동화 단계 진입
 
 ## Needs audit
 
