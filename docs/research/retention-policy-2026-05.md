@@ -9,7 +9,7 @@
 ## 1. Executive summary
 
 - 데이터는 **4 분류** (영구 보존 / 시간 가치 감쇠 / TTL 한정 / Replaceable) 로 나누고, 각 분류에 명시적 R2 prefix와 lifecycle action을 1:1 매핑한다.
-- **R2 native lifecycle** = age-based 단순 만료 (multipart abort, raw cache 만료, backup rotation 등 "blunt instrument") 에만 사용. **Application batch job** = 의미적 기준 (claim retraction, dedupe, dataset_vintage GC, scenario revision supersede) 처리.
+- **R2 native lifecycle** = age-based 단순 만료 (multipart abort, backup rotation 등 "blunt instrument") 에만 사용. **raw_cache_items 는 R2 진입 금지 (ADR-0012 INV-0012-3/4)** — SQLite metadata + local FS 만 사용하며 TTL eviction 은 application batch job (`expire_raw_cache`, 일간 cadence) 이 담당. **Application batch job** = 의미적 기준 (claim retraction, dedupe, dataset_vintage GC, scenario revision supersede) + raw_cache TTL 처리.
 - **항상 보존 목록**은 명시적으로 "GC 금지 (do-not-touch)"로 정책에 박아둔다: `permitted_artifact/derived/publication/`, JSONL audit export 12개월 이후의 cold archive, `access_interventions` ledger, `policy_decisions`. 이 목록을 건드리는 모든 batch는 reject한다.
 - 1년 boundary 거친 추정 R2 비용은 **월 USD 0.20 ~ 1.50 수준** (storage ≤100 GB 가정 시 dominant cost는 operations가 아니라 storage). egress=0이라 1인 운영자 부담은 매우 낮음.
 - 단, **5+1 trace retroactive verification** (publication preflight) 이 깨지지 않도록 모든 GC 결정은 `policy_decisions` 테이블에 reason+evidence-pointer로 logging해 두는 게 핵심. soft-delete → tombstone → hard-delete 2단계 패턴 권장.
