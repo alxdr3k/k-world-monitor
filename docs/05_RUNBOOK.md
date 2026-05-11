@@ -13,9 +13,20 @@
 - CLI: `bun build` → 단일 실행 파일 (로컬 설치 + cron / launchd worker
   등록 — Discovery, Fetcher, Extractor, Stale Worker, retention batch 3
   cadence)
-- 인프라 키 보관: Cloudflare R2 + Anthropic API key + Cloudflare Pages
-  project + Neo4j credential 의 Doppler / 환경 변수 (P0-M2 milestone
-  진입 시점 정의)
+- 인프라 키 보관 (P0-M2 milestone 진입 시점 정의, ADR-0023 / DEC-010
+  multi-vendor 라우팅에 따른 발급 의무):
+  - **OpenAI API key** (default LLM vendor, GPT-5 nano/mini/standard/
+    extended thinking — Tier 0~3 default) — **required**
+  - **Anthropic API key** (Claude Haiku 4.5 / Sonnet 4.6 / Opus 4.7 xhigh
+    — cross-vendor reviewer + 도메인 override) — **required**
+  - **Google AI Studio API key** (Gemini 2.5 Flash — 탐색 grounding +
+    Tier 3 비용효율 fallback) — optional (v0 진입 시 발급 권고)
+  - Cloudflare R2 (S3 compatible, permitted artifact 저장) — required
+  - Cloudflare Pages project (자체 사이트 호스팅) — required
+  - Neo4j credential (Community Edition self-host) — required
+  - Doppler 또는 환경 변수 자체 보관 — 1인 운영자 선택
+  - 2026-05-11 status: OpenAI / Anthropic / Google AI Studio 모두 발급
+    완료 (current-state.md "External services / credentials" 섹션)
 
 - Deployment owner: 운영자(user)
 - Target environments: local (CLI + Neo4j self-host) + Cloudflare Pages
