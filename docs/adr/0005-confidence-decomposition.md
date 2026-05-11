@@ -11,13 +11,13 @@ superseded_by: []
 
 scope:
   in:
-    - storage.sqlite.document_table.reliability_tier
-    - storage.sqlite.claim_table.extraction_confidence
-    - storage.sqlite.claim_table.claim_status
-    - storage.sqlite.scenario_table.assumptions_weight
+    - storage.neo4j.source_node.reliability_tier   # ADR-0011/0012 — Document was SQLite, Source is Neo4j; reliability_tier moved to Source layer
+    - storage.neo4j.claim_node.extraction_confidence   # ADR-0012 — Claim moved to Neo4j
+    - storage.neo4j.claim_node.claim_status   # ADR-0012 — Claim moved to Neo4j; 8-state per ADR-0011 INV-0011-5
+    - storage.neo4j.scenario_node.assumptions_weight   # ADR-0012 — Scenario moved to Neo4j
   out:
     - pipeline.extraction_layer.routing      # auto-accept threshold는 ADR-0006
-    - storage.sqlite.edge_table              # edge ledger는 ADR-0007
+    - storage.neo4j.edges                    # edge ledger는 ADR-0013 (ADR-0007 superseded; storage moved to Neo4j)
 
 invariants:
   - id: INV-0005-1
@@ -27,7 +27,7 @@ invariants:
     statement: extraction_confidence (0-1)는 Claim 단위 속성이며 LLM 추출 경로에서만 채워진다 (manual_intake는 null)
     status: active
   - id: INV-0005-3
-    statement: claim_status ∈ {draft, confirmed, disputed, stale, retracted}는 Claim 단위 lifecycle이다 (frontmatter ledger 변경으로만 전이)
+    statement: "claim_status는 Claim 단위 lifecycle이다 (frontmatter ledger 변경으로만 전이). v0 lock 시점 5-state {draft, confirmed, disputed, stale, retracted} — ADR-0011 INV-0011-5에서 8-state로 확장 (R9/Q4: + source_changed, source_unavailable, needs_recorroboration). 현 canonical은 8-state"
     status: active
   - id: INV-0005-4
     statement: scenario assumptions[] weight (0-1)는 scenario 안의 속성이며 claim 자체의 confidence가 아니다
@@ -57,12 +57,12 @@ reviewed_terms:
   - extraction_confidence
   - claim
 reviewed_scopes:
-  - storage.sqlite.document_table.reliability_tier
-  - storage.sqlite.claim_table.extraction_confidence
-  - storage.sqlite.claim_table.claim_status
-  - storage.sqlite.scenario_table.assumptions_weight
+  - storage.neo4j.source_node.reliability_tier   # ADR-0011/0012 supersede
+  - storage.neo4j.claim_node.extraction_confidence
+  - storage.neo4j.claim_node.claim_status   # 8-state per ADR-0011
+  - storage.neo4j.scenario_node.assumptions_weight
   - pipeline.extraction_layer.routing
-  - storage.sqlite.edge_table
+  - storage.neo4j.edges   # ADR-0013 supersede
 
 provenance: user_confirmed
 sensitivity: private
@@ -100,7 +100,7 @@ throttling(자동 confirm 가능한지), scenario validate(weight 누락 여부)
 |---|---|---|
 | reliability_tier | Document | enum {high, medium, low, unknown} |
 | extraction_confidence | Claim | float 0-1 (LLM only, else null) |
-| claim_status | Claim | enum {draft, confirmed, disputed, stale, retracted} |
+| claim_status | Claim | enum {draft, confirmed, disputed, stale, retracted, source_changed, source_unavailable, needs_recorroboration} — 8-state (R9/Q4, ADR-0011 INV-0011-5 확장) |
 | scenario assumption weight | Scenario.assumptions[].weight | float 0-1 |
 | evidence_strength | (derived) | claim_status + reliability_tier로 view 계산 |
 

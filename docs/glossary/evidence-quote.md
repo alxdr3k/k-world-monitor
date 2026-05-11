@@ -23,7 +23,7 @@ retention: long_term
 ai_include: true
 
 applies_to_planes:
-  - storage.sqlite.claim_table.evidence
+  - storage.neo4j.claim_node.evidence    # ADR-0012/0015 supersede — Claim moved to Neo4j; evidence is nullable + quote_reason + storage_level
   - pipeline.cite_check_layer
 forbidden_paths:
   - quote_length_over_200_chars        # NFR-005: ≤ 200자 강제

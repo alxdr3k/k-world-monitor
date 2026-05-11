@@ -30,7 +30,7 @@ invariants:
     statement: Policy learning은 rule-based다. ML fine-tuning 학습은 도입하지 않는다 — 1인 프로젝트 데이터 부족 + audit 어려움 (R15/Q10-4 Claude 결정)
     status: active
   - id: INV-0021-2
-    statement: 학습 방향은 "auto-tighten allowed, auto-relax prohibited"다. 보수화(예: 3회 연속 manual → 기본값 manual) 자동 적용 / 완화 방향은 항상 사용자 명시 승인 + 추가 정보(terms_url, license_url) 입력 요구 (R15/Q10-4 GPT 원칙)
+    statement: '학습 방향은 "auto-tighten allowed, auto-relax prohibited"다. 보수화 (예시 — 3회 연속 manual → 기본값 manual) 자동 적용 / 완화 방향은 항상 사용자 명시 승인 + 추가 정보 (terms_url, license_url) 입력 요구 (R15/Q10-4 GPT 원칙)'
     status: active
   - id: INV-0021-3
     statement: 5 pattern 단계화 — v0 Pattern 1 (source policy refinement) / v1 Pattern 2 (domain-level rule, e.g., *.ft.com N회 paywalled → rule 제안) / v2 Pattern 3 (anomaly detection) + Pattern 5 (negative learning) / v3 옵션 Pattern 4 (LLM-based suggestion)

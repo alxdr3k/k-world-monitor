@@ -20,7 +20,7 @@ Then  <기대 결과>
 | ID | REQ/NFR | 시나리오 | 검증 방법 | Status |
 |---|---|---|---|---|
 | AC-001 | REQ-001 | Given 신규 fetch된 Snapshot. When extractor가 claim을 추출. Then Document → Snapshot → Claim 3-tier에 row가 생기고 Dossier/Scenario/Draft/Publication 단계는 미생성 상태로 trace anchor가 보존된다 | manual + automated TEST-001 | defined |
-| AC-002 | REQ-002 | Given research.db. When 1만 건 candidate claim과 5천 건 snapshot 메타가 적재. Then SELECT + FTS5 keyword 검색이 cold cache p95 < 1초 (NFR-001) | TEST-002 (bench) | defined |
+| AC-002 | REQ-002 | Given Neo4j Community 인스턴스. When 1만 graph object(Claim + Snapshot + Source + Document + Edge) 적재. Then Neo4j native FTS keyword 검색 + 1-hop traversal이 cold cache p95 < 1초 (NFR-001, SPIKE-001) | TEST-002 (bench) | defined |
 | AC-003 | REQ-003 | Given Snapshot row. When r2_key가 가리키는 객체를 fetch. Then sha256이 일치하고 mime이 일치한다 | TEST-003 | defined |
 | AC-004 | REQ-004 | Given 1만 건 candidate claim. When 그 중 50건이 promoted. Then Markdown vault에는 50건만 존재하고 나머지는 SQLite에만 존재한다 | TEST-004 + manual | defined |
 | AC-005 | REQ-005 | Given 신규 객체 생성. When ID 발급. Then 접두 + 단조 증가 식별자(`doc_/snap_/clm_/dos_/scn_/drf_/pub_/edge_/run_`) 규칙을 따른다 | TEST-005 | defined |
@@ -70,8 +70,8 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 
 | ID | 이름 | 위치 | 커버하는 AC |
 |---|---|---|---|
-| TEST-001 | 7-stage object trace anchor | `tests/pipeline/object_model_test.ts` (planned) | AC-001 |
-| TEST-002 | FTS5 1만 건 검색 bench | `tests/bench/fts5_search_bench.ts` (planned) | AC-002 |
+| TEST-001 | 9-stage object trace anchor | `tests/pipeline/object_model_test.ts` (planned) | AC-001 |
+| TEST-002 | Neo4j native FTS 1만 graph object 검색 bench | `tests/bench/neo4j_fts_search_bench.ts` (planned) | AC-002 |
 | TEST-003 | R2 sha256 round-trip | `tests/storage/r2_integrity_test.ts` (planned) | AC-003 |
 | TEST-004 | promoted only markdown | `tests/storage/markdown_promoted_only_test.ts` (planned) | AC-004 |
 | TEST-005 | ID prefix lint | `tests/lint/id_prefix_test.ts` (planned) | AC-005 |

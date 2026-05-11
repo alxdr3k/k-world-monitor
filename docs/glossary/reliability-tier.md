@@ -23,11 +23,12 @@ retention: long_term
 ai_include: true
 
 applies_to_planes:
-  - storage.sqlite.document_table
+  - storage.neo4j.source_node          # ADR-0011/0012 — reliability_tier moved to Source (Tier 0)
+  - storage.neo4j.document_node        # Document.publisher FK to Source inherits reliability_tier
   - pipeline.extraction_layer.routing
 forbidden_paths:
-  - storage.sqlite.claim_table.reliability   # reliability는 Document 속성, Claim에 직접 두지 않는다
-  - mixed_field_with_extraction_confidence   # 단일 confidence 필드로 합치기 금지 (ADR-0005)
+  - storage.neo4j.claim_node.reliability   # reliability는 Source 속성, Claim에 직접 두지 않는다 (INV-0005-1)
+  - mixed_field_with_extraction_confidence # 단일 confidence 필드로 합치기 금지 (ADR-0005)
 ---
 
 # reliability_tier

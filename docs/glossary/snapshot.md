@@ -24,11 +24,12 @@ ai_include: true
 
 applies_to_planes:
   - pipeline.source_layer
-  - storage.r2.bytes
-  - storage.sqlite.snapshot_table
+  - storage.neo4j.snapshot_node       # ADR-0012 supersede — fingerprint record (URL/content_hash/locator)
+  - storage.r2.permitted_artifacts    # ADR-0012 — R2 binary는 예외(open license / 공식 API / 자체 산출물)만
 forbidden_paths:
   - storage.markdown.snapshot      # Snapshot 자체는 Markdown 노트로 쓰지 않는다 (수만 건 자동생성 금지)
   - pipeline.publication_layer     # Snapshot은 Claim 추출 입력일 뿐, Publication에 직접 인용되지 않는다 (Claim 경유)
+  - storage.r2.raw_third_party_text  # ADR-0012 INV-0012-3 — raw third-party text R2 업로드 영구 금지
 ---
 
 # snapshot

@@ -44,9 +44,12 @@ ADR-0011~0021로 supersede됐다.
 ## Implemented
 
 코드 구현은 아직 없다. 현재까지 채워진 것은 문서 기반 architecture 합의:
-- 12 ADR(0003~0010 Round 3 lock 시점, 0003/0004/0007/0008은 superseded)
-- 11 ADR(0011~0021 Round 4~25 canonical) 신규 작성
-- project delivery artifacts(PRD/HLD/Plan/Acceptance/Glossary)
+- ADR 0001~0010 (boilerplate placeholder 1개 + 0002 invariant tracking +
+  Round 3 lock 시점 0003~0010 8개. 0003/0004/0007/0008은 0011~0015로
+  superseded)
+- ADR 0011~0021 (Round 4~25 canonical) 11개 신규 작성
+- project delivery artifacts(PRD/HLD/Implementation Plan/Acceptance Tests/
+  Glossary/Questions/Decisions/Traceability)
 
 ## Planned
 

@@ -23,10 +23,11 @@ retention: long_term
 ai_include: true
 
 applies_to_planes:
-  - storage.sqlite.claim_table
+  - storage.neo4j.claim_node                            # ADR-0012 supersede
   - pipeline.extraction_layer.review_throttling
 forbidden_paths:
-  - storage.sqlite.document_table.extraction_confidence  # Document 단위에는 두지 않는다
+  - storage.neo4j.document_node.extraction_confidence   # Document 단위에는 두지 않는다
+  - storage.neo4j.source_node.extraction_confidence     # Source 단위에도 두지 않는다 (INV-0005-2)
   - manual_intake_path                                   # extraction_confidence는 LLM 추출에만 부여
 ---
 

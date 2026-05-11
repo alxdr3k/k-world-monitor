@@ -33,7 +33,7 @@ invariants:
     statement: cite check는 다음 5종을 검출한다 — stale, retracted, horizon mismatch, unit mismatch, overclaim. cite check 실패 ContentDraft는 Publication으로 승격되지 않는다
     status: active
   - id: INV-0008-4
-    statement: "원문 인용 전면 금지" 정책은 폐기됐다 (검증성을 파괴) — 짧은 quote + hash로 검증 가능하게 한다
+    statement: '"원문 인용 전면 금지" 정책은 폐기됐다 (검증성을 파괴) — 짧은 quote + hash로 검증 가능하게 한다'
     status: active
 
 preconditions:

@@ -26,8 +26,8 @@ ai_include: true
 applies_to_planes:
   - pipeline.scenario_layer
   - storage.markdown.scenario
-  - storage.sqlite.scenario_table
-  - storage.sqlite.scenario_revisions
+  - storage.neo4j.scenario_node             # ADR-0012 supersede
+  - storage.neo4j.scenario_revision_node    # ADR-0012 supersede
 forbidden_paths:
   - pipeline.publication_layer.direct        # Publication은 Scenario를 직접 인용하지 않고 ContentDraft를 거친다
   - storage.markdown.candidate_claim_inline  # Scenario는 promoted claim만 인용

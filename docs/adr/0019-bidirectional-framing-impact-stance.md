@@ -40,7 +40,7 @@ invariants:
     statement: thesis는 stance + market_stance(optional) 2 필드를 보유한다 — thesis.stance ∈ {constructive, cautionary, neutral, mixed, asymmetric, exploratory} (일반 thesis) / thesis.market_stance ∈ {bullish, bearish, range_bound, volatility_up, volatility_down, neutral} (자산·시장 thesis, optional v0, 필수 v1). 두 필드는 mutual exclusive 아님 (자산 thesis가 둘 다 가질 수 있음)
     status: active
   - id: INV-0019-5
-    statement: Source는 source_perspective tag를 보유한다 — {risk_observer, opportunity_observer, neutral, mixed}. Q21 Tier A seed 작성 시 분포 균형 강제 (예: 30개 중 risk_observer ≤ 15, opportunity_observer ≥ 8, neutral ≥ 7)
+    statement: "Source는 source_perspective tag를 보유한다 — {risk_observer, opportunity_observer, neutral, mixed}. Q21 Tier A seed 작성 시 분포 균형 강제 (예시 — 30개 중 risk_observer ≤ 15, opportunity_observer ≥ 8, neutral ≥ 7)"
     status: active
   - id: INV-0019-6
     statement: RAG build_evidence_pack은 v0에서 4 section을 출력한다 — supporting_evidence / opposing_evidence / mitigating·amplifying (merged) / monitoring_signals. v1에서 8 section으로 확장 — + neutral_base_rate / uncertainty_factors / unresolved_access_interventions / amplifying_factors(분리)

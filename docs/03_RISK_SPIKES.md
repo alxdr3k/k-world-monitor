@@ -10,24 +10,36 @@
 
 ## Spikes
 
-### SPIKE-001: SQLite + FTS5가 1만 건 시점에서 NFR-001 (검색 < 1초 p95) 충족하는가
+### SPIKE-001: Neo4j Community + native FTS가 1만 graph object 시점에서 NFR-001 (검색 < 1초 p95) 충족하는가
 
-- Hypothesis: SQLite + FTS5 + 적절한 인덱스 정책으로 claim 1만 건, snapshot 1만
-  건 fixture 위에서 단일 keyword 검색이 cold-cache p95 1s 이하에서 수렴한다
-  (PRD ASM-004).
+- Hypothesis: self-host Neo4j Community Edition + native FTS(Lucene) + 적절한
+  index policy로 Claim 1만 건 + Snapshot 1만 건 + Source/Document/Edge 부수
+  fixture 위에서 단일 keyword 검색 + 1-hop traversal이 cold-cache p95 1s
+  이하에서 수렴한다 (PRD ASM-004, ADR-0012/0014).
 - Owner: user
-- Time-box: 2일
+- Time-box: 2~3일
 - Start / End: TBD
 - Status: open
+- Note: 본 spike는 2026-05-11 reset(DEC-003)에서 SQLite+FTS5에서 Neo4j +
+  native FTS로 대상 갱신됨. ADR-0007 Alternative D ("Neo4j discarded")는
+  ADR-0013/0014로 supersede.
 
 **Experiment**
 
-- 1만 건 합성 fixture 생성 (claim body는 한국어 200~400자, snapshot 메타 + 5
-  claim/snapshot 평균)
-- 스키마: `claims_fts5(body, evidence_quote, snapshot_id, claim_status)` +
-  `claims_meta(extraction_confidence, claim_status)` 보조
-- 검색 쿼리: 키워드 + claim_status filter + reliability_tier join
-- bench: 50 cold-cache 쿼리 p95, p99 측정
+- 1만 graph object 합성 fixture 생성:
+  - Claim 1만 건 (한국어 body 200~400자) + Snapshot 1만 건 (fingerprint
+    record) + Source 30~50 + Document 1만 + Edge 1.5만 (평균 1.5 edges/claim)
+- Neo4j schema: native FTS index on Claim.body / Snapshot.body /
+  Dossier.summary / Thesis.body
+- 검색 쿼리 3종:
+  - (a) keyword FTS — `CALL db.index.fulltext.queryNodes("claim_fts",
+    "keyword") YIELD node, score`
+  - (b) FTS + claim_status filter — `MATCH (c:Claim) WHERE c.claim_status =
+    'confirmed' AND ... RETURN c LIMIT 50`
+  - (c) FTS + 1-hop edge traversal — `MATCH (c:Claim)-[:SUPPORTS|:CONTRADICTS]->
+    (target) WHERE ... RETURN c, target`
+- bench: 50 cold-cache 쿼리 p95, p99 측정 (3 query type 각각)
+- Neo4j Community Edition standard config (heap 2-4G), APOC + GDS plugin
 
 **Result**
 
@@ -35,10 +47,14 @@
 
 **Decision / Next Step**
 
-- 충족 시: ADR-0004 INV-0004-1 + NFR-001 그대로 lock, INFRA-1A.2 slice 진행
+- 충족 시: ADR-0012 INV-0012-1 + ADR-0014 INV-0014-3 + NFR-001 lock,
+  INFRA-1A.2 slice 진행
 - 미충족 시:
-  - chunking 정책 재검토 (chunk 단위를 claim에서 sentence로 좁히기)
-  - duckdb / SQLite alternative 검토 (큰 변경 — ADR-0004 supersede)
+  - native FTS index analyzer 재검토 (한국어 tokenizer)
+  - Neo4j heap / cache config 튜닝
+  - graph object 분할 (Claim → Statement sub-node 등) 재검토
+  - 마지막 수단: ADR-0014 native vector index(v1 도입 시점) 또는 외부
+    full-text search (Meilisearch) 검토 — ADR-0012/0014 supersede
 - Follow-up: Slice `INFRA-1A.2`
 
 ---

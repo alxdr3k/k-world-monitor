@@ -13,11 +13,11 @@ scope:
   in:
     - pipeline.extraction_layer.review_throttling
     - pipeline.cite_check_layer.stale_check
-    - storage.sqlite.claim_table.claim_status
+    - storage.neo4j.claim_node.claim_status   # ADR-0012 Claim moved to Neo4j; 8-state per ADR-0011 INV-0011-5
     - pipeline.scenario_layer.cascade
   out:
     - pipeline.extraction_layer.routing    # routing은 ADR-0006
-    - storage.sqlite.edge_table            # edge ledger는 ADR-0007
+    - storage.neo4j.edges            # edge ledger는 ADR-0013 (ADR-0007 superseded)
 
 invariants:
   - id: INV-0010-1
@@ -50,10 +50,10 @@ reviewed_terms:
 reviewed_scopes:
   - pipeline.extraction_layer.review_throttling
   - pipeline.cite_check_layer.stale_check
-  - storage.sqlite.claim_table.claim_status
+  - storage.neo4j.claim_node.claim_status
   - pipeline.scenario_layer.cascade
   - pipeline.extraction_layer.routing
-  - storage.sqlite.edge_table
+  - storage.neo4j.edges
 
 provenance: user_confirmed
 sensitivity: private
