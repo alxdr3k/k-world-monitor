@@ -45,7 +45,7 @@
 | Platform | Cloudflare Pages (free tier — 월 500 build, 100GB bandwidth) |
 | Build source | `vault/publications/**` (single source, ADR-0022 INV-0022-1) + Astro site files (`site/**`, `astro.config.*`, `src/content.config.*`, `package.json`) |
 | Build watch paths (precondition) | **include**: `site/**`, `vault/publications/**`, `package.json`, `astro.config.*`, `src/content.config.*`. **exclude**: `vault/dossiers/**`, `vault/scenarios/**`, `vault/theses/**`, `vault/content_drafts/**`, `vault/promoted_claims/**`, `vault/documents/**`, `docs/**`. 미설정 시 모든 push가 build trigger (DEC-006 precondition) |
-| Build gate | Astro Content Collection + Zod schema (status / cite_refs[] / correction_ledger[] / format) — dead-link cite_refs 또는 invalid status 는 **build fail** (ADR-0022 INV-0022-3, **AC-035**) |
+| Build gate | Astro Content Collection + Zod schema (status / cite_refs[] / correction_ledger[] / format / **editorial_intent_id (ADR-0025) / editorial_quality_rubric_passed (DEC-012)**) — invalid status / dead-link cite_refs / dead-link editorial_intent_id / editorial_quality_rubric_passed = false 또는 missing 시 **build fail** (ADR-0022 INV-0022-3 + ADR-0025 + DEC-012, **AC-035**) |
 | Build failure behavior | 이전 successful deploy 가 live 유지 (Cloudflare Pages 기본). 운영자가 Pages build log 확인 |
 | Correction / retraction update | ContentDraft frontmatter `status` (live → corrected → retracted) + `correction_ledger[]` append → git commit → push → Pages auto build → `<RetractionBanner/>` + `<CorrectionLedger/>` 컴포넌트가 visible 렌더 (ADR-0022 INV-0022-7) |
 | Cross-post lint (NFR-010 / AC-034) | 외부 플랫폼(Substack / YouTube / X) 게시물의 cite footnote 가 자체 사이트 canonical URL 만 가리키도록 검증. v0 manual, v1+ auto (Q-033) |
