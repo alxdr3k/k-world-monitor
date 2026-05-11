@@ -272,10 +272,10 @@ Counterclaim coverage(per scenario)는 측정 가능한 KPI(섹션 7).
 - **E. LLM-judge cite check 도입 단계**: v0에 deterministic 룰만, v1+에서 LLM-judge 추가가 안전. SPIKE 별도 신설할지.
 - **F. SPIKE-003 측정 시 cache TTL 만료 처리**: batch가 5분을 초과해 미스가 나는 경우를 hit rate 계산에서 어떻게 다룰지(분모 정의).
 
-### Followup (별도 spike 후보)
+### Followup (별도 spike 후보 — 아직 정식 SPIKE ID 발급 전)
 
-- **SPIKE-004 (제안)**: Sonnet escalate trigger rule을 confidence-only vs confidence + domain + reliability_tier 복합 룰로 시뮬레이션 (운영 데이터 200건 확보 후).
-- **SPIKE-005 (제안)**: Opus 4.7 scenario validate ROI 측정 — Sonnet validate 결과와 Opus validate 결과의 reviewer-judged quality diff vs cost diff.
+- **Spike 후보 #A**: Sonnet escalate trigger rule을 confidence-only vs confidence + domain + reliability_tier 복합 룰로 시뮬레이션 (운영 데이터 200건 확보 후). 채택 시 `docs/03_RISK_SPIKES.md`에 정식 ID 발급.
+- **Spike 후보 #B**: Opus 4.7 scenario validate ROI 측정 — Sonnet validate 결과와 Opus validate 결과의 reviewer-judged quality diff vs cost diff. 채택 시 정식 ID 발급.
 
 ---
 

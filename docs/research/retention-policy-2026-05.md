@@ -29,7 +29,7 @@
 | `Scenario`, `Thesis` revision history | 시간 가치 감쇠 | Neo4j | latest + last 5 revisions | revision count | head revision은 영구, deep history는 N>5에서 collapse |
 | Neo4j dump | TTL 한정 | R2 `backups/neo4j/{date}/` | 30d | daily age | Q-027 제안 그대로 |
 | SQLite snapshot | TTL 한정 | R2 `backups/sqlite/{date}/` | 90d | daily age | 단일 파일 → 작음 |
-| `raw_cache_items` (third-party fetched raw) | TTL 한정 (강제) | SQLite (metadata) + local FS | 7d 기본, 30d 상한 | last_accessed_at + fetch_at | ADR-0012 INV-0012-3/4 — **R2 진입 절대 금지** |
+| `raw_cache_items` (third-party fetched raw) | TTL 한정 (강제) | SQLite (metadata) + local FS | TTL 24h~7d, finalize/abandon 시 즉시 삭제 | last_accessed_at + fetch_at + session 종료 신호 | ADR-0021 INV-0021-6 + ADR-0012 INV-0012-3/4 — **R2 진입 절대 금지**, 7d hard ceiling, 24h floor |
 | `research_session` ephemeral | TTL 한정 | SQLite | 30d after `closed_at` | session close + age | 종료 안 된 세션은 보호 |
 | Open-license dataset (versioned) | Replaceable but versioned | R2 `permitted_artifact/dataset/{publisher}/{vintage}/` | 무기한 hot 30d → IA | dataset_vintage `end_of_life` | EOL marked → 12mo grace → archive prefix로 이동 |
 | Intermediate computation (regenerable) | Replaceable | local tmp | 24h | run completion | R2 진입 금지 |
@@ -89,7 +89,12 @@ R2 lifecycle = age + prefix만 본다. 의미적 기준 (cited 여부, retractio
 ```python
 def daily_retention_job(now):
     # 1. raw_cache_items TTL evict (OPS-1A.4)
-    expire_raw_cache(now, ttl_default=timedelta(days=7), ttl_max=timedelta(days=30))
+    # ADR-0021 INV-0021-6: TTL 24h~7d, ttl_override는 이 범위 내에서만 honor.
+    expire_raw_cache(now,
+                     ttl_floor=timedelta(hours=24),
+                     ttl_ceiling=timedelta(days=7))
+    # finalize/abandon 즉시 삭제는 session 종료 hook에서 동기 호출되며
+    # 본 batch와 별도. (delete_raw_cache_on_session_finalize 참조)
 
     # 2. research_session GC
     expire_research_sessions(now, age_after_close=timedelta(days=30),
@@ -99,19 +104,63 @@ def daily_retention_job(now):
     purge_local_tmp(now, ttl=timedelta(hours=24))
 
 
-def expire_raw_cache(now, ttl_default, ttl_max):
+def expire_raw_cache(now, ttl_floor, ttl_ceiling):
+    """
+    ADR-0021 INV-0021-6 enforcement:
+      - per-item ttl_override must be clamped to [ttl_floor, ttl_ceiling]
+        (24h ~ 7d). NULL override → ttl_ceiling 적용.
+      - LRU last_accessed_at 기반 evict + fetched_at 기반 hard ceiling.
+      - finalize/abandon 즉시 삭제는 본 batch 밖에서 처리됨.
+    """
     rows = sqlite.query("""
         SELECT id, cache_key, fetched_at, last_accessed_at, ttl_override
         FROM raw_cache_items
-        WHERE last_accessed_at < ? OR fetched_at < ?
-    """, [now - ttl_default, now - ttl_max])
+        WHERE
+            -- per-item TTL (clamped to floor..ceiling)
+            fetched_at < ? - MIN(MAX(COALESCE(ttl_override, ?), ?), ?)
+            -- LRU: 미접근 floor 초과
+            OR last_accessed_at < ? - ?
+    """, [
+        now,
+        ttl_ceiling,  # default if no override
+        ttl_floor,    # lower clamp
+        ttl_ceiling,  # upper clamp (hard ceiling)
+        now,
+        ttl_floor,    # idle LRU window
+    ])
     for r in rows:
         # raw 파일은 local FS only (R2 진입 금지 INV-0012-3/4)
         os.unlink(local_path(r.cache_key))
         sqlite.execute("DELETE FROM raw_cache_items WHERE id = ?", [r.id])
+        effective_ttl = clamp(r.ttl_override or ttl_ceiling, ttl_floor, ttl_ceiling)
         emit_policy_decision(
             kind="raw_cache_evict", target=r.id,
-            reason="ttl_expired", evidence={"last_accessed_at": r.last_accessed_at}
+            reason="ttl_expired",
+            evidence={
+                "last_accessed_at": r.last_accessed_at,
+                "fetched_at": r.fetched_at,
+                "effective_ttl": effective_ttl,
+                "ttl_override": r.ttl_override,
+            },
+        )
+
+
+def delete_raw_cache_on_session_finalize(session_id, reason):
+    """
+    research_session.finalize() 또는 abandon() 호출 시 동기 실행.
+    ADR-0021 INV-0021-6: finalize/abandon 즉시 삭제 의무.
+    """
+    rows = sqlite.query(
+        "SELECT id, cache_key FROM raw_cache_items WHERE session_id = ?",
+        [session_id],
+    )
+    for r in rows:
+        os.unlink(local_path(r.cache_key))
+        sqlite.execute("DELETE FROM raw_cache_items WHERE id = ?", [r.id])
+        emit_policy_decision(
+            kind="raw_cache_evict", target=r.id,
+            reason=f"session_{reason}",  # session_finalize / session_abandon
+            evidence={"session_id": session_id},
         )
 ```
 
@@ -224,7 +273,7 @@ def monthly_retention_job(now):
 3. **soft-delete + tombstone + 14d grace + policy_decisions log**를 모든 delete 경로의 기본 패턴.
 4. **항상 보존 목록은 코드에 list로 박고 batch job에서 reject**. 단일 `RETENTION_PROTECTED_KINDS` 상수.
 5. **IA transition은 1년 이상 cold-ish data만**. retrieval cost 미미해서 retroactive verification에 부담 없음.
-6. **raw_cache_items는 R2 진입 절대 금지** (ADR-0012). local FS + SQLite metadata only, 7d TTL default, last_accessed_at 기반 LRU + 30d 강제 상한.
+6. **raw_cache_items는 R2 진입 절대 금지** (ADR-0012). local FS + SQLite metadata only, **TTL 24h~7d 범위 (ADR-0021 INV-0021-6)** — ttl_override는 이 범위로 clamp, last_accessed_at 기반 LRU, finalize/abandon 시 동기 즉시 삭제.
 7. **Q-027 lock 권장값** (변경 없음, 추가 명시): Neo4j dump 30d + SQLite 90d + JSONL audit 1y hot → 무기한 IA + derived publication 무기한 + dataset versioned + EOL grace 12mo.
 8. **연 1회 retention drill**: 임의 publication 하나 골라서 5+1 trace 전부 reachable한지 수동 verify. 깨지면 batch 정책 재검토.
 
@@ -236,7 +285,7 @@ def monthly_retention_job(now):
 2. **Q-B**: `metrics_*` raw row 12mo 보존 vs aggregated rollup — rollup 정밀도 (daily? weekly?) 사용자 선호 필요. evaluation reproducibility와 trade-off.
 3. **Q-C**: JSONL audit export의 IA transition 시점 — 1년 후 vs 영구 Standard? 1인 운영자가 audit replay를 얼마나 자주 할 의향인지에 달림.
 4. **Q-D**: `dataset_vintage` EOL 후 grace 12mo 이후 archive prefix로 옮긴 dataset의 최종 운명 — 무기한 IA vs 5년 후 delete? 5-10년 horizon 시나리오에서 어떤 빈티지가 다시 필요해질 가능성이 있는지.
-5. **Q-E**: `raw_cache_items` TTL 사용자 override 한도 — 30d 강제 상한이 적정인가, 아니면 더 짧게 (14d) ? 강한 caching 의존이면 분석 효율과 정책 깨짐 트레이드오프.
+5. **Q-E**: `raw_cache_items` TTL override의 floor/ceiling — ADR-0021 INV-0021-6은 24h~7d로 lock하나, default를 7d로 둘지 더 짧게(예: 48h)로 두고 운영자가 명시 override 시에만 7d까지 늘릴지. 분석 효율 vs 정책 보수성 trade-off.
 6. **Q-F**: tombstone retention — 모든 tombstone을 무기한 보존하면 ledger가 빠르게 커진다. 10년 boundary에서 millions row 가능 → tombstone 자체에도 aggregate rollup 필요한가?
 7. **Q-G**: R2 object versioning을 on/off 할 것인가? on이면 안전망이지만 추가 storage 비용 + lifecycle 동작이 noncurrent version에도 적용되어야 함.
 
