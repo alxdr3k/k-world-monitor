@@ -137,12 +137,12 @@ ADR-0019).
 | REQ-019 | 탐색·콘텐츠 제작 중 막힌 source는 access_interventions Neo4j 노드에 누적되고 세션 종료 시 batch report. severity 자동 산정(deterministic default, LLM 옵션). unresolved HIGH/CRITICAL은 publication 핵심 근거 사용 금지 | must | AC-024 | R18 | ADR-0017, ADR-0015 |
 | REQ-020 | Manual feedback inbound — `pipeline feedback add|bulk|link|from-report` + `pipeline intervention review <id>` 3-option. manual_claim_entries는 user_written_claim / user_opinion / referenced_quote 3-way 분리 (한 row 한 필드만). raw_text_stored=false 강제 | must | AC-025 | R18 | ADR-0018 |
 | REQ-021 | Scenario는 impact_targets[] + impact_direction_by_target (dict, target별 upside/downside/mixed/neutral) + transmission_channels[]를 보유한다. asymmetric은 derive. Thesis는 stance(constructive/cautionary/neutral/mixed/asymmetric/exploratory) + market_stance(optional v0, 필수 v1; bullish/bearish/range_bound/volatility_up/volatility_down/neutral) | must | AC-026 | R23, R25 | ADR-0019 |
-| REQ-022 | Source는 source_perspective tag (risk_observer/opportunity_observer/neutral/mixed)를 보유한다. Q21 Tier A seed 작성 시 분포 균형 강제 (risk_observer ≤ 50%, opportunity_observer ≥ 25%, neutral ≥ 15%) | must | AC-027 | R23 | ADR-0019 |
+| REQ-022 | Source는 source_perspective tag (risk_observer/opportunity_observer/neutral/mixed)를 보유한다. Tier A seed set 전체(size 무관, upper cap 없음 — Q-021)에 대해 분포 균형 강제 (risk_observer ≤ 50%, opportunity_observer ≥ 25%, neutral ≥ 15%; mixed 는 valid value 이지만 ratio 의무 4 dim 중 3 dim 에만 적용) | must | AC-027 | R23 + DEC-009 reflow | ADR-0019 |
 | REQ-023 | RAG `build_evidence_pack`은 v0에서 4 section(supporting_evidence / opposing_evidence / mitigating·amplifying / monitoring_signals)을 출력한다. LLM synthesis prompt는 mode 분리(balanced / specific) | must | AC-028 | R23, R25 | ADR-0019 |
 | REQ-024 | System metrics — v0 측정 9+개 (unsupported_sentence_rate, counterclaim_presence_rate, stale_violation_rate, policy_block_count, manual_claim_entry_rate, db_size_growth_rate, upside_claim_presence_rate, downside_claim_presence_rate, one_sided_warning_rate). 6 카테고리(데이터 품질/운영 성능/Policy safety/콘텐츠 production/추적성/시스템 건강) + evaluation harness | must | AC-029 | R15, R23 | ADR-0020 |
 | REQ-025 | Policy learning은 rule-based, "auto-tighten allowed, auto-relax prohibited". v0 Pattern 1 (source policy refinement). 자동 적용 X — propose만, accept는 사용자. 잘못된 rule은 자동 demote | must | AC-030 | R15 | ADR-0021 |
 | REQ-026 | 도메인 카테고리는 v0에서 **4 메타 카테고리** (정책 / 경제 / 사회 / 대중문화) 로 lock한다 (DEC-004, Q-022 supersede). 기존 8 enum(macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai / digital_assets) + tag 5개는 4 메타 카테고리의 `subtopic_tags[]` 로 강등 보존 — v1+ 누적 dossier 기반 재승격(Q-032) | must | AC-031 | R22 | DEC-004 (supersedes Q-022) |
-| REQ-027 | Publishing primary 는 **자체 사이트 (Astro 5.0 + Cloudflare Pages)** 이고 vault `publications/` 디렉토리(4 subdirectory: blog_long / newsletter / youtube_long / shorts)가 single source 다 (ADR-0022). 외부 플랫폼(Substack / YouTube / X)은 cross-post target — 모든 외부 발행물의 cite footnote는 자체 사이트 URL을 canonical anchor 로 가리킨다 (ADR-0022 INV-0022-2). v0 turn-key 발행 scope 는 blog_long 1개 + 자체 사이트 + manual cross-post + manual correction approve (DEC-005). TTS / auto cross-post / 자동 retraction trigger 는 v1+ (Q-031 / Q-033 / Q-034). cite check 5+1(ADR-0015)의 일부는 Astro Content Collection + Zod schema 로 **build-time enforce** (dead-link cite_refs / invalid status 는 build fail, ADR-0022 INV-0022-3) | must | AC-013, AC-018, AC-028, AC-034 | (R25 + v0 turn-key) | ADR-0022, DEC-005, DEC-006 |
+| REQ-027 | Publishing primary 는 **자체 사이트 (Astro 5.0 + Cloudflare Pages)** 이고 vault `publications/` 디렉토리(4 subdirectory: blog_long / newsletter / youtube_long / shorts)가 single source 다 (ADR-0022). 외부 플랫폼(Substack / YouTube / X)은 cross-post target — 모든 외부 발행물의 cite footnote는 자체 사이트 URL을 canonical anchor 로 가리킨다 (ADR-0022 INV-0022-2). v0 turn-key 발행 scope 는 blog_long 1개 + 자체 사이트 + manual cross-post + manual correction approve (DEC-005). TTS / auto cross-post / 자동 retraction trigger 는 v1+ (Q-031 / Q-033 / Q-034). cite check 5+1(ADR-0015)의 일부는 Astro Content Collection + Zod schema 로 **build-time enforce** (dead-link cite_refs / invalid status 는 build fail, ADR-0022 INV-0022-3) | must | AC-013, AC-018, AC-028, AC-034, AC-035 | (R25 + v0 turn-key) | ADR-0022, DEC-005, DEC-006 |
 
 ### Non-functional (NFR-###)
 
@@ -171,9 +171,11 @@ ADR-0019).
   NFR-001을 만족한다 (SPIKE-001로 검증, 대상 SQLite+FTS5에서 Neo4j로 갱신).
 - ASM-005: 외부 source 대부분이 fetch 시점 sha256 content_hash로 변경 감지가
   충분하다.
-- ASM-006: Tier A source(공식 API/RSS/open dataset) 30~50개 seed로 1인 콘텐츠
-  production scale을 충족 (매일 수천 RSS items + 주당 수십~수백 reports).
-  Tier B/C/D는 manual fallback으로 흡수.
+- ASM-006: Tier A source(공식 API/RSS/open dataset) seed 가 1인 콘텐츠
+  production scale을 충족 — 개수 상한 없음 (Q-021 cap 폐기, 운영 부담
+  안에서 누적 자유). v0 turn-key 진입 분포는 `docs/research/source-seed-
+  list-2026-05.md` 50 source proposed. Tier B/C/D는 manual fallback으로
+  흡수.
 - ASM-007: Neo4j Community GPL v3 boundary는 1인 internal use에서 contagion
   없다 (Q-020 검토 후 확인).
 
@@ -210,13 +212,16 @@ Q-<NNN>.md`로 이동.
 - Q-008: Thesis ID 체계 (`ths_<sha256[0:10]>` vs draft 내부 thesis_text)
 - Q-012: graph DB 도입 후 SQLite ↔ Neo4j sync 정책 (CDC vs batch)
 - Q-020: Neo4j Community GPL v3 boundary (1인 internal use vs 배포)
-- Q-021: Tier A source universe 초기 seed 30~50개 + perspective 분포 균형
+- Q-021: Tier A source seed (size cap 없음 — DEC-009 reflow 후 v0 entry
+  50 source `docs/research/source-seed-list-2026-05.md`) + perspective
+  분포 균형
 - ~~Q-022~~: v0 카테고리 8개 — **resolved by DEC-004** (v0 4 메타
   카테고리로 축소: 정책 / 경제 / 사회 / 대중문화. 8 enum + tag 5개는
   subtopic_tags[] 로 강등 보존)
 - Q-024: Neo4j-specific 기능 활용 boundary (APOC standard vs extended, GDS
   Community 알고리즘 list, Cypher 5.x 범위)
-- Q-025: 외부 repo 부트스트랩 cadence (week 1-9)
+- Q-025: 이 repo (= second-brain vault 기준 "외부 repo") 부트스트랩 cadence
+  (week 1-9 가이드)
 - ~~Q-026~~: Vault sync trigger — **resolved by DEC-006** (ADR-0022 자체 사이트
   stack 결정 후 git push 단일 trigger로 단순화. Cloudflare Pages git
   integration이 publications/ 변경분 자동 build + deploy)

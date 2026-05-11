@@ -141,12 +141,14 @@ collectability_score:
 - source_reliability(ADR-0005 reliability_tier)와 collectability_score는 독립
   차원. Q21 Tier A seed 작성 시 두 차원 분리 입력.
 
-**Q21 Tier A seed 가이드** (30~50개 후보 분포):
-- domain: macro_finance / geopolitics_security / health_biosecurity /
-  energy_commodities / trade_supply_chain / climate_environment /
-  technology_cyber_ai / digital_assets (ADR-0019 + Q22 카테고리 8개)
+**Q21 Tier A seed 가이드** (size cap 폐기 — DEC-009 reflow 후 누적 자유.
+v0 entry 50 source `docs/research/source-seed-list-2026-05.md`. 분포는
+enforcement 유지):
+- domain: DEC-004 4 메타 카테고리 (정책 / 경제 / 사회 / 대중문화) +
+  subtopic_tags[] 로 강등된 기존 8 enum 보존 — Q-022 historical reference
 - perspective: risk_observer / opportunity_observer / neutral / mixed
-  (ADR-0019 source_perspective tag — 분포 균형 필수)
+  (ADR-0019 source_perspective tag — 분포 균형 필수, REQ-022 / AC-027 적용
+  scope = Tier A seed set 전체)
 - access_method 분포: api > rss > sitemap > public_page
 
 ## Alternatives Considered
@@ -179,7 +181,7 @@ collectability_score:
   - 봇 우회 회피는 미디어 빠르게 변하는 dynamic page를 일부 놓침 — 의도된 수용
 
 - 후속 작업:
-  - INFRA-1A.6 (신설): Source registry seed Q21 — Tier A 30~50개 분포 균형 작성
+  - INFRA-1A.6 (신설): Source registry seed Q21 — Tier A seed (size cap 폐기 후 누적 자유) + 분포 균형 작성. v0 entry 50 source proposed (`docs/research/source-seed-list-2026-05.md`)
   - INFRA-1B.1 슬라이스: Source registry + Collection Queue (Tier 분류 강제)
   - ADR-0017: source policy gate (archive_policy / raw_cloud_policy /
     external_llm_policy 3 필드)

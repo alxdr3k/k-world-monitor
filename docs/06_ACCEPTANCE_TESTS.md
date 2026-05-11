@@ -45,7 +45,7 @@ Then  <기대 결과>
 | AC-024 | REQ-019 | Given 시나리오·콘텐츠 제작 세션. When 막힌 source N건 발생. Then access_interventions 노드 N건 누적되고 세션 종료 시 batch report 생성, severity 자동 산정(deterministic default), unresolved HIGH/CRITICAL은 publication 핵심 근거로 사용 시 cite check inline_block | TEST-024 | defined |
 | AC-025 | REQ-020 | Given access_intervention review. When `pipeline intervention review <id>` 호출. Then 3-option (ignore / manual_claim / temp_text) 중 하나 선택 가능. manual_claim 선택 시 `pipeline feedback add` 진입 후 user_written_claim / user_opinion / referenced_quote 3-way 중 하나만 채워진 manual_claim_entry 생성. raw_text_stored=false 강제 | TEST-025 | defined |
 | AC-026 | REQ-021 | Given Scenario 작성. When validate. Then impact_targets[] + impact_direction_by_target dict + transmission_channels[]이 채워졌고 (summary_valence는 optional). Thesis는 stance ∈ {constructive, cautionary, neutral, mixed, asymmetric, exploratory} + market_stance (optional v0 / 필수 v1) ∈ {bullish, bearish, range_bound, volatility_up, volatility_down, neutral} 보유 | TEST-026 | defined |
-| AC-027 | REQ-022 | Given Q21 Tier A seed 30~50개. When source_perspective 분포 검사. Then risk_observer ≤ 50% + opportunity_observer ≥ 25% + neutral ≥ 15% 충족 | TEST-027 + manual review | defined |
+| AC-027 | REQ-022 | Given Tier A seed set 전체 (size 무관 — Q-021 가 upper cap 폐기, 누적 가능). When source_perspective 분포 검사. Then **전체 seed 기준** risk_observer ≤ 50% + opportunity_observer ≥ 25% + neutral ≥ 15% 충족 (mixed 는 valid value 이나 ratio 분모에서 제외하지 않음 — 의무 ratio 는 4 dim 중 3 dim 에 대해서만 적용). 카테고리 subset compliance 는 reference only — 의무 아님 | TEST-027 + manual review | defined |
 | AC-028 | REQ-023 | Given build_evidence_pack 호출 (mode=balanced). When output 구조 검사. Then v0에서 4 section (supporting / opposing / mitigating·amplifying / monitoring) 모두 채워졌거나 명시 "no evidence found". LLM synthesis prompt에 "한쪽 방향 evidence만으로 결론 금지 / winners·losers 분리" 제약 포함 | TEST-028 | defined |
 | AC-029 | REQ-024 | Given pipeline run 종료. When metrics_run 기록 + daily aggregation. Then 6 카테고리 metrics 모두 row 생성. v0 9+ metrics (unsupported_sentence_rate / counterclaim_presence_rate / stale_violation_rate / policy_block_count / manual_claim_entry_rate / db_size_growth_rate / upside_claim_presence_rate / downside_claim_presence_rate / one_sided_warning_rate) 측정됐다 | TEST-029 | defined |
 | AC-030 | REQ-025 | Given 사용자가 같은 source ignore 3회. When policy_learning_events 검사. Then Pattern 1 rule_candidate 생성 (active=false), 사용자에게 confirm prompt 제시. 사용자 accept 시 rule active=true. 완화 방향 rule은 terms_url + license_url 입력 필수 | TEST-030 | defined |
@@ -53,6 +53,7 @@ Then  <기대 결과>
 | AC-032 | NFR-008 | Given 모든 R2 upload + 모든 외부 LLM 호출. When policy_decisions ledger + source_material_policy 검사. Then raw_cloud_policy=always_prohibited 위반 0건, 모든 upload에 archive_policy 통과 audit log 존재, raw third-party text의 클라우드 저장 0건 | TEST-032 | defined |
 | AC-033 | NFR-009 | Given trailing 50개 publication. When thesis_polarity_distribution 측정. Then 한 방향(direction 6값 중 하나) ≥ 70% 쏠림 0건 (v1+ 활성화) | TEST-033 (v1+) | defined |
 | AC-034 | NFR-010 + REQ-027 | Given 자체 사이트 publish + 외부 플랫폼 cross-post (Substack / YouTube / X). When cross-post 게시물의 cite footnote anchor URL 추출. Then **외부 플랫폼 발행물의 모든 cite footnote가 자체 사이트 도메인 URL을 가리킨다** (외부 임의 URL 0건). v0 manual cross-post에서는 사람 검증, v1+ auto cross-post 도입 시 link transform + lint 자동 (ADR-0022 INV-0022-2). vault `publications/` 외 디렉토리(documents/, dossiers/, scenarios/, theses/, content_drafts/, promoted_claims/) URL을 cite anchor로 사용 시 reject (internal canonical 비노출, ADR-0022 INV-0022-4) | TEST-034 | defined |
+| AC-035 | REQ-027 + ADR-0022 INV-0022-3 | Given `vault/publications/blog_long/<slug>.mdx` (그리고 v1+ newsletter / youtube_long / shorts) 발행. When Astro Content Collection 빌드 실행. Then **Zod schema (status / cite_refs[] / correction_ledger[] / format) 가 strict 검증** — invalid value (예 `status` enum 외 값) 또는 **dead-link `cite_refs` (claim id 존재 안 함)** 시 **build fail** (Cloudflare Pages 가 이전 successful deploy 유지). 정상 시 사이트에 publication URL 노출 + `<Cite/>` / `<RetractionBanner/>` / `<CorrectionLedger/>` 컴포넌트가 frontmatter 값을 render | TEST-035 | defined |
 
 ## Status vocabulary
 
@@ -103,6 +104,7 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-032 | raw cloud upload 0건 audit | `tests/policy/raw_cloud_zero_test.ts` (planned) | AC-032 |
 | TEST-033 | thesis_polarity_distribution v1+ | `tests/metrics/polarity_distribution_test.ts` (planned, v1+) | AC-033 |
 | TEST-034 | cross-post cite anchor canonical lint (외부 플랫폼 footnote가 자체 사이트 도메인 URL만) + internal vault path leakage 차단 | `tests/publishing/cross_post_anchor_lint_test.ts` (planned) | AC-034 |
+| TEST-035 | Astro Content Collection Zod schema build-time gate — invalid status / dead-link cite_refs 인 fixture 로 빌드하면 fail, 정상 fixture 로 빌드하면 pass + `<Cite/>` / `<RetractionBanner/>` / `<CorrectionLedger/>` 컴포넌트 출력 검증 | `tests/publishing/astro_zod_build_gate_test.ts` (planned) | AC-035 |
 
 ## CI/CD gates
 

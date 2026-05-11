@@ -171,7 +171,9 @@ source:
   source_perspective: risk_observer | opportunity_observer | neutral | mixed
 ```
 
-Q21 Tier A seed 분포 균형 (30~50개):
+Q21 Tier A seed 분포 균형 (size cap 폐기 — DEC-009 reflow 후 누적 자유.
+v0 entry 50 source `docs/research/source-seed-list-2026-05.md`. 분포는
+enforcement 유지 — Tier A seed set 전체 기준):
 - risk_observer ≤ 50%
 - opportunity_observer ≥ 25%
 - neutral ≥ 15%

@@ -28,7 +28,7 @@
 
 - 1만 graph object 합성 fixture 생성:
   - Claim 1만 건 (한국어 body 200~400자) + Snapshot 1만 건 (fingerprint
-    record) + Source 30~50 + Document 1만 + Edge 1.5만 (평균 1.5 edges/claim)
+    record) + Source 50+ (size cap 폐기 — DEC-009 reflow, v0 entry 50 in `docs/research/source-seed-list-2026-05.md`) + Document 1만 + Edge 1.5만 (평균 1.5 edges/claim)
 - Neo4j schema: native FTS index on Claim.body / Snapshot.body /
   Dossier.summary / Thesis.body
 - 검색 쿼리 3종:

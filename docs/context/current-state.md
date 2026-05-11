@@ -54,11 +54,13 @@ ADR-0011~0021로 supersede됐다.
   scope / vault sync trigger 단일화)
 - **DEC-007 / DEC-008 / DEC-009** (retention/R2 lifecycle policy lock /
   LLM cost/quality discipline lock / v0 첫 발행 카테고리 = 경제)
-- **AC-031 갱신 + AC-034 + TEST-034 신규** (4 메타 카테고리 validation +
-  cross-post canonical cite anchor lint)
+- **AC-031 갱신 + AC-034 + AC-035 신규 (TEST-034/035 포함)** (4 메타 카테고리
+  validation + cross-post canonical cite anchor lint + Astro Content
+  Collection Zod schema build-time gate)
 - **09_TRACEABILITY_MATRIX TRACE-030/034/035/036/037 갱신 / 신규**
-- **`docs/research/source-seed-list-2026-05.md`** (Tier A 30 source list
-  proposed — Q-021 reflow)
+- **`docs/research/source-seed-list-2026-05.md`** (Tier A 50 source list
+  proposed — Q-021 reflow, size cap 폐기, 한국 소스 보강. 분포 충족
+  risk 18% / opportunity 30% / neutral 46%)
 - project delivery artifacts(PRD/HLD/Implementation Plan/Acceptance Tests/
   Glossary/Questions/Decisions/Traceability)
 
@@ -119,9 +121,12 @@ ADR-0011~0021로 supersede됐다.
 - Q-008 Thesis ID 체계
 - Q-012 Neo4j ↔ SQLite sync (CDC vs batch)
 - Q-020 Neo4j GPL v3 boundary
-- Q-021 Tier A source seed 30~50개 + perspective 분포 균형 (4 메타 카테고리
-  분포로 reflow — DEC-004 + DEC-009). 30 source proposed 
-  `docs/research/source-seed-list-2026-05.md` — 사용자 list review 후 lock
+- Q-021 Tier A source seed (size cap 폐기 — DEC-009 reflow, 누적 자유) +
+  perspective 분포 균형 (전체 seed 기준 risk ≤50% / opportunity ≥25% /
+  neutral ≥15% 충족). v0 entry 50 source proposed (경제 18 + 정책 12 +
+  사회 11 + 대중문화 9, 한국 소스 보강 포함) `docs/research/source-seed-
+  list-2026-05.md` — 사용자 list review 후 이 repo `data/sources_seed.
+  yaml` commit 시 resolved (외부 repo 의존성 없음)
 - ~~Q-022~~ **resolved by DEC-004** (v0 4 메타 카테고리: 정책 / 경제 / 사회
   / 대중문화)
 - Q-024 Neo4j-specific 기능 활용 boundary

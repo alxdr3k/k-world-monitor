@@ -1,201 +1,217 @@
 ---
-title: Tier A source seed list 30개 (Q-021 reflow) — 4 메타 카테고리 분포, 경제 우선 (DEC-009)
+title: Tier A source seed list — 4 메타 카테고리 분포, 경제 우선 (DEC-009), 한국 소스 보강, no upper cap
 created_at: 2026-05-11
+updated_at: 2026-05-11
 status: research
 informs:
-  - Q-021 (Tier A seed reflow lock)
+  - Q-021 (Tier A seed lock)
   - INFRA-1A.6 (Tier A seed slice)
   - DEC-009 (v0 첫 발행 = 경제)
-  - REQ-022 (source_perspective 분포 균형)
+  - REQ-022 / AC-027 (source_perspective 분포 균형 — 전체 seed set 적용)
 provenance: research_synthesis
 sensitivity: private
 ai_include: true
 ---
 
-# Tier A source seed list 30개 — 4 메타 카테고리 분포
+# Tier A source seed list — 4 메타 카테고리
 
 ## 구성 원칙
 
-- **총 30 source** (Q-021 30~50 범위 lower bound, 1인 운영 부담 통제)
-- **DEC-004 4 메타 카테고리 분포**: 경제 12 + 정책 7 + 사회 6 + 대중문화 5
-  (DEC-009 경제 우선 weight)
-- **source_perspective 분포** (REQ-022 / ADR-0019 INV-0019-5): 카테고리별로
-  risk_observer ≤ 50%, opportunity_observer ≥ 25%, neutral ≥ 15% 충족
-- **Tier A 우선** (ADR-0016): 공식 API / RSS / official endpoint. 자동 수집
-  가능
-- **access_method**: API > RSS > sitemap (자동화 친화도)
-- **collectability_score** 4 dimension 초기치(0~1): automation_reliability /
-  legal_policy_clarity / anti_bot_friction / preferred_mode
+- **개수 상한 없음** — Q-021 의 이전 "30~50개" 가이드는 폐기. 1인 운영
+  부담 안에서 누적 가능한 만큼 등록 (현재 50 source proposed, v0 진행 중
+  추가 등록 자유).
+- **DEC-004 4 메타 카테고리 분포** — 경제 / 정책 / 사회 / 대중문화. 경제
+  우선 (DEC-009, v0 turn-key 첫 발행).
+- **source_perspective 분포 균형 (REQ-022 / AC-027)**:
+  - risk_observer ≤ 50%
+  - opportunity_observer ≥ 25%
+  - neutral ≥ 15%
+  - 적용 범위 = **Tier A seed set 전체** (카테고리 subset 의무 아님)
+- **한국 소스 적극 포함** — KDI / KIEP / KIET / 외교부 / 통일연구원 /
+  KIHASA / 환경부 / 농촌진흥청 / KOCCA / KOFIC / KISDI 등.
+- **Tier A 우선** (ADR-0016) — 공식 API / RSS / official endpoint.
+- **canonical 위치**: 이 repo `data/sources_seed.yaml` (외부 repo 의존성
+  없음. INFRA-1A.6 slice 진입 시 yaml 또는 SQLite migration INSERT 로
+  commit).
 
 ---
 
-## 1. 경제 (economy) — 12 source (v0 우선)
+## 1. 경제 (economy) — 18 source (v0 우선, DEC-009)
 
 원래 8 카테고리의 `macro_finance / trade_supply_chain / energy_commodities
-/ digital_assets` 가 흡수된 메타 카테고리. v0 turn-key 첫 발행 카테고리
-(DEC-009).
+/ digital_assets` 가 흡수.
 
-| # | Source name | Publisher | URL root | access_method | source_perspective | reliability_tier | subtopic_tags | 비고 |
-|---|---|---|---|---|---|---|---|---|
-| 1 | **FRED (Federal Reserve Economic Data)** | Federal Reserve Bank of St. Louis | https://fred.stlouisfed.org | API (FRED API key) | neutral | A | macro_finance | 수만 개 macroeconomic series. 가장 풍부한 timeseries source |
-| 2 | **FOMC statements + speeches** | Federal Reserve Board | https://www.federalreserve.gov/feeds/press_all.xml | RSS | risk_observer | A | macro_finance / governance_institutions | Hawkish/dovish stance 신호. 통화정책 risk 채널 |
-| 3 | **IMF WEO Database + Article IV** | International Monetary Fund | https://www.imf.org/en/Publications/WEO + API | API + RSS | opportunity_observer | A | macro_finance / trade_supply_chain | 성장 전망 + 회원국 평가. institutional growth-development perspective |
-| 4 | **BIS Quarterly Review + Working Papers** | Bank for International Settlements | https://www.bis.org/list/qtrpdf/index.xml | RSS | risk_observer | A | macro_finance | 금융안정성 + cross-border imbalances. 보수적 risk 관점 |
-| 5 | **ECB Press Releases + Economic Bulletin** | European Central Bank | https://www.ecb.europa.eu/rss/press.html + API (SDW) | RSS + API | risk_observer | A | macro_finance | 유럽 통화정책 + 금융안정. ECB SDW로 timeseries |
-| 6 | **한국은행 통화정책 + ECOS API** | Bank of Korea | http://ecos.bok.or.kr/api | API + RSS | risk_observer | A | macro_finance | 국내 macro + KRW 통화정책. ECOS Open API key 필요 |
-| 7 | **KOSIS Open API (한국 통계청)** | 통계청 (Korean Statistical Information Service) | https://kosis.kr/openapi | API | neutral | A | macro_finance / demographics_migration | 국내 통계 hub. CPI/GDP/employment/demographics |
-| 8 | **BLS Data (US Bureau of Labor Statistics)** | US BLS | https://api.bls.gov/publicAPI/v2 | API | neutral | A | macro_finance | CPI/PPI/jobs report. US 노동/물가 공식 |
-| 9 | **World Bank Open Data API** | World Bank | https://api.worldbank.org/v2 | API | opportunity_observer | A | macro_finance / trade_supply_chain | Global Economic Prospects + WDI. development perspective |
-| 10 | **OECD Composite Leading Indicators + Outlook** | OECD | https://stats.oecd.org/SDMX-JSON | API | opportunity_observer | A | macro_finance | 38개 회원국 leading indicators. OECD growth perspective |
-| 11 | **EIA Petroleum Status + Short-Term Energy Outlook** | US Energy Information Administration | https://api.eia.gov | API | neutral | A | energy_commodities | 원유/가스 weekly 통계 + 단기 전망 |
-| 12 | **IEA Oil Market Report + World Energy Outlook** | International Energy Agency | https://www.iea.org/topics/oil-market-report (subscriptions) | RSS (abstract) | neutral | A | energy_commodities | 글로벌 에너지 + 전환 시나리오. WEO 연 1회 |
+| # | Source name | Publisher | access | perspective | subtopic_tags |
+|---|---|---|---|---|---|
+| 1 | FRED | Fed St. Louis | API | neutral | macro_finance |
+| 2 | FOMC statements + speeches | Fed Board | RSS | risk_observer | macro_finance / governance_institutions |
+| 3 | IMF WEO + Article IV | IMF | API + RSS | opportunity_observer | macro_finance / trade_supply_chain |
+| 4 | BIS Quarterly Review + Working Papers | BIS | RSS | risk_observer | macro_finance |
+| 5 | ECB Press + Economic Bulletin | ECB | RSS + API (SDW) | risk_observer | macro_finance |
+| 6 | 한국은행 통화정책 + ECOS API | BOK | API + RSS | risk_observer | macro_finance |
+| 7 | KOSIS Open API | 통계청 | API | neutral | macro_finance / demographics_migration |
+| 8 | BLS Data | US BLS | API | neutral | macro_finance |
+| 9 | World Bank Open Data | World Bank | API | opportunity_observer | macro_finance / trade_supply_chain |
+| 10 | OECD CLI + Outlook | OECD | API | opportunity_observer | macro_finance |
+| 11 | EIA Petroleum + STEO | US EIA | API | neutral | energy_commodities |
+| 12 | IEA Oil Market Report + WEO | IEA | RSS (abstract) | neutral | energy_commodities |
+| 13 | **KDI 정책분석 / Economic Outlook** | 한국개발연구원 | RSS | opportunity_observer | macro_finance |
+| 14 | **KIEP 세계경제전망** | 대외경제정책연구원 | RSS | opportunity_observer | trade_supply_chain |
+| 15 | **KIET 산업동향** | 산업연구원 | RSS | neutral | macro_finance |
+| 16 | **금융위원회 보도자료** | 한국 금융위 | RSS | risk_observer | macro_finance |
+| 17 | **KITA 무역통계 + 보고서** | 한국무역협회 | RSS + API | opportunity_observer | trade_supply_chain |
+| 18 | **산업통상자원부 보도자료** | 한국 산업부 | RSS | neutral | trade_supply_chain |
 
-**경제 카테고리 perspective 분포**:
-- risk_observer: 2(Fed), 4(BIS), 5(ECB), 6(BOK) = **4/12 = 33%** (≤50% ✓)
-- opportunity_observer: 3(IMF), 9(World Bank), 10(OECD) = **3/12 = 25%** (≥25% ✓)
-- neutral: 1(FRED), 7(KOSIS), 8(BLS), 11(EIA), 12(IEA) = **5/12 = 42%** (≥15% ✓)
-
-3 dimension 모두 충족. 추가 1 source 등록 시 mixed perspective 권고 (예
-IGC 곡물 / IGC = neutral / SCMP 무역 mixed) — 12개로 v0 lock, 추가는
-누적 시점.
-
----
-
-## 2. 정책 (policy) — 7 source
-
-원래 8 카테고리의 `geopolitics_security / governance_institutions / tag
-`governance_institutions`` 가 흡수된 메타 카테고리.
-
-| # | Source name | Publisher | URL root | access_method | source_perspective | reliability_tier | subtopic_tags |
-|---|---|---|---|---|---|---|---|
-| 13 | **UN Security Council Press** | United Nations | https://press.un.org/en/feed/category/security-council | RSS | neutral | A | geopolitics_security |
-| 14 | **NATO Press Releases** | NATO | https://www.nato.int/cps/en/natohq/feed.htm | RSS | risk_observer | A | geopolitics_security |
-| 15 | **외교부 보도자료 (한국)** | 외교부 | https://www.mofa.go.kr (RSS) | RSS | neutral | A | governance_institutions |
-| 16 | **국방부 보도자료 (한국)** | 국방부 | https://www.mnd.go.kr (RSS) | RSS | neutral | A | governance_institutions |
-| 17 | **CSIS Reports** | Center for Strategic and International Studies | https://www.csis.org/feeds | RSS | risk_observer | A | geopolitics_security |
-| 18 | **Brookings Research** | Brookings Institution | https://www.brookings.edu/feed | RSS | opportunity_observer | A | governance_institutions |
-| 19 | **IISS Strategic Survey / Military Balance** | International Institute for Strategic Studies | https://www.iiss.org/publications (abstract RSS) | RSS (abstract) | neutral | A | geopolitics_security |
-
-**정책 카테고리 perspective 분포**:
-- risk_observer: 14, 17 = 2/7 = 29% (≤50% ✓)
-- opportunity_observer: 18 = 1/7 = 14% (≥25% **미달** ⚠️)
-- neutral: 13, 15, 16, 19 = 4/7 = 57% (≥15% ✓)
-
-opportunity_observer 미달 — Brookings 1개. 추가 후보: Atlantic Council
-research, Council on Foreign Relations(CFR), Carnegie Endowment. v0
-누적 시점에 1개 추가 권고.
+**경제 카테고리 perspective 분포**: risk 4 (22%) / opportunity 6 (33%) /
+neutral 8 (44%) — risk ≤50% ✓ / opportunity ≥25% ✓ / neutral ≥15% ✓
 
 ---
 
-## 3. 사회 (society) — 6 source
+## 2. 정책 (policy) — 12 source
+
+원래 8 카테고리의 `geopolitics_security / tag governance_institutions /
+regulatory_policy` 가 흡수.
+
+| # | Source name | Publisher | access | perspective | subtopic_tags |
+|---|---|---|---|---|---|
+| 19 | UN Security Council Press | UN | RSS | neutral | geopolitics_security |
+| 20 | NATO Press Releases | NATO | RSS | risk_observer | geopolitics_security |
+| 21 | 외교부 보도자료 | 외교부 | RSS | neutral | governance_institutions |
+| 22 | 국방부 보도자료 | 국방부 | RSS | neutral | governance_institutions |
+| 23 | CSIS Reports | CSIS | RSS | risk_observer | geopolitics_security |
+| 24 | Brookings Research | Brookings | RSS | opportunity_observer | governance_institutions |
+| 25 | IISS Strategic Survey / Military Balance | IISS | RSS (abstract) | neutral | geopolitics_security |
+| 26 | **CFR Reports** | Council on Foreign Relations | RSS | opportunity_observer | geopolitics_security / governance_institutions |
+| 27 | **PIIE Policy Briefs** | Peterson Institute for International Economics | RSS | opportunity_observer | trade_supply_chain / governance_institutions |
+| 28 | **통일연구원 (KINU) 정세분석** | KINU | RSS | risk_observer | geopolitics_security |
+| 29 | **세종연구소 정책분석** | 세종연구소 | RSS | mixed | geopolitics_security |
+| 30 | **국회입법조사처 (NABO)** | 입법조사처 | RSS | neutral | governance_institutions |
+
+**정책 카테고리 perspective 분포**: risk 3 (25%) / opportunity 3 (25%) /
+neutral 5 (42%) / mixed 1 (8%) — 전 dimension 충족
+
+---
+
+## 3. 사회 (society) — 11 source
 
 원래 8 카테고리의 `health_biosecurity / demographics_migration / food_water_
-security / climate_environment` 가 흡수된 메타 카테고리.
+security / climate_environment` 흡수.
 
-| # | Source name | Publisher | URL root | access_method | source_perspective | reliability_tier | subtopic_tags |
-|---|---|---|---|---|---|---|---|
-| 20 | **WHO Disease Outbreak News** | World Health Organization | https://www.who.int/feeds/entity/csr/don/en/rss.xml | RSS | neutral | A | health_biosecurity |
-| 21 | **CDC MMWR (Morbidity & Mortality Weekly Report)** | US Centers for Disease Control | https://www.cdc.gov/mmwr/rss/rss.xml | RSS | neutral | A | health_biosecurity |
-| 22 | **FAO Food Outlook + GIEWS** | Food and Agriculture Organization | https://www.fao.org/giews + RSS | RSS + API | neutral | A | food_water_security |
-| 23 | **IPCC Assessment Reports** | Intergovernmental Panel on Climate Change | https://www.ipcc.ch/feed | RSS | risk_observer | A | climate_environment |
-| 24 | **IOM World Migration Report** | International Organization for Migration | https://publications.iom.int (RSS) | RSS | opportunity_observer | A | demographics_migration |
-| 25 | **질병관리청 (한국 KDCA) 보도자료** | KDCA | https://www.kdca.go.kr (RSS) | RSS | neutral | A | health_biosecurity |
+| # | Source name | Publisher | access | perspective | subtopic_tags |
+|---|---|---|---|---|---|
+| 31 | WHO Disease Outbreak News | WHO | RSS | neutral | health_biosecurity |
+| 32 | CDC MMWR | CDC | RSS | neutral | health_biosecurity |
+| 33 | FAO Food Outlook + GIEWS | FAO | RSS + API | neutral | food_water_security |
+| 34 | IPCC Assessment Reports | IPCC | RSS | risk_observer | climate_environment |
+| 35 | IOM World Migration Report | IOM | RSS | opportunity_observer | demographics_migration |
+| 36 | KDCA 보도자료 | 질병관리청 | RSS | neutral | health_biosecurity |
+| 37 | **KIHASA 보건사회연구** | 한국보건사회연구원 | RSS | mixed | health_biosecurity / demographics_migration |
+| 38 | **환경부 보도자료** | 한국 환경부 | RSS | neutral | climate_environment |
+| 39 | **농촌진흥청 (RDA) 농업 동향** | RDA | RSS | neutral | food_water_security |
+| 40 | **UN SDG Knowledge Hub** | UN | RSS | opportunity_observer | demographics_migration / climate_environment |
+| 41 | **Gates Foundation Research** | Gates Foundation | RSS | opportunity_observer | health_biosecurity (Tier 검토 — RSS 형식 공식 publications 한정) |
 
-**사회 카테고리 perspective 분포**:
-- risk_observer: 23 = 1/6 = 17% (≤50% ✓)
-- opportunity_observer: 24 = 1/6 = 17% (≥25% **미달** ⚠️)
-- neutral: 20, 21, 22, 25 = 4/6 = 67% (≥15% ✓)
-
-opportunity_observer 미달 — IOM 1개. 추가 후보: Gates Foundation health
-reports / UN SDG progress reports / clean tech adoption reports.
+**사회 카테고리 perspective 분포**: risk 1 (9%) / opportunity 3 (27%) /
+neutral 6 (55%) / mixed 1 (9%) — 전 dimension 충족
 
 ---
 
-## 4. 대중문화 (pop_culture) — 5 source
+## 4. 대중문화 (pop_culture) — 9 source
 
 원래 8 카테고리의 `technology_cyber_ai consumer surface / media / cultural
-trend / 디지털 콘텐츠 생태` 가 흡수된 메타 카테고리. 1인 발행자의 일반적
-콘텐츠 영역에 가장 가까움.
+trend / 디지털 콘텐츠 생태` 흡수.
 
-| # | Source name | Publisher | URL root | access_method | source_perspective | reliability_tier | subtopic_tags |
-|---|---|---|---|---|---|---|---|
-| 26 | **Pew Research Center** | Pew Research | https://www.pewresearch.org/feed | RSS | neutral | A | technology_cyber_ai |
-| 27 | **Reuters Institute Digital News Report** | Reuters Institute | https://reutersinstitute.politics.ox.ac.uk/our-research (RSS) | RSS | neutral | A | technology_cyber_ai |
-| 28 | **Stanford HAI AI Index Report** | Stanford Human-Centered AI | https://hai.stanford.edu/ai-index (annual) | RSS + manual | neutral | A | technology_cyber_ai |
-| 29 | **MIT Technology Review** | MIT Tech Review | https://www.technologyreview.com/feed | RSS | opportunity_observer | A | technology_cyber_ai |
-| 30 | **OECD AI Policy Observatory** | OECD AI | https://oecd.ai/en (RSS) | RSS | neutral | A | technology_cyber_ai / governance_institutions |
-
-**대중문화 카테고리 perspective 분포**:
-- risk_observer: 0/5 = 0% (≤50% ✓)
-- opportunity_observer: 29 = 1/5 = 20% (≥25% **미달** ⚠️)
-- neutral: 26, 27, 28, 30 = 4/5 = 80% (≥15% ✓)
-
-opportunity_observer 미달 + risk_observer 부재. 추가 후보:
-- risk_observer: Wired security, MIT Tech Review의 일부 cybersecurity 섹션
-- opportunity_observer: a16z research (Tier B 가능성 — commercial bias 검토),
-  Andreessen Horowitz blog
-
----
-
-## 5. 전체 분포 요약
-
-| 카테고리 | 총 | risk_observer | opportunity_observer | neutral | 분포 충족 |
+| # | Source name | Publisher | access | perspective | subtopic_tags |
 |---|---|---|---|---|---|
-| 경제 | 12 | 4 (33%) | 3 (25%) | 5 (42%) | ✓ 모두 충족 |
-| 정책 | 7 | 2 (29%) | 1 (14%) | 4 (57%) | ⚠️ opportunity 미달 |
-| 사회 | 6 | 1 (17%) | 1 (17%) | 4 (67%) | ⚠️ opportunity 미달 |
-| 대중문화 | 5 | 0 (0%) | 1 (20%) | 4 (80%) | ⚠️ opportunity 미달 / risk 부재 |
-| **전체** | **30** | **7 (23%)** | **6 (20%)** | **17 (57%)** | risk ≤50% ✓ / opportunity 25% 경계 / neutral ≥15% ✓ |
+| 42 | Pew Research Center | Pew | RSS | neutral | technology_cyber_ai |
+| 43 | Reuters Institute Digital News Report | Reuters Institute | RSS | neutral | technology_cyber_ai |
+| 44 | Stanford HAI AI Index Report | Stanford HAI | RSS + manual | neutral | technology_cyber_ai |
+| 45 | MIT Technology Review | MIT | RSS | opportunity_observer | technology_cyber_ai |
+| 46 | OECD AI Policy Observatory | OECD AI | RSS | neutral | technology_cyber_ai / governance_institutions |
+| 47 | **KOCCA 콘텐츠산업 동향** | 한국콘텐츠진흥원 | RSS | opportunity_observer | technology_cyber_ai / cultural |
+| 48 | **KOFIC 영상산업 통계** | 영화진흥위원회 | RSS | opportunity_observer | cultural |
+| 49 | **KISDI 정보통신정책분석** | 정보통신정책연구원 | RSS | mixed | technology_cyber_ai / governance_institutions |
+| 50 | **CISA Cybersecurity Advisories** | US CISA | RSS | risk_observer | technology_cyber_ai |
 
-**전체 분포**: risk ≤ 50% ✓ / opportunity ≥ 25% **미달 5%** ✗ / neutral
-≥ 15% ✓.
-
-**REQ-022 / AC-027 적용 범위 = Tier A seed 전체 (30~50 source)** — 카테고리
-subset compliance 는 의무 아님. 현재 30 source 분포는 opportunity_observer
-6/30 = 20% 로 **AC-027 미준수**.
-
-⚠️ **INFRA-1A.6 진입 전 closing 의무** — 30 source 그대로 commit 시
-INFRA-1A.6 acceptance(AC-027) 가 fail. 다음 중 하나로 처리:
-
-1. **opportunity_observer source 최소 +2 추가** (권장 — 30 → 32 source,
-   opportunity 6 → 8 = 25% 충족). 후보:
-   - 정책: **CFR (Council on Foreign Relations)** research feed —
-     governance/international 정책 institutional perspective
-   - 사회: **UN SDG Progress Reports** — development opportunity
-     perspective. 또는 Gates Foundation health reports (Tier 검토 필요)
-   - 대중문화: **a16z research / Future** — 단 commercial bias 검토 필요
-     (Tier B 가능성). 대안: OECD Going Digital Project / WIPO IP
-     statistics 등 institutional opportunity perspective
-2. **neutral 또는 risk_observer 1~2개 drop + opportunity 추가** — 총
-   source 수는 30 유지하면서 분포 reflow. 단 정보 손실
-3. **REQ-022 / AC-027 의 분포 enforcement 를 phase 단위로 완화** (별도 ADR
-   / DEC 필요) — 권장하지 않음 (ADR-0019 INV-0019-5 보존 가치)
-
-v0 turn-key 첫 발행 카테고리(경제, DEC-009)는 단독 분포 충족이라 PUB-1A.5
-진입 자체는 분포 gap 의 blocker 가 아니지만, **INFRA-1A.6 Tier A seed
-commit 은 30→32 reflow 후에 진행**.
-
-경제 단독 분포(4/3/5)는 carry-over reference 로만 활용 — 운영 중 카테고리
-별 균형 점검에 유용하나, AC-027 통과는 전체 seed 기준.
+**대중문화 카테고리 perspective 분포**: risk 1 (11%) / opportunity 3 (33%) /
+neutral 4 (44%) / mixed 1 (11%) — 전 dimension 충족
 
 ---
 
-## 6. 다음 단계 (사용자 review 필요)
+## 5. 전체 분포 — REQ-022 / AC-027 enforcement
 
-1. **사용자 list review** — 30 source 중 빠진 / 잘못된 publisher / 우선
-   순위 재조정 의견. 특히:
-   - 한국 source 추가 권고? (한국개발연구원 KDI / 한국은행 BOK 외 / 산업
-     연구원 KIET / KIEP 등)
-   - paywall source (IEA WEO 본문, MIT Tech Review 일부, IISS 본문) 의
-     Tier 재평가 (abstract만 사용 시 Tier A 유지 가능, 본문 필요 시 Tier
-     B-C)
-   - opportunity_observer 분포 미달 fix를 위한 추가 후보 (CFR / Carnegie /
-     a16z 검토)
-2. **사용자 accept** 후 외부 repo `data/sources_seed.yaml` 또는 SQLite
-   migration INSERT 로 commit.
-3. **INFRA-1A.6 slice** 진입: 30개 source 의 source_policy 3 필드 (archive
-   / raw_cloud / external_llm) + 8 위험 행동 트리거 + access_method 검증
-4. **DEC-009 PUB-1A.5 첫 발행 카테고리 = 경제** 진입: 경제 12 source 중
+| 카테고리 | 총 | risk | opportunity | neutral | mixed | 카테고리 자체 충족 |
+|---|---|---|---|---|---|---|
+| 경제 | 18 | 4 (22%) | 6 (33%) | 8 (44%) | 0 | ✓ |
+| 정책 | 12 | 3 (25%) | 3 (25%) | 5 (42%) | 1 (8%) | ✓ |
+| 사회 | 11 | 1 (9%) | 3 (27%) | 6 (55%) | 1 (9%) | ✓ |
+| 대중문화 | 9 | 1 (11%) | 3 (33%) | 4 (44%) | 1 (11%) | ✓ |
+| **전체** | **50** | **9 (18%)** | **15 (30%)** | **23 (46%)** | **3 (6%)** | ✓ |
+
+**전체 분포 검증** (REQ-022 / AC-027):
+- risk_observer 18% ≤ 50% ✓
+- opportunity_observer 30% ≥ 25% ✓ (안전 마진 5%)
+- neutral 46% ≥ 15% ✓
+- **AC-027 통과 가능**. INFRA-1A.6 진입 blocker 없음.
+
+mixed perspective 3개는 enforcement 분모에 포함되지만 4 dimension 분포
+중 어느 쪽으로도 카운트되지 않음 (REQ-022 ratio 계산 시 risk/opportunity/
+neutral 3개만 합산 — 그러나 mixed 도 valid value 라 source registry 입력
+시 그대로 보존).
+
+---
+
+## 6. 추가 등록 후보 (v0 진행 중 누적)
+
+상한 없음. 1인 운영 부담 안에서 누적:
+
+**경제**:
+- BEA (US Bureau of Economic Analysis) — neutral
+- 일본 BOJ / 중국 PBoC 영문 자료 — risk_observer / mixed
+- 한국 예금보험공사 (금융 안정) — risk_observer
+
+**정책**:
+- Carnegie Endowment — mixed
+- Atlantic Council — risk_observer
+- Asan Institute (한국, 외교/안보 think-tank) — risk_observer / mixed
+- 통일부 RSS — neutral
+
+**사회**:
+- UNHCR (난민) — opportunity_observer
+- ECDC (유럽 질병 관리) — neutral
+- NOAA (미국 해양/대기) — neutral
+- 산림청 / 해양수산부 (한국) — neutral
+- KEEI (에너지경제연구원) — neutral / mixed
+
+**대중문화**:
+- KAIST AI Center — opportunity_observer
+- a16z research (Tier 검토 — commercial bias) — opportunity_observer
+- 한국언론진흥재단 (KPF) — neutral
+- 방송통신위원회 — mixed
+- 한국소비자원 — neutral
+- WIPO (지적재산권) — neutral
+
+추가 시 전체 분포 재계산 (REQ-022 / AC-027 enforcement 가 그대로 적용).
+
+---
+
+## 7. 다음 단계 (사용자 review 필요)
+
+1. **사용자 list review** — 50 source 중 빠진 / 잘못된 publisher / 우선
+   순위 재조정. 특히:
+   - paywall source (IEA WEO 본문 / MIT Tech Review 일부 / IISS 본문 /
+     Gates Foundation publications) 의 Tier 재평가 (abstract 만 사용 시
+     Tier A 유지)
+   - RSS endpoint 확인 (정부 기관 RSS 가 종종 사라지거나 형식 변경 — 등록
+     시 endpoint 검증 의무)
+   - 6 섹션 "추가 등록 후보" 중 v0 진입 시 함께 등록할 source 선택
+2. **사용자 accept** 후 이 repo `data/sources_seed.yaml` 에 commit (또는
+   SQLite migration INSERT). 외부 repo 의존성 없음 — `alxdr3k/k-world-
+   monitor` 자체가 canonical.
+3. **INFRA-1A.6 slice** 진입: 50 source 의 source_policy 3 필드 (archive /
+   raw_cloud / external_llm) + 8 위험 행동 트리거 + access_method + URL
+   endpoint 검증
+4. **DEC-009 PUB-1A.5 첫 발행 카테고리 = 경제** 진입: 경제 18 source 중
    첫 Dossier 주제 선정 (운영자 판단)
 
 ---
@@ -204,9 +220,11 @@ commit 은 30→32 reflow 후에 진행**.
 
 - DEC-004 (v0 4 메타 카테고리)
 - DEC-009 (첫 발행 = 경제)
-- Q-021 (Tier A seed reflow)
+- Q-021 (Tier A seed — no upper cap, this repo canonical)
 - ADR-0016 (Tier A-D + collectability_score + no bot bypass)
 - ADR-0019 (source_perspective tag 분포 강제)
-- REQ-022 (source_perspective 분포 균형 강제)
-- Anthropic API: not used here (research synthesis from public source registries)
-- Public source registries (FRED / IMF / World Bank / OECD / WHO / etc.) — all official endpoints
+- REQ-022 / AC-027 (분포 균형 — Tier A seed set 전체 적용)
+- DEC-001 (이 repo = canonical, vault 외부 repo 형 운영)
+- Public source registries — all official endpoints (FRED / IMF / World
+  Bank / OECD / ECB / KDI / KIEP / KITA / 외교부 / 환경부 / KOCCA /
+  KOFIC / etc.) confirmed official-publisher / RSS / API
