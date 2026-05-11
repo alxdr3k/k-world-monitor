@@ -133,23 +133,23 @@ Storage seams:
 
 | 컴포넌트 | 책임 | 의존성 |
 |---|---|---|
-| Discovery | RSS / API / sitemap polling, manual intake CLI | Source Registry |
+| Discovery | RSS / API / sitemap polling, manual intake CLI. **검색 grounding 보조 = Gemini 2.5 Flash 의 Google Search tool** (선택, Tier 3, 메인/리뷰 X — ADR-0023 INV-0023-5) | Source Registry, Google AI SDK (선택) |
 | Source Registry | Source 정의(publisher) + Document URL 그룹 + reliability_tier + collectability_score + source_policy + source_perspective | Neo4j Source 노드 |
 | Collection Queue | fetch 대상 큐 (priority, dedup, throttle) | SQLite queue 테이블 |
 | Policy Gate | mode-aware 검사 (inline_block / inline_warn / batch_report) — 8 위험 행동 트리거 inline_block | SQLite source_policy + policy_decisions ledger, Neo4j AccessIntervention 노드 |
 | Fetcher | URL → fingerprint Snapshot 노드 (R2 binary는 permitted artifact만) | Neo4j Snapshot + R2, SQLite policy_decisions |
 | Chunker / Indexer | Snapshot 텍스트 → chunk + Neo4j native FTS 인덱스 | Neo4j FTS, SQLite raw_cache_items (TTL) |
-| Extractor (article) | Haiku 4.5 1차 + Sonnet 4.6 escalate (ADR-0006) | Anthropic SDK, run ledger |
-| Extractor (dataset) | parser only, LLM 미사용 | parser libs |
-| Extractor (report) | Haiku 4.5 with structure prompt | Anthropic SDK |
+| Extractor (article) | Tier 2 default = GPT-5 mini (OpenAI). 한국어 long-context 시 Sonnet 4.6 standard override. confidence < 0.85 시 Tier 1 escalate (GPT-5.5 Pro standard) — ADR-0023 + DEC-010 | OpenAI SDK + Anthropic SDK (vendor 추상화 layer), run ledger (vendor/tier/domain_override_reason 필드) |
+| Extractor (dataset) | **Data Science Module** (ADR-0024) — Polars + DuckDB + statsmodels + scipy deterministic. 1000+ rows / 50KB+ payload 는 LLM raw 입력 금지, derived metric 으로 압축 후 LLM (Tier 2) 합성 | Polars, DuckDB, statsmodels, scipy, derived_metric_ledger (SQLite) |
+| Extractor (report) | Tier 2 default = GPT-5 mini with structure prompt + section-by-section page locator | OpenAI SDK + Anthropic SDK |
 | Review Queue | reviewer manual + auto-accept threshold | SQLite review_queue 테이블 |
 | Edge Ledger | Neo4j typed relationships (SUPPORTS / CONTRADICTS / QUALIFIES / UPDATES / SUPERSEDES) (ADR-0013) | Neo4j |
 | Dossier Composer | 주제별 promoted claim + counterclaim 합성 | Neo4j + Markdown promoted_claim |
 | Scenario Composer | drivers/assumptions/branches/falsifier/counterclaim(polarity-symmetric)/monitoring/impact_targets/impact_direction_by_target/transmission_channels + ScenarioRevision ledger | Neo4j Scenario/ScenarioRevision, edges |
-| Scenario Validator | 5종 검사 (ADR-0009 INV-0009-1) + bidirectional balance | Edge Ledger |
-| Thesis Composer | Scenario 압축 → stance + market_stance(optional). 4-format ContentDraft 재사용 anchor | Neo4j Thesis |
+| Scenario Validator | 5종 검사 (ADR-0009 INV-0009-1) + bidirectional balance + **Tier 0 adversarial pass cross-vendor review mandatory** (GPT-5.5 Pro xthink 생성 + Opus 4.7 xhigh review, ADR-0023 + DEC-010) | Edge Ledger, OpenAI SDK + Anthropic SDK (cross-vendor) |
+| Thesis Composer | Scenario 압축 → stance + market_stance(optional). 4-format ContentDraft 재사용 anchor. default = GPT-5.5 Pro standard (Tier 1). **high-stakes 운영자 flag 시 Tier 0 (GPT-5.5 Pro xthink + Opus 4.7 xhigh cross-review mandatory)** — ADR-0023 + DEC-010 | Neo4j Thesis, OpenAI SDK + Anthropic SDK (cross-vendor on flag) |
 | ContentDraft Composer | Thesis + Dossier → draft (format별 분기) + 인용 ledger | Markdown vault |
-| Cite Check | 5 block (stale / retracted / horizon / unit / overclaim) + access_intervention block + 1 warning v1+ (one-sided thesis) | Edge Ledger, Scenario, Anthropic SDK (overclaim), AccessIntervention |
+| Cite Check | 5 block (stale / retracted / horizon / unit / overclaim) + access_intervention block + 1 warning v1+ (one-sided thesis). overclaim LLM judge = GPT-5 nano 생성 + **Haiku 4.5 cross-vendor review mandatory** (Tier 3, ADR-0023 INV-0023-4 + DEC-010) | Edge Ledger, Scenario, OpenAI SDK + Anthropic SDK (cross-vendor), AccessIntervention |
 | Publication Ledger | live / corrected / retracted state + cascade alert | Neo4j Publication |
 | Publishing Site | Astro 5.0 (Content Collection + Zod schema) + Cite/Retraction/Correction 컴포넌트 + pagefind + RSS + vega-lite/mermaid → Cloudflare Pages 호스팅. vault publications/ single source. build-time cite gate (ADR-0015 일부 enforcement) | vault/publications/, Cloudflare Pages, R2 (chart/audio 산출물) |
 | Cross-post Surface | Substack / YouTube / X 발행 (v0 manual, v1+ API integration Q-033). 모든 외부 발행물의 cite footnote가 자체 사이트 URL canonical anchor (ADR-0022 INV-0022-2) | Publishing Site URL |
@@ -256,8 +256,16 @@ SQLite migration).
   record. raw cloud upload 영구 금지.
 - ADR-0005: confidence 단일 필드 폐기 — reliability_tier / extraction_confidence
   / claim_status (8-state) / scenario weight / collectability_score 분해
-- ADR-0006: LLM routing (Haiku 1차 + Sonnet escalate) + parser split +
-  auto-accept
+- ~~ADR-0006~~ (superseded by ADR-0023): LLM routing v1 — Haiku 1차 + Sonnet
+  escalate (Anthropic only)
+- **ADR-0023** (supersedes ADR-0006): LLM routing v2 — GPT default +
+  Anthropic dual-vendor (performance-tiered) + Google exploration-only +
+  minimal 3-stage cross-vendor review (preflight cite check / scenario
+  validate adversarial / high-stakes thesis)
+- **ADR-0024**: Data Science Module — deterministic dataset processing
+  (Polars + DuckDB + statsmodels + scipy) + derived_metric_ledger
+  reproducibility 3-tuple + 1000 rows / 50KB raw dataset → LLM 직접 입력
+  금지
 - **ADR-0013** (supersedes ADR-0007): edge ledger via Neo4j typed
   relationships. v0 5 edge type, v1+ counterclaim multi-relation 4 추가.
 - **ADR-0014**: Neo4j-native feature adoption (APOC + GDS + native vector +

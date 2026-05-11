@@ -33,7 +33,7 @@
 | 0003 | 7-stage pipeline object model with 3-tier source layer | superseded by 0011 | 2026-05-11 |
 | 0004 | Storage tiers — Markdown / SQLite+FTS5 / R2 | superseded by 0012 | 2026-05-11 |
 | 0005 | Confidence decomposition | accepted | 2026-05-11 |
-| 0006 | LLM routing — Haiku 1차 + Sonnet escalate | accepted | 2026-05-11 |
+| 0006 | LLM routing — Haiku 1차 + Sonnet escalate | superseded by 0023 | 2026-05-11 |
 | 0007 | Edge ledger — supports / contradicts / qualifies / updates / supersedes | superseded by 0013 | 2026-05-11 |
 | 0008 | Evidence quote and cite check coverage | superseded by 0015 | 2026-05-11 |
 | 0009 | Scenario validate and revisions ledger | accepted | 2026-05-11 |
@@ -50,6 +50,8 @@
 | 0020 | System metrics framework (6 categories + evaluation harness, staged v0/v1/v2) | accepted | 2026-05-11 |
 | 0021 | Policy learning framework (rule-based, auto-tighten allowed, auto-relax prohibited) | accepted | 2026-05-11 |
 | 0022 | Publishing site — Astro 5.0 + Cloudflare Pages + vault publications/ as source (resolves Q-026 via DEC-006, enables v0 turn-key publish via DEC-005) | accepted | 2026-05-11 |
+| 0023 | LLM routing v2 — GPT default + Anthropic dual-vendor (performance-tiered) + Google exploration-only + minimal cross-vendor review (supersedes 0006) | accepted | 2026-05-11 |
+| 0024 | Data Science Module — deterministic dataset processing layer (parser + derived metric computer) | accepted | 2026-05-11 |
 
 ## Template
 

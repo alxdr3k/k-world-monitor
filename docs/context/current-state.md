@@ -52,8 +52,15 @@ ADR-0011~0021로 supersede됐다.
   + vault publications/ single source — v0 turn-key 결정)
 - **DEC-004 / DEC-005 / DEC-006** (v0 4 메타 카테고리 / v0 turn-key publish
   scope / vault sync trigger 단일화)
-- **DEC-007 / DEC-008 / DEC-009** (retention/R2 lifecycle policy lock /
-  LLM cost/quality discipline lock / v0 첫 발행 카테고리 = 경제)
+- **DEC-007 / ~~DEC-008~~ (superseded by DEC-010) / DEC-009 / DEC-010**
+  (retention/R2 lifecycle policy lock / v0 첫 발행 카테고리 = 경제 / LLM
+  routing v2 multi-vendor + Data Science Module lock)
+- **ADR-0023 (supersedes ADR-0006)** — LLM routing v2 GPT default +
+  Anthropic dual-vendor + Google exploration-only + minimal cross-vendor
+  review
+- **ADR-0024** — Data Science Module (deterministic dataset processing,
+  Polars + DuckDB + statsmodels + scipy, reproducibility 3-tuple, 1000
+  rows / 50KB raw → LLM 직접 입력 금지)
 - **AC-031 갱신 + AC-034 + AC-035 신규 (TEST-034/035 포함)** (4 메타 카테고리
   validation + cross-post canonical cite anchor lint + Astro Content
   Collection Zod schema build-time gate)

@@ -2,12 +2,12 @@
 id: adr-0006
 type: adr
 title: LLM routing — Haiku 1차 + Sonnet escalate, prompt caching, batch API, auto-accept threshold
-status: accepted
+status: superseded
 created_at: 2026-05-11
 updated_at: 2026-05-11
 deciders: [user, claude-opus-4-7]
 supersedes: []
-superseded_by: []
+superseded_by: [adr-0023]
 
 scope:
   in:
