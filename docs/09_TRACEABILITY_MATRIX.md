@@ -78,8 +78,9 @@ Question ↔ Decision ↔ Requirement ↔ Gate/Test ↔ Milestone/Track/Phase/Sl
 - Q-020 (Neo4j GPL v3 boundary) 미해결 → INFRA-1A.2 commit 전 lock 권고
 - Q-021 (Tier A seed — size cap 없음) — `docs/research/source-seed-list-
   2026-05.md` 72 source proposed (경제 22 + 정책 17 + 사회 18 + 대중문화 15,
-  한국 소스 보강 포함). 분포 충족: risk 18% / opportunity 30% / neutral
-  46% — AC-027 통과. 사용자 list review + accept 후 **이 repo** `data/
+  한국 소스 24개 + 글로벌 48개). 분포 충족: risk 14 (19%) / opportunity
+  21 (29%) / neutral 30 (42%) / mixed 7 (10%) — AC-027 통과 (안전 마진
+  4%). 사용자 list review + accept 후 **이 repo** `data/
   sources_seed.yaml` 또는 SQLite migration INSERT commit 시 resolved
   (외부 repo 의존성 없음 — `alxdr3k/k-world-monitor` 자체가 canonical)
 - ~~Q-022~~ **resolved by DEC-004** (v0 4 메타 카테고리)

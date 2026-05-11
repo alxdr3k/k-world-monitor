@@ -43,8 +43,10 @@ ADR-0019).
 
 ### In-scope
 
-- 9-stage 객체 모델 (Source → Document → Snapshot → Claim → Dossier → Scenario
-  → Thesis → ContentDraft → Publication, ADR-0011)
+- **10-stage 객체 모델** (Source → Document → Snapshot → Claim → Dossier
+  → Scenario → **EditorialIntent** → Thesis → ContentDraft → Publication,
+  ADR-0025 supersedes ADR-0011) — EditorialIntent 는 Scenario revision 과
+  Thesis 사이의 anchor, 운영자 명시 lock 의무
 - Source registry + Tier A-D 분류 + collectability_score (ADR-0016)
 - Discovery (RSS / API / sitemap) → Collection Queue → Fetcher (fingerprint
   record, R2 binary 보관은 예외) → Chunker / Indexer → Claim 추출
@@ -117,11 +119,11 @@ ADR-0019).
 
 | ID | 요구사항 | 우선순위 | 관련 AC | Source (Round) | ADR |
 |---|---|---|---|---|---|
-| REQ-001 | 객체 모델은 9-stage(Source → Document → Snapshot → Claim → Dossier → Scenario → Thesis → ContentDraft → Publication)이며 source layer는 4-tier(Source/Document/Snapshot/Claim)로 분리한다 | must | AC-001 | R3, R6 | ADR-0011 |
+| REQ-001 | 객체 모델은 **10-stage**(Source → Document → Snapshot → Claim → Dossier → Scenario → **EditorialIntent** → Thesis → ContentDraft → Publication)이며 source layer는 4-tier(Source/Document/Snapshot/Claim)로 분리한다. EditorialIntent 는 Scenario revision 과 Thesis 사이의 anchor — 운영자 명시 lock 의무 (ADR-0025 INV-0025-4) | must | AC-001 | R3, R6 + ADR-0025 | ADR-0025 (supersedes ADR-0011 object model) |
 | REQ-002 | graph objects(Source, Document, Snapshot, Claim, Dossier, Scenario, Thesis, ContentDraft, Publication, Edge, ScenarioRevision, ManualClaimEntry, AccessIntervention)는 Neo4j Community Edition을 canonical store로 사용한다 | must | AC-002 | R18, R19 | ADR-0012, ADR-0014 |
 | REQ-003 | Snapshot은 fingerprint record(URL, accessed_at, content_hash, locator)다. R2 binary 보관은 예외(open-license dataset / 공식 허용 API / 자체 산출물)로만 허용. 일반 raw text R2 업로드는 영구 금지 (raw_cloud_policy=always_prohibited) | must | AC-003 | R8, R14 | ADR-0012 |
 | REQ-004 | Markdown vault에는 Document hub, Dossier, Scenario, Thesis, ContentDraft, Publication, scenario에 인용된 promoted claim만 둔다. candidate claim 자동 markdown 생성은 금지 | must | AC-004 | R3 | ADR-0012 |
-| REQ-005 | ID 체계는 `src_/doc_/snap_/clm_/dos_/scn_/ths_/drf_/pub_/edge_/run_/aci_/mcl_` 접두 + 단조 증가 식별자다 | must | AC-005 | R3, R6, R18 | ADR-0011 |
+| REQ-005 | ID 체계는 `src_/doc_/snap_/clm_/dos_/scn_/eit_/ths_/drf_/pub_/edge_/run_/aci_/mcl_/met_` 접두 + 단조 증가 식별자다 (eit_ = EditorialIntent ADR-0025, met_ = derived_metric ADR-0024) | must | AC-005 | R3, R6, R18 + ADR-0024 + ADR-0025 | ADR-0025 (supersedes ADR-0011), ADR-0024 |
 | REQ-006 | confidence 단일 필드는 사용하지 않는다. Document `reliability_tier`, Claim `extraction_confidence` + `claim_status`(8-state), Scenario assumptions[] `weight`, Source `collectability_score`로 분해한다 | must | AC-006 | R3, R9, R17 | ADR-0005, ADR-0011, ADR-0016 |
 | REQ-007 | claim evidence는 (quote nullable + locator + quote_hash + quote_reason + storage_level) 5-tuple이다. quote는 schema-level nullable, storage_level=excerpt_evidence일 때만 채워지며 quote_reason 명시 필수 | must | AC-007 | R3, R10 | ADR-0015 |
 | REQ-008 | edge 관계는 Neo4j typed relationships로 저장한다. v0 5종(SUPPORTS / CONTRADICTS / QUALIFIES / UPDATES / SUPERSEDES). frontmatter `supports[]/contradicts[]` 배열은 금지 | must | AC-008 | R3, R18 | ADR-0013 |
@@ -137,7 +139,7 @@ ADR-0019).
 | REQ-018 | Source policy 3 필드 (archive_policy / raw_cloud_policy / external_llm_policy) + mode-aware policy_gate (inline_block / inline_warn / batch_report). 위험 행동은 어느 mode에서도 inline_block. Discovery=inline_warn / Extract·Cache·Embed·Cloud upload=inline_block / 탐색·콘텐츠 제작=batch_report / Publication preflight=inline_block | must | AC-023 | R14, R18 | ADR-0017 |
 | REQ-019 | 탐색·콘텐츠 제작 중 막힌 source는 access_interventions Neo4j 노드에 누적되고 세션 종료 시 batch report. severity 자동 산정(deterministic default, LLM 옵션). unresolved HIGH/CRITICAL은 publication 핵심 근거 사용 금지 | must | AC-024 | R18 | ADR-0017, ADR-0015 |
 | REQ-020 | Manual feedback inbound — `pipeline feedback add|bulk|link|from-report` + `pipeline intervention review <id>` 3-option. manual_claim_entries는 user_written_claim / user_opinion / referenced_quote 3-way 분리 (한 row 한 필드만). raw_text_stored=false 강제 | must | AC-025 | R18 | ADR-0018 |
-| REQ-021 | Scenario는 impact_targets[] + impact_direction_by_target (dict, target별 upside/downside/mixed/neutral) + transmission_channels[]를 보유한다. asymmetric은 derive. Thesis는 stance(constructive/cautionary/neutral/mixed/asymmetric/exploratory) + market_stance(optional v0, 필수 v1; bullish/bearish/range_bound/volatility_up/volatility_down/neutral) | must | AC-026 | R23, R25 | ADR-0019 |
+| REQ-021 | Scenario는 impact_targets[] + impact_direction_by_target (dict, target별 upside/downside/mixed/neutral) + transmission_channels[]를 보유한다. asymmetric은 derive. Thesis는 stance(constructive/cautionary/neutral/mixed/asymmetric/exploratory) + market_stance(optional v0, 필수 v1; bullish/bearish/range_bound/volatility_up/volatility_down/neutral) + **EditorialIntent reference (ADR-0025 INV-0025-2) — Thesis 1개당 정확히 1개 EditorialIntent 와 link. bidirectional_weight_intent (intent) 와 stance + market_stance (thesis) align 의무 (INV-0025-6)** | must | AC-026 | R23, R25 + ADR-0025 | ADR-0019, ADR-0025 |
 | REQ-022 | Source는 source_perspective tag (risk_observer/opportunity_observer/neutral/mixed)를 보유한다. Tier A seed set 전체(size 무관, upper cap 없음 — Q-021)에 대해 분포 균형 강제 (risk_observer ≤ 50%, opportunity_observer ≥ 25%, neutral ≥ 15%; mixed 는 valid value 이지만 ratio 의무 4 dim 중 3 dim 에만 적용) | must | AC-027 | R23 + DEC-009 reflow | ADR-0019 |
 | REQ-023 | RAG `build_evidence_pack`은 v0에서 4 section(supporting_evidence / opposing_evidence / mitigating·amplifying / monitoring_signals)을 출력한다. LLM synthesis prompt는 mode 분리(balanced / specific) | must | AC-028 | R23, R25 | ADR-0019 |
 | REQ-024 | System metrics — v0 측정 9+개 (unsupported_sentence_rate, counterclaim_presence_rate, stale_violation_rate, policy_block_count, manual_claim_entry_rate, db_size_growth_rate, upside_claim_presence_rate, downside_claim_presence_rate, one_sided_warning_rate). 6 카테고리(데이터 품질/운영 성능/Policy safety/콘텐츠 production/추적성/시스템 건강) + evaluation harness | must | AC-029 | R15, R23 | ADR-0020 |
@@ -150,7 +152,7 @@ ADR-0019).
 | ID | 카테고리 | 목표 | 측정 방법 | 관련 AC | Source (Round) | ADR |
 |---|---|---|---|---|---|---|
 | NFR-001 | performance | graph object 1만 건 시점에서 단일 검색 < 1초 (p95) | bench script: Neo4j Community + native FTS cold cache 검색, 1만 graph object fixture (SPIKE-001 갱신 — SQLite+FTS5에서 Neo4j로 대상 변경) | AC-002 | (rubric) | ADR-0012, ADR-0014 |
-| NFR-002 | reproducibility | 동일 source set + scenario 모델로 다른 운영자가 같은 결론 도달 가능 | scenario evidence + edge ledger reproducibility test (수동 + diff) | AC-017 | (rubric) R3 A4 | ADR-0009 |
+| NFR-002 | reproducibility | 동일 source set + scenario revision + **EditorialIntent** 로 다른 운영자가 같은 thesis + draft 결론 도달 가능. (ADR-0024 Data Science Module 의 derived_metric reproducibility 3-tuple + ADR-0025 EditorialIntent anchor 보강) | scenario evidence + edge ledger + EditorialIntent + derived_metric_ledger reproducibility test (수동 + diff) | AC-017 | (rubric) R3 A4 + ADR-0024 + ADR-0025 | ADR-0009, ADR-0024, ADR-0025 |
 | NFR-003 | traceability | 콘텐츠 한 문장 → 원 source까지 5단계 이내 (Publication → ContentDraft → Thesis → Scenario → Claim → Snapshot → Source) — 9-stage 안에서 5단계 이내 유지(선택적 단계 skip) | cite check report에서 trace depth 측정 | AC-018 | (rubric) | ADR-0011 |
 | NFR-004 | cost | 일일 LLM 비용 상한 soft $5/hard $7.5 + 주간 $25 + Tier 0 호출 일일 cap 5회 + backfill 별도 budget bucket (DEC-010). 초과 시 큐 backoff + 알람 | `run_` 단위 비용 ledger (vendor + tier + cross_vendor_review_of + domain_override_reason 필드 포함) + threshold alert + cross_vendor_review_coverage ≥ 0.95 KPI | AC-019 | R3 A1 + DEC-010 reflow | ADR-0023 (supersedes ADR-0006), DEC-010 |
 | NFR-005 | safety | 외부 인용 시 `quote ≤ 200자` 강제 + quote_reason 명시 필수 + storage_level=excerpt_evidence | extract pipeline assertion + cite check | AC-007 | R3, R10 | ADR-0015 |

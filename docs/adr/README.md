@@ -38,7 +38,7 @@
 | 0008 | Evidence quote and cite check coverage | superseded by 0015 | 2026-05-11 |
 | 0009 | Scenario validate and revisions ledger | accepted | 2026-05-11 |
 | 0010 | Stale triggers and review queue throttling | accepted | 2026-05-11 |
-| 0011 | 9-stage pipeline object model with Source + Thesis (supersedes 0003) | accepted | 2026-05-11 |
+| 0011 | 9-stage pipeline object model with Source + Thesis (supersedes 0003) | superseded by 0025 | 2026-05-11 |
 | 0012 | Non-archival storage — Neo4j / SQLite / R2; raw cloud upload prohibited (supersedes 0004) | accepted | 2026-05-11 |
 | 0013 | Edge ledger via Neo4j (supersedes 0007) | accepted | 2026-05-11 |
 | 0014 | Neo4j-native feature adoption (APOC + GDS + native vector + native FTS) + intentional lock-in | accepted | 2026-05-11 |
@@ -52,6 +52,7 @@
 | 0022 | Publishing site — Astro 5.0 + Cloudflare Pages + vault publications/ as source (resolves Q-026 via DEC-006, enables v0 turn-key publish via DEC-005) | accepted | 2026-05-11 |
 | 0023 | LLM routing v2 — GPT default + Anthropic dual-vendor (performance-tiered) + Google exploration-only + minimal cross-vendor review (supersedes 0006) | accepted | 2026-05-11 |
 | 0024 | Data Science Module — deterministic dataset processing layer (parser + derived metric computer) | accepted | 2026-05-11 |
+| 0025 | Editorial Intent layer — 10-stage object model (Scenario → EditorialIntent → Thesis anchor 신설, supersedes 0011 object model) | accepted | 2026-05-11 |
 
 ## Template
 

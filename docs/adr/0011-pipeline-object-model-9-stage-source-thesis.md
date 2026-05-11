@@ -2,12 +2,12 @@
 id: adr-0011
 type: adr
 title: 9-stage pipeline object model with Source + Thesis (supersedes ADR-0003)
-status: accepted
+status: superseded
 created_at: 2026-05-11
 updated_at: 2026-05-11
 deciders: [user, claude-opus-4-7, gpt]
 supersedes: [adr-0003]
-superseded_by: []
+superseded_by: [adr-0025]
 
 scope:
   in:

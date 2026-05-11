@@ -67,7 +67,11 @@ ADR-0011~0021로 supersede됐다.
   review
 - **ADR-0024** — Data Science Module (deterministic dataset processing,
   Polars + DuckDB + statsmodels + scipy, reproducibility 3-tuple, 1000
-  rows / 50KB raw → LLM 직접 입력 금지)
+  rows / 50KB raw → LLM 직접 입력 금지). Stack lock close (2026-05-11).
+- **ADR-0025 (supersedes ADR-0011 object model)** — Editorial Intent layer
+  10-stage object model (Scenario → EditorialIntent → Thesis anchor 신설).
+  운영자 명시 lock 의무, 4-format draft 재사용 anchor, NFR-002
+  reproducibility 강화. ID prefix `eit_` 신규.
 - **AC-031 갱신 + AC-034 + AC-035 신규 (TEST-034/035 포함)** (4 메타 카테고리
   validation + cross-post canonical cite anchor lint + Astro Content
   Collection Zod schema build-time gate)

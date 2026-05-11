@@ -54,13 +54,14 @@ INV-0012-4).
                        │  for metadata)    │  (ADR-0014)
                        └────────┬──────────┘
                                 ▼
-       ┌────── Aggregation / Scenario / Thesis Layer (Neo4j) ──────┐
-       │  Dossier  →  Scenario(impact_targets) →  Thesis  →  Draft │
-       │ (주제별)    (validate +                  (stance +        │
-       │             revisions +                   market_stance,  │
-       │             counterclaim                  4-format        │
-       │             polarity-symmetric)            재사용)        │
-       └───────────────────┬──────────────────────────────────────┘
+  ┌─── Aggregation / Scenario / EditorialIntent / Thesis Layer (Neo4j) ───┐
+  │  Dossier → Scenario(impact_targets) → EditorialIntent → Thesis → Draft │
+  │ (주제별)   (validate + revisions +    (운영자 명시   (stance +   (4-format│
+  │            counterclaim polarity-     lock,           market_     재사용,│
+  │            symmetric)                 ADR-0025)       stance,    intent  │
+  │                                                       intent     reuse  │
+  │                                                       align)    anchor) │
+  └────────────────────────────────┬────────────────────────────────────────┘
                            ▼
                   ┌────────────────────┐
                   │ Cite Check 5+1     │ (5 block + 1 warning v1+,
@@ -147,8 +148,9 @@ Storage seams:
 | Dossier Composer | 주제별 promoted claim + counterclaim 합성 | Neo4j + Markdown promoted_claim |
 | Scenario Composer | drivers/assumptions/branches/falsifier/counterclaim(polarity-symmetric)/monitoring/impact_targets/impact_direction_by_target/transmission_channels + ScenarioRevision ledger | Neo4j Scenario/ScenarioRevision, edges |
 | Scenario Validator | 5종 검사 (ADR-0009 INV-0009-1) + bidirectional balance + **Tier 0 adversarial pass cross-vendor review mandatory** (GPT-5.5 Pro xthink 생성 + Opus 4.7 xhigh review, ADR-0023 + DEC-010) | Edge Ledger, OpenAI SDK + Anthropic SDK (cross-vendor) |
-| Thesis Composer | Scenario 압축 → stance + market_stance(optional). 4-format ContentDraft 재사용 anchor. default = GPT-5.5 Pro standard (Tier 1). **high-stakes 운영자 flag 시 Tier 0 (GPT-5.5 Pro xthink + Opus 4.7 xhigh cross-review mandatory)** — ADR-0023 + DEC-010 | Neo4j Thesis, OpenAI SDK + Anthropic SDK (cross-vendor on flag) |
-| ContentDraft Composer | Thesis + Dossier → draft (format별 분기) + 인용 ledger | Markdown vault |
+| Editorial Intent Composer | Scenario revision → EditorialIntent (purpose / audience / tone / call_to_action / alignment_criteria / exclusion_criteria / bidirectional_weight_intent). LLM 자동 propose (Tier 1 GPT-5.5 Pro standard) → **운영자 명시 lock 의무** (`decided_by_operator = true`, ADR-0025 INV-0025-4) | Neo4j EditorialIntent + Markdown vault `editorial_intents/<eit_id>.md` + CLI `pipeline intent compose / show / lock` |
+| Thesis Composer | EditorialIntent reference + Scenario revision 압축 → stance + market_stance (intent.bidirectional_weight_intent 와 align). 4-format ContentDraft 재사용 anchor. default = GPT-5.5 Pro standard (Tier 1). **high-stakes 운영자 flag 시 Tier 0 (GPT-5.5 Pro xthink + Opus 4.7 xhigh cross-review mandatory)** — ADR-0023 + DEC-010 + ADR-0025 | Neo4j Thesis (`:HAS_INTENT` → EditorialIntent), OpenAI SDK + Anthropic SDK (cross-vendor on flag) |
+| ContentDraft Composer | Thesis + EditorialIntent + Dossier → draft (format별 분기, v0 blog_long only DEC-005) + 인용 ledger. EditorialIntent `:USES_INTENT` reference 의무 (ADR-0025 INV-0025-2). Astro Zod schema 가 `editorial_intent_id` dead-link build fail (ADR-0022 INV-0022-3 확장) | Markdown vault, Neo4j ContentDraft |
 | Cite Check | 5 block (stale / retracted / horizon / unit / overclaim) + access_intervention block + 1 warning v1+ (one-sided thesis). overclaim LLM judge = GPT-5 nano 생성 + **Haiku 4.5 cross-vendor review mandatory** (Tier 3, ADR-0023 INV-0023-4 + DEC-010) | Edge Ledger, Scenario, OpenAI SDK + Anthropic SDK (cross-vendor), AccessIntervention |
 | Publication Ledger | live / corrected / retracted state + cascade alert | Neo4j Publication |
 | Publishing Site | Astro 5.0 (Content Collection + Zod schema) + Cite/Retraction/Correction 컴포넌트 + pagefind + RSS + vega-lite/mermaid → Cloudflare Pages 호스팅. vault publications/ single source. build-time cite gate (ADR-0015 일부 enforcement) | vault/publications/, Cloudflare Pages, R2 (chart/audio 산출물) |
@@ -200,8 +202,10 @@ SQLite migration).
   - `pipeline feedback add|bulk|link|from-report`
   - `pipeline intervention review <id>` (ignore / manual_claim / temp_text)
   - `pipeline scenario validate <id>`
-  - `pipeline thesis compose <scenario_revision_id>`
-  - `pipeline draft compose <thesis_id> --format {blog_long|youtube_long|shorts|newsletter}`
+  - `pipeline intent compose <scenario_revision_id> [--tone ...] [--audience <str>] [--weight-intent ...]` (LLM 자동 propose + 운영자 명시 승인) — ADR-0025
+  - `pipeline intent show <eit_id>` / `pipeline intent lock <eit_id>`
+  - `pipeline thesis compose <scenario_revision_id> --intent <eit_id>`
+  - `pipeline draft compose <thesis_id> --format {blog_long|youtube_long|shorts|newsletter} --intent <eit_id>` (intent reference 의무 — ADR-0025 INV-0025-2)
   - `pipeline publish <draft_id>` (cite check 5+1 gate — vault/publications/
     하위 적합 subdirectory에 ContentDraft 파일 emit)
   - `pipeline metrics report --since <date>`
@@ -256,6 +260,11 @@ SQLite migration).
   record. raw cloud upload 영구 금지.
 - ADR-0005: confidence 단일 필드 폐기 — reliability_tier / extraction_confidence
   / claim_status (8-state) / scenario weight / collectability_score 분해
+- ~~ADR-0011~~ (object model superseded by ADR-0025): 9-stage object model
+- **ADR-0025** (supersedes ADR-0011 object model): 10-stage object model
+  with EditorialIntent — Scenario → EditorialIntent → Thesis anchor. 운영
+  자 명시 lock 의무, 4-format draft 재사용 anchor, NFR-002 reproducibility
+  강화
 - ~~ADR-0006~~ (superseded by ADR-0023): LLM routing v1 — Haiku 1차 + Sonnet
   escalate (Anthropic only)
 - **ADR-0023** (supersedes ADR-0006): LLM routing v2 — GPT default +
