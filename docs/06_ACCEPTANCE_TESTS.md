@@ -36,9 +36,9 @@ Then  <기대 결과>
 | AC-015 | REQ-015 | Given 신규 추출 100건 (mix of reliability + confidence). When review queue에 적재. Then auto-confirm 비율과 수동 review 큐 크기가 ADR-0006 INV-0006-4 룰과 일치 | TEST-015 | defined |
 | AC-016 | REQ-016 | Given confirmed claim. When (a) snapshot 갱신 (b) 시간 경과 (c) counterclaim 등록 중 하나 발생. Then claim_status: confirmed → stale 전이 + 인용 ContentDraft/Publication에 cascade | TEST-016 | defined |
 | AC-017 | NFR-002 | Given 동일 source set + scenario revision id. When 다른 운영자가 cite check + scenario validate 재실행. Then 동일 promoted claim set + 동일 branches 결론에 도달 | manual reproducibility test | defined |
-| AC-018 | NFR-003 | Given Publication. When 인용 trace 추출. Then Publication → ContentDraft → Claim → Snapshot → R2 bytes 5단계로 한 문장이 역추적 가능 | TEST-018 | defined |
+| AC-018 | NFR-003 | Given Publication. When 인용 trace 추출. Then 9-stage anchor를 따라 Publication → ContentDraft → (Thesis →) Scenario revision → (Dossier →) promoted Claim → Snapshot fingerprint → Source 경로로 한 문장이 5단계 이내 역추적 가능 (선택적 단계 skip 허용, ADR-0011 INV-0011-8). R2 bytes는 permitted artifact일 때만 trace 종착점이며 raw third-party text는 미보관 (ADR-0012 INV-0012-3) | TEST-018 | defined |
 | AC-019 | NFR-004 | Given 일별 LLM 비용 상한 (TBD). When run ledger 합산. Then 누적 비용이 상한 미만, 초과 시 큐 throttling 동작 | TEST-019 | defined |
-| AC-020 | NFR-006 | Given Snapshot row. When R2에서 객체 삭제 시도. Then 정책 위반(public bucket이 아니므로 차단)이거나 sha256 + r2_key로 회수 가능 | TEST-020 | defined |
+| AC-020 | NFR-006 | Given Snapshot fingerprint row. When 원문이 변경/소실됨. Then (a) 모든 Snapshot은 content_hash(sha256) diff로 변경 감지 가능 + claim_status가 source_changed / source_unavailable로 자동 전이 (ADR-0011 INV-0011-5, ADR-0012). (b) r2_key가 NULL이 아닌 permitted artifact (open-license dataset / 공식 API / 자체 산출물)만 R2 round-trip으로 회수 가능 — content_hash + r2_key 무결성 verify. (c) raw third-party text는 r2_key=NULL이므로 R2 회수 대상 아님 (raw_cloud_policy=always_prohibited, NFR-008) | TEST-020 | defined |
 | AC-021 | NFR-007 | Given 신규 source type 추가 의도. When extractor interface 확장. Then 기존 article/dataset/report 분기에 영향 없이 dry-run 1건 추가 가능 | TEST-021 + manual | defined |
 | AC-022 | REQ-017 | Given Source registry row. When Tier 분류 / collectability_score / access_method / source_perspective 필드 검사. Then 모든 source가 4 dimension collectability + access_method + Tier (A/B/C/D) + source_perspective tag를 보유한다. source_reliability와 collectability는 독립 입력됐다 (Reuters case 검증) | TEST-022 | defined |
 | AC-023 | REQ-018 | Given fetch / extract / cache / embed / cloud upload 단계. When source_policy 3 필드(archive/raw_cloud/external_llm) + 8 위험 행동 트리거 검사. Then 위험 행동은 어느 mode에서도 inline_block 되고 모든 결정이 policy_decisions ledger에 기록된다 | TEST-023 | defined |
@@ -85,9 +85,9 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-014 | scenario revisions append-only | `tests/scenario/revisions_test.ts` (planned) | AC-014 |
 | TEST-015 | review queue throttling | `tests/review/throttling_test.ts` (planned) | AC-015 |
 | TEST-016 | stale 트리거 3종 | `tests/stale/triggers_test.ts` (planned) | AC-016 |
-| TEST-018 | 5-step trace | `tests/pipeline/trace_test.ts` (planned) | AC-018 |
+| TEST-018 | 9-stage 5-step trace (Publication → Source) | `tests/pipeline/trace_test.ts` (planned) | AC-018 |
 | TEST-019 | run ledger cost throttling | `tests/cost/ledger_test.ts` (planned) | AC-019 |
-| TEST-020 | R2 durability | `tests/storage/r2_durability_test.ts` (planned) | AC-020 |
+| TEST-020 | Snapshot fingerprint durability + content_hash diff + permitted artifact R2 round-trip | `tests/storage/snapshot_fingerprint_test.ts` (planned) | AC-020 |
 | TEST-021 | extractor interface dry-run | `tests/extraction/interface_test.ts` (planned) | AC-021 |
 | TEST-022 | Source registry Tier + collectability + perspective | `tests/source/registry_test.ts` (planned) | AC-022 |
 | TEST-023 | policy gate mode-aware + 8 위험 행동 | `tests/policy/gate_test.ts` (planned) | AC-023 |
