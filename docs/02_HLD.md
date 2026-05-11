@@ -126,7 +126,7 @@ Storage seams:
                                   audit export (raw third-party text 업로드 영구 금지)
   Cloudflare Pages (host)      ← vault/publications/ Astro build artifact —
                                   git push trigger (DEC-006), incremental deploy.
-                                  vendor surface는 R2 + Anthropic + CF Pages 통합
+                                  vendor surface는 R2 + OpenAI (default LLM) + Anthropic (cross-vendor review + override) + Google AI Studio (optional 탐색 grounding, Tier 3 fallback) + CF Pages 통합
                                   (ADR-0014 intentional lock-in 연장, ADR-0022 INV-0022-5)
 ```
 
