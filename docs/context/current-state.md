@@ -41,6 +41,13 @@ ADR-0011~0021로 supersede됐다.
   graph store가 ADR로 lock — ADR-0011 + ADR-0012 + ADR-0013)
 - canonical ledger: `docs/04_IMPLEMENTATION_PLAN.md`
 
+## External services / credentials
+
+- **API key 발급 완료** (2026-05-11): OpenAI / Anthropic / Google AI Studio
+  (Gemini) — v0 turn-key 진입 직전 Doppler 또는 환경 변수 등록 의무
+  (`docs/05_RUNBOOK.md` Publishing Site Deployment 섹션).
+- Cloudflare R2 + Cloudflare Pages: 발급 상태 확인 (P0-M2 ~ P0-M6 진입 직전).
+
 ## Implemented
 
 코드 구현은 아직 없다. 현재까지 채워진 것은 문서 기반 architecture 합의:

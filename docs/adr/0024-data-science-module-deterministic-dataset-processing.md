@@ -145,20 +145,42 @@ Dossier / Scenario / Thesis 합성 단계
 - 각 spec 은 single function `transform(df, params) -> derived_metric` 형식
 - spec_sha256 = SHA256(spec 파일 본문). run_ledger 에 기록.
 
-### Library stack 권고 (v0 entry)
+### Library stack lock (v0 entry, 2026-05-11 lock close)
 
-| 도구 | 용도 | 비고 |
+**Lock 결정** (대안 5종 재검토 후 — A/B 섹션 참조):
+
+| 도구 | 용도 | 버전 lock | 비고 |
+|---|---|---|---|
+| **Python** | runtime | 3.12.x | uv lock 의무 (PRE-0024-1 + INV-0024-2 reproducibility 3-tuple) |
+| **Polars** | DataFrame primary | latest stable | Rust 기반 LazyFrame, pandas 대비 5~10x 빠름 + 메모리 효율 |
+| **DuckDB** | SQL on parquet / CSV / API response | latest stable | embedded analytical DB, **R2 S3 native 지원** (httpfs extension) — R2 와 자연 정합 |
+| **statsmodels** | time series (ARIMA / Granger causality / state-space / GARCH) | latest stable | macro / 계량경제 표준 라이브러리 |
+| **scipy.stats** | distribution / hypothesis test / correlation | latest stable | |
+| **numpy** | numerical primitive | latest stable | |
+| **pandas** | **legacy compat 용으로만 유지** | latest stable | 신규 코드는 Polars 사용 — pandas 는 기존 외부 example / tutorial 호환만 |
+| **jq** (Python `pyjq` 또는 CLI `jq`) | JSON 변환 (API response → row) | latest stable | |
+| **uv** | Python 의존성 lock + 빠른 install | latest stable | `uv lock` → `library_version_lock_sha256` 산출 |
+
+#### 대안 재검토 결과 (2026-05-11 lock close)
+
+| 대안 stack | 결과 | 결정 근거 |
 |---|---|---|
-| **Polars** | DataFrame primary | Rust 기반, lazy eval, pandas 보다 빠르고 메모리 효율 |
-| **DuckDB** | SQL on parquet / CSV / API response | embedded analytical DB, R2 와 자연 정합 |
-| **statsmodels** | time series (ARIMA / Granger causality) | macro/금융 분석 표준 |
-| **scipy.stats** | distribution / hypothesis test / correlation | |
-| **numpy** | numerical primitive | |
-| **pandas** | legacy compat (필요시만) | |
-| **jq** | JSON 변환 (API response → row) | CLI / Python `pyjq` |
+| **A. Polars + DuckDB + statsmodels + scipy (Python) — 본 ADR 권고** | **lock close** | Rust 기반 LazyFrame + R2 S3 native + macro/econ 통계 표준 + uv lock 으로 reproducibility 3-tuple 가능 |
+| B. Polars JS + DuckDB Node + simple-statistics (100% bun, TypeScript) | reject | statsmodels 의 TS 동급 부재 (Granger / GARCH / state-space). simple-statistics basic only — macro 분석 부족 |
+| C. R tidyverse + fable + forecast | reject | 1인 운영 학습 곡선 + LLM agent R 능숙도 ↓ + 3-stack 부담 (Python/TS/R) |
+| D. Julia DataFrames.jl + StatsBase + StateSpaceModels | reject | 생태 빈약 + LLM agent 약함 |
+| E. Pandas-only (legacy) | partial accept | Polars legacy compat 용으로만 유지 (신규 코드는 Polars) |
+| F. DuckDB only (SQL-first, Python 통계 없이) | reject | 통계 분석 (ARIMA / GARCH) 부족 — statsmodels 없으면 macro/econ 분석 불가능 |
 
-v0 entry stack 최종 선택은 INFRA-1A.2 시점에 lock (Python 3.12 + Polars +
-DuckDB + statsmodels + scipy 권고 default).
+#### bun / TypeScript 메인 stack 과 hybrid
+
+본 프로젝트의 메인 stack 은 bun + TypeScript 이고 Data Science Module 은
+Python. hybrid 통신 방식 (subprocess invoke / Python REPL via stdio / bun-py
+bridge) 의 최종 선택은 INFRA-1A.2 (Cypher schema + SQLite migration) commit
+직전에 lock. 권장 default = **subprocess invoke (`bun spawn` → `python -m
+transforms.<spec_id>` → stdin JSON / stdout derived metric JSON)**, derived
+metric ledger row 는 SQLite 에 직접 INSERT (Python ↔ TypeScript 양쪽
+read).
 
 ### Reproducibility 3-tuple
 
