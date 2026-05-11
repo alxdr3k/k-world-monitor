@@ -147,14 +147,36 @@ opportunity_observer 미달 + risk_observer 부재. 추가 후보:
 | 대중문화 | 5 | 0 (0%) | 1 (20%) | 4 (80%) | ⚠️ opportunity 미달 / risk 부재 |
 | **전체** | **30** | **7 (23%)** | **6 (20%)** | **17 (57%)** | risk ≤50% ✓ / opportunity 25% 경계 / neutral ≥15% ✓ |
 
-**전체 분포**: risk ≤ 50% ✓ / opportunity ≥ 25% **경계 미달 5%** / neutral
+**전체 분포**: risk ≤ 50% ✓ / opportunity ≥ 25% **미달 5%** ✗ / neutral
 ≥ 15% ✓.
 
-opportunity_observer 분포 미달은 정책/사회/대중문화 카테고리에서 발생.
-경제 카테고리 단독으로는 분포 충족. v0 turn-key 발행이 경제 카테고리이
-므로 **v0 진입 자체는 가능**하되, 정책/사회/대중문화 카테고리 누적 시점
-에 opportunity_observer source 추가 등록 권고 (예 CFR, IOM 외 다른 글로벌
-agency, a16z 검토 등).
+**REQ-022 / AC-027 적용 범위 = Tier A seed 전체 (30~50 source)** — 카테고리
+subset compliance 는 의무 아님. 현재 30 source 분포는 opportunity_observer
+6/30 = 20% 로 **AC-027 미준수**.
+
+⚠️ **INFRA-1A.6 진입 전 closing 의무** — 30 source 그대로 commit 시
+INFRA-1A.6 acceptance(AC-027) 가 fail. 다음 중 하나로 처리:
+
+1. **opportunity_observer source 최소 +2 추가** (권장 — 30 → 32 source,
+   opportunity 6 → 8 = 25% 충족). 후보:
+   - 정책: **CFR (Council on Foreign Relations)** research feed —
+     governance/international 정책 institutional perspective
+   - 사회: **UN SDG Progress Reports** — development opportunity
+     perspective. 또는 Gates Foundation health reports (Tier 검토 필요)
+   - 대중문화: **a16z research / Future** — 단 commercial bias 검토 필요
+     (Tier B 가능성). 대안: OECD Going Digital Project / WIPO IP
+     statistics 등 institutional opportunity perspective
+2. **neutral 또는 risk_observer 1~2개 drop + opportunity 추가** — 총
+   source 수는 30 유지하면서 분포 reflow. 단 정보 손실
+3. **REQ-022 / AC-027 의 분포 enforcement 를 phase 단위로 완화** (별도 ADR
+   / DEC 필요) — 권장하지 않음 (ADR-0019 INV-0019-5 보존 가치)
+
+v0 turn-key 첫 발행 카테고리(경제, DEC-009)는 단독 분포 충족이라 PUB-1A.5
+진입 자체는 분포 gap 의 blocker 가 아니지만, **INFRA-1A.6 Tier A seed
+commit 은 30→32 reflow 후에 진행**.
+
+경제 단독 분포(4/3/5)는 carry-over reference 로만 활용 — 운영 중 카테고리
+별 균형 점검에 유용하나, AC-027 통과는 전체 seed 기준.
 
 ---
 
