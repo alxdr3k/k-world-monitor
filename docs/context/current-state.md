@@ -131,10 +131,12 @@ ADR-0011~0021로 supersede됐다.
 - `docs/current/CODE_MAP.md`, `DATA_MODEL.md`, `RUNTIME.md`, `OPERATIONS.md`,
   `TESTING.md`: 코드 미존재. Neo4j Cypher schema + SQLite relational schema 합의
   후 갱신 필요
-- `docs/06_ACCEPTANCE_TESTS.md`: Round 3 lock 기준 AC로 작성됨 — Round 25
-  canonical 반영 펜딩 (AC-022~AC-033 신설 필요)
-- `docs/09_TRACEABILITY_MATRIX.md`: REQ-017~REQ-026 + NFR-008/NFR-009 trace row
-  추가 필요
+- `docs/06_ACCEPTANCE_TESTS.md`: Round 25 canonical 반영 완료 (AC-022~AC-033 +
+  TEST-022~TEST-033 신규, DEC-003). 코드 도입 시 TEST 위치 `(planned)` →
+  실제 경로 갱신 필요
+- `docs/09_TRACEABILITY_MATRIX.md`: Round 25 canonical 반영 완료 (TRACE-001~020
+  supersede 표시 + TRACE-021~033 신규). gate evidence는 코드 / SPIKE 결과
+  누적 후 갱신
 
 ## Links
 
