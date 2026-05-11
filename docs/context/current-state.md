@@ -135,6 +135,7 @@ ADR-0011~0021로 supersede됐다.
    마이그레이션 commit
 4. SPIKE-001 재정의: Neo4j Community + native FTS 1만 graph object < 1초 p95
    (NFR-001)
+5. post-merge cleanup: commit `99b0993` 이후 stale codex review 재확인 + main latest commit 신규 review 도착 시 cleanup branch에서 thread resolve/outdated 정리
 
 ## Current risks / unknowns
 
