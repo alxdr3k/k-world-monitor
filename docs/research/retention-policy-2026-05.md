@@ -41,7 +41,8 @@
 
 | 기준 | Trigger 정의 | Action | 주요 위험 |
 |---|---|---|---|
-| **access count + last_accessed_at** | `last_accessed_at < now - 90d AND access_count < 2` (raw cache, dossier hot tier) | tier transition or soft-delete | 사용량 낮은 long-tail 인용물 누락 — publication에 cited 되었는지 cross-check 필수 |
+| **dossier hot tier — access count + last_accessed_at** | `last_accessed_at < now - 90d AND access_count < 2` (dossier export hot 한정) | tier transition (hot → IA), soft-delete 아님 | 사용량 낮은 long-tail 인용물 누락 — publication에 cited 되었는지 cross-check 필수 |
+| **raw_cache TTL + LRU (per-item clamped)** | `fetched_at < now - clamp(ttl_override ?? ttl_ceiling, ttl_floor=24h, ttl_ceiling=7d)` OR `last_accessed_at < now - clamp(...)` (raw_cache_items 한정, ADR-0021 INV-0021-6) | hard-delete (local FS unlink + sqlite row delete) + `policy_decisions` 발행 | **7d hard ceiling**. `ttl_override` 는 24h~7d 범위로 강제 clamp, LRU idle window도 동일 clamped TTL을 따른다 (운영자 명시 override의 효과를 LRU에서도 honor — INV-0021-6 위반 차단). R2 진입 절대 금지 |
 | **upstream snapshot supersedes** | 동일 `Source.id`에 newer `content_hash` snapshot가 등장 + 구 snapshot이 어떤 Claim/Dossier에도 cited 안 됨 | 구 snapshot collapse (canonical만 keep) | cited 여부 누락 시 5단계 trace 단절 |
 | **claim retraction** | `Claim.status = retracted` + downstream Dossier 없음 | soft-delete + tombstone | retraction 자체가 evidence — 절대 hard-delete 금지, tombstone 영구 |
 | **scenario_revisions 상위 버전** | head revision N에 대해 N-6 이하 revision | collapse (delta만 keep) | 외부 발간된 revision은 보호 (publication FK check) |
@@ -109,24 +110,34 @@ def expire_raw_cache(now, ttl_floor, ttl_ceiling):
     ADR-0021 INV-0021-6 enforcement:
       - per-item ttl_override must be clamped to [ttl_floor, ttl_ceiling]
         (24h ~ 7d). NULL override → ttl_ceiling 적용.
-      - LRU last_accessed_at 기반 evict + fetched_at 기반 hard ceiling.
+      - fetched_at 기반 hard ceiling = absolute age 만료.
+      - LRU last_accessed_at 기반 evict = idle window. idle window 도
+        per-item clamped effective_ttl 을 따른다 — ttl_override 가 7d 이면
+        7d 미접근 시 evict, NULL/default 이면 ttl_ceiling(7d) 미접근 시
+        evict. ttl_floor(24h) 를 idle window 로 쓰면 명시 override 가
+        무력화되므로 금지.
       - finalize/abandon 즉시 삭제는 본 batch 밖에서 처리됨.
     """
     rows = sqlite.query("""
         SELECT id, cache_key, fetched_at, last_accessed_at, ttl_override
         FROM raw_cache_items
         WHERE
-            -- per-item TTL (clamped to floor..ceiling)
+            -- per-item TTL on fetched_at (clamped to floor..ceiling):
+            -- absolute age hard ceiling
             fetched_at < ? - MIN(MAX(COALESCE(ttl_override, ?), ?), ?)
-            -- LRU: 미접근 floor 초과
-            OR last_accessed_at < ? - ?
+            -- LRU on last_accessed_at: idle window = same clamped
+            -- effective_ttl. 운영자 명시 ttl_override 의 효과를 LRU 에서도
+            -- honor (INV-0021-6 의 per-item TTL 의미 보존)
+            OR last_accessed_at < ? - MIN(MAX(COALESCE(ttl_override, ?), ?), ?)
     """, [
         now,
-        ttl_ceiling,  # default if no override
-        ttl_floor,    # lower clamp
-        ttl_ceiling,  # upper clamp (hard ceiling)
+        ttl_ceiling,  # fetched_at: default if no override
+        ttl_floor,    # fetched_at: lower clamp
+        ttl_ceiling,  # fetched_at: upper clamp (hard ceiling)
         now,
-        ttl_floor,    # idle LRU window
+        ttl_ceiling,  # last_accessed_at: default if no override
+        ttl_floor,    # last_accessed_at: lower clamp
+        ttl_ceiling,  # last_accessed_at: upper clamp (hard ceiling)
     ])
     for r in rows:
         # raw 파일은 local FS only (R2 진입 금지 INV-0012-3/4)
@@ -273,7 +284,7 @@ def monthly_retention_job(now):
 3. **soft-delete + tombstone + 14d grace + policy_decisions log**를 모든 delete 경로의 기본 패턴.
 4. **항상 보존 목록은 코드에 list로 박고 batch job에서 reject**. 단일 `RETENTION_PROTECTED_KINDS` 상수.
 5. **IA transition은 1년 이상 cold-ish data만**. retrieval cost 미미해서 retroactive verification에 부담 없음.
-6. **raw_cache_items는 R2 진입 절대 금지** (ADR-0012). local FS + SQLite metadata only, **TTL 24h~7d 범위 (ADR-0021 INV-0021-6)** — ttl_override는 이 범위로 clamp, last_accessed_at 기반 LRU, finalize/abandon 시 동기 즉시 삭제.
+6. **raw_cache_items는 R2 진입 절대 금지** (ADR-0012). local FS + SQLite metadata only, **TTL 24h~7d 범위 (ADR-0021 INV-0021-6)** — ttl_override는 이 범위로 clamp, fetched_at hard ceiling + last_accessed_at LRU 둘 다 같은 clamped effective_ttl 을 사용 (ttl_floor 를 LRU idle window 로 쓰면 명시 override 가 무력화됨 — 금지), finalize/abandon 시 동기 즉시 삭제.
 7. **Q-027 lock 권장값** (변경 없음, 추가 명시): Neo4j dump 30d + SQLite 90d + JSONL audit 1y hot → 무기한 IA + derived publication 무기한 + dataset versioned + EOL grace 12mo.
 8. **연 1회 retention drill**: 임의 publication 하나 골라서 5+1 trace 전부 reachable한지 수동 verify. 깨지면 batch 정책 재검토.
 
