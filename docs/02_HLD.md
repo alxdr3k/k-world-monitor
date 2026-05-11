@@ -72,7 +72,29 @@ INV-0012-4).
                   ┌────────────────────┐
                   │   Publication      │  (live / corrected /
                   │   ledger           │   retracted, cascade)
-                  └────────────────────┘
+                  └────────┬───────────┘
+                           ▼
+        ┌──────────────────────────────────────────────────┐
+        │ Publishing Site (ADR-0022)                       │
+        │ ┌──────────────────────────────────────────────┐ │
+        │ │ vault/publications/ (single source)          │ │
+        │ │  ├─ blog_long/  → /posts/[slug]   (v0 활성)  │ │
+        │ │  ├─ newsletter/ → /newsletter/[slug] (v1+)   │ │
+        │ │  ├─ youtube_long/ → /videos/[slug]   (v1+)   │ │
+        │ │  └─ shorts/    → /shorts/[slug]      (v1+)   │ │
+        │ └──────────────────────────────────────────────┘ │
+        │ Astro 5.0 (Content Collection + Zod schema)      │
+        │   + <Cite/> / <RetractionBanner/> / <Correction- │
+        │     Ledger/> components (build-time cite gate)   │
+        │ + pagefind (client-side full-text)               │
+        │ + vega-lite / mermaid (chart / diagram)          │
+        │ + @astrojs/rss (4 format별 feed)                 │
+        │ → Cloudflare Pages (git push trigger, DEC-006)   │
+        │                                                  │
+        │ External cross-post (manual v0, auto v1+ Q-033): │
+        │   Substack / YouTube / X — cite anchor는 자체    │
+        │   사이트 URL canonical (INV-0022-2)              │
+        └──────────────────────────────────────────────────┘
 
 Lateral (모든 단계 횡단):
   ┌─────────────────────────────────────────────┐
@@ -85,7 +107,11 @@ Lateral (모든 단계 횡단):
   └─────────────────────────────────────────────┘
 
 Storage seams:
-  Markdown vault (curated)     ← promoted Claim, Dossier, Scenario, Thesis, Draft, Pub
+  Markdown vault (curated)     ← internal: Document hub, promoted Claim, Dossier,
+                                  Scenario, Thesis, ContentDraft (drafts)
+                                  publishing: vault/publications/{blog_long,
+                                  newsletter, youtube_long, shorts}/ —
+                                  자체 사이트 single source (ADR-0022 INV-0022-1)
   Neo4j Community (canonical)  ← Source, Document, Snapshot, Claim, Dossier, Scenario,
                                   Thesis, ContentDraft, Publication, Edge,
                                   ScenarioRevision, ManualClaimEntry, AccessIntervention
@@ -95,8 +121,12 @@ Storage seams:
                                   metrics_run/daily/alerts, evaluation_runs/cases,
                                   retrieval_pack_metrics, research_session, raw_cache_items
   R2 (permitted artifacts)     ← open-license dataset, 공식 허용 API 응답,
-                                  자체 산출물(차트/export), 월별 JSONL audit export
-                                  (raw third-party text 업로드 영구 금지)
+                                  자체 산출물(차트/export/v1+ TTS audio), 월별 JSONL
+                                  audit export (raw third-party text 업로드 영구 금지)
+  Cloudflare Pages (host)      ← vault/publications/ Astro build artifact —
+                                  git push trigger (DEC-006), incremental deploy.
+                                  vendor surface는 R2 + Anthropic + CF Pages 통합
+                                  (ADR-0014 intentional lock-in 연장, ADR-0022 INV-0022-5)
 ```
 
 ## Components
@@ -121,6 +151,8 @@ Storage seams:
 | ContentDraft Composer | Thesis + Dossier → draft (format별 분기) + 인용 ledger | Markdown vault |
 | Cite Check | 5 block (stale / retracted / horizon / unit / overclaim) + access_intervention block + 1 warning v1+ (one-sided thesis) | Edge Ledger, Scenario, Anthropic SDK (overclaim), AccessIntervention |
 | Publication Ledger | live / corrected / retracted state + cascade alert | Neo4j Publication |
+| Publishing Site | Astro 5.0 (Content Collection + Zod schema) + Cite/Retraction/Correction 컴포넌트 + pagefind + RSS + vega-lite/mermaid → Cloudflare Pages 호스팅. vault publications/ single source. build-time cite gate (ADR-0015 일부 enforcement) | vault/publications/, Cloudflare Pages, R2 (chart/audio 산출물) |
+| Cross-post Surface | Substack / YouTube / X 발행 (v0 manual, v1+ API integration Q-033). 모든 외부 발행물의 cite footnote가 자체 사이트 URL canonical anchor (ADR-0022 INV-0022-2) | Publishing Site URL |
 | Run Ledger | 모든 LLM/parser run의 (model, tokens, cost, cached_tokens, batch_id) 기록 | SQLite run 테이블 |
 | Stale Worker | time / snapshot_diff / counterclaim 트리거 (ADR-0010) | Edge Ledger, snapshot content_hash |
 | Manual Feedback CLI | `pipeline feedback add\|bulk\|link\|from-report`, `pipeline intervention review <id>` 3-option | Neo4j ManualClaimEntry, AccessIntervention |
@@ -170,15 +202,23 @@ SQLite migration).
   - `pipeline scenario validate <id>`
   - `pipeline thesis compose <scenario_revision_id>`
   - `pipeline draft compose <thesis_id> --format {blog_long|youtube_long|shorts|newsletter}`
-  - `pipeline publish <draft_id>` (cite check 5+1 gate)
+  - `pipeline publish <draft_id>` (cite check 5+1 gate — vault/publications/
+    하위 적합 subdirectory에 ContentDraft 파일 emit)
   - `pipeline metrics report --since <date>`
-  - `pipeline vault-sync` (publication 시점 자동 + manual trigger, Q-026)
+  - ~~`pipeline vault-sync`~~ — DEC-006 으로 v0에서 제거. vault publications/
+    가 자체 사이트 single source 이므로 git push 가 단일 sync trigger.
+    v1+ 외부 플랫폼 auto cross-post(Q-033) 도입 시 재도입 검토
+  - `pipeline site build` (선택, Astro local preview용 — Cloudflare Pages
+    가 git push 시 자동 build이므로 운영에는 불필요)
 - HTTP API는 PUB 단계 이후 검토.
 - 이벤트/메시지: GitHub Actions cron / 로컬·자체 서버 cron (self-host only)
 - 외부 통합:
   - Anthropic SDK (Haiku 4.5 + Sonnet 4.6, prompt caching, batch API)
   - Cloudflare R2 (S3 compatible API, permitted artifact only)
+  - **Cloudflare Pages** (자체 사이트 호스팅 — git push trigger, ADR-0022)
   - 소스별 RSS / API client (Discovery, Tier A)
+  - v1+ Substack / YouTube Data / X API (auto cross-post — Q-033)
+  - v1+ TTS provider API (ElevenLabs / OpenAI TTS / Coqui self-host — Q-031)
 - Neo4j 접속: bolt://localhost:7687 (self-host Docker / binary) + APOC + GDS
   plugin
 
@@ -235,10 +275,17 @@ SQLite migration).
 - **ADR-0020**: System metrics framework (6 카테고리 + evaluation harness).
 - **ADR-0021**: Policy learning framework (rule-based, auto-tighten /
   auto-relax 분리).
+- **ADR-0022**: Publishing site — Astro 5.0 + Cloudflare Pages + vault
+  publications/ single source. Build-time cite gate (Zod schema), cite
+  anchor canonical, correction visibility 컴포넌트. ContentDraft 4-format
+  1:1 매핑.
 
 ## Open Questions
 
-- Q-001 ~ Q-030: PRD §Open Questions 참조 (per-file `docs/questions/Q-<NNN>.md`)
+- Q-001 ~ Q-034: PRD §Open Questions 참조 (per-file `docs/questions/Q-<NNN>.md`).
+  resolved: Q-022 (DEC-004), Q-026 (DEC-006).
+  신규 v1+: Q-031 (TTS), Q-032 (4-format auto-generate phasing), Q-033 (외부
+  플랫폼 auto cross-post), Q-034 (auto retraction trigger)
 
 ## Related Requirements
 
@@ -273,7 +320,10 @@ SQLite migration).
   build_evidence_pack (ADR-0019)
 - REQ-024 (metrics 6 카테고리 + harness) → Metrics Collector (ADR-0020)
 - REQ-025 (Policy learning rule-based) → Policy Learner (ADR-0021)
-- REQ-026 (카테고리 8개) → Source Registry tag + Dossier topic
+- REQ-026 (v0 4 메타 카테고리) → Source Registry tag + Dossier topic
+  (DEC-004 supersedes Q-022)
+- REQ-027 (자체 사이트 publishing primary + build-time cite gate +
+  cite anchor canonical) → Publishing Site 컴포넌트 (ADR-0022)
 - NFR-001 (1만건 < 1s p95) → Neo4j native FTS + index 정책 (SPIKE-001로 검증)
 - NFR-002 (reproducibility) → scenario_revisions + edge ledger (ADR-0009)
 - NFR-003 (5단계 trace) → 9-stage object model + ID propagation (ADR-0011)
@@ -286,3 +336,5 @@ SQLite migration).
   ADR-0017)
 - NFR-009 (bidirectional balance) → Metrics Framework + Cite Check warning
   (ADR-0019, ADR-0020)
+- NFR-010 (publish_traceability — 외부 플랫폼 cite footnote 100% 자체 사이트
+  URL anchor) → Cross-post lint + ADR-0022 INV-0022-2

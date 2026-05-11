@@ -28,7 +28,8 @@ ADR-0019).
   - 시나리오의 가정·반증조건·반대 증거를 모두 추적 (counterclaim first 강제,
     ADR-0009, ADR-0019 양방향)
   - 같은 Thesis로 블로그/유튜브 long/shorts/뉴스레터 4 format 재사용
-    (ADR-0011)
+    (ADR-0011). v0 turn-key 활성 format은 blog_long 1개 (DEC-005). 나머지
+    3 format은 v1+ phasing (Q-032)
   - 콘텐츠의 모든 주장이 source claim까지 5단계 이내 역추적 (publication
     preflight 5-check, ADR-0015)
 - 비즈니스 목표:
@@ -77,6 +78,12 @@ ADR-0019).
   prohibited, ADR-0021)
 - LLM 비용 가드(Haiku 1차 + Sonnet escalate, prompt caching, batch API,
   auto-accept threshold, ADR-0006)
+- **자체 사이트 publishing primary** (Astro 5.0 + Cloudflare Pages + vault
+  publications/ single source) — ContentDraft 4-format 매핑, build-time
+  cite gate (Zod schema), correction visibility 컴포넌트 (ADR-0022)
+- **v0 turn-key publish scope** — blog_long 1개 + 자체 사이트 + manual
+  Substack/YouTube/X cross-post + manual correction approve. TTS deferred,
+  auto retraction deferred (DEC-005)
 
 ### Out-of-scope
 
@@ -86,6 +93,14 @@ ADR-0019).
 - 단일 LLM extractor로 article / dataset / report 통합 처리 (parser 분리 —
   ADR-0006)
 - 자동 publish 자동화 (사람 운영자가 최종 발행 결정)
+- **v0 TTS 파이프라인** (youtube_long / shorts script → audio 변환은 v1+
+  외주 또는 자체 — Q-031)
+- **v0 외부 플랫폼 auto cross-post** (Substack / YouTube / X API
+  integration 은 v1+ — Q-033)
+- **v0 자동 retraction trigger** (manual approve only — auto trigger는 v1+
+  cite check / access_intervention 기반 일부 자동화 — Q-034)
+- **Dossier / Scenario / Thesis / promoted Claim 의 자체 사이트 공개 노출**
+  (internal canonical store 유지 — ADR-0022 INV-0022-4, DEC-005)
 - **봇 감지 우회를 production dependency로** (ADR-0016 INV-0016-1)
 - **Raw third-party text의 클라우드 업로드** (ADR-0012 INV-0012-3, raw_cloud_policy=always_prohibited default)
 - **다양한 graph DB 동시 지원 / vendor-neutral 마이그레이션 자동화** (ADR-0014
@@ -126,7 +141,8 @@ ADR-0019).
 | REQ-023 | RAG `build_evidence_pack`은 v0에서 4 section(supporting_evidence / opposing_evidence / mitigating·amplifying / monitoring_signals)을 출력한다. LLM synthesis prompt는 mode 분리(balanced / specific) | must | AC-028 | R23, R25 | ADR-0019 |
 | REQ-024 | System metrics — v0 측정 9+개 (unsupported_sentence_rate, counterclaim_presence_rate, stale_violation_rate, policy_block_count, manual_claim_entry_rate, db_size_growth_rate, upside_claim_presence_rate, downside_claim_presence_rate, one_sided_warning_rate). 6 카테고리(데이터 품질/운영 성능/Policy safety/콘텐츠 production/추적성/시스템 건강) + evaluation harness | must | AC-029 | R15, R23 | ADR-0020 |
 | REQ-025 | Policy learning은 rule-based, "auto-tighten allowed, auto-relax prohibited". v0 Pattern 1 (source policy refinement). 자동 적용 X — propose만, accept는 사용자. 잘못된 rule은 자동 demote | must | AC-030 | R15 | ADR-0021 |
-| REQ-026 | 도메인 카테고리는 v0 core 7 (macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai) + secondary 1 (`digital_assets` — bitcoin/stablecoin entity 분리) = 8개. tag 5개(social_stability_information / demographics_migration / food_water_security / governance_institutions / critical_infrastructure)로 시작 후 dossier 승격 | must | AC-031 | R22 | (Q22) |
+| REQ-026 | 도메인 카테고리는 v0에서 **4 메타 카테고리** (정책 / 경제 / 사회 / 대중문화) 로 lock한다 (DEC-004, Q-022 supersede). 기존 8 enum(macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai / digital_assets) + tag 5개는 4 메타 카테고리의 `subtopic_tags[]` 로 강등 보존 — v1+ 누적 dossier 기반 재승격(Q-032) | must | AC-031 | R22 | DEC-004 (supersedes Q-022) |
+| REQ-027 | Publishing primary 는 **자체 사이트 (Astro 5.0 + Cloudflare Pages)** 이고 vault `publications/` 디렉토리(4 subdirectory: blog_long / newsletter / youtube_long / shorts)가 single source 다 (ADR-0022). 외부 플랫폼(Substack / YouTube / X)은 cross-post target — 모든 외부 발행물의 cite footnote는 자체 사이트 URL을 canonical anchor 로 가리킨다 (ADR-0022 INV-0022-2). v0 turn-key 발행 scope 는 blog_long 1개 + 자체 사이트 + manual cross-post + manual correction approve (DEC-005). TTS / auto cross-post / 자동 retraction trigger 는 v1+ (Q-031 / Q-033 / Q-034). cite check 5+1(ADR-0015)의 일부는 Astro Content Collection + Zod schema 로 **build-time enforce** (dead-link cite_refs / invalid status 는 build fail, ADR-0022 INV-0022-3) | must | AC-013, AC-018, AC-028 | (R25 + v0 turn-key) | ADR-0022, DEC-005, DEC-006 |
 
 ### Non-functional (NFR-###)
 
@@ -141,6 +157,7 @@ ADR-0019).
 | NFR-007 | maintainability | 새로운 source type을 LLM/parser 분리 원칙 안에서 추가 가능 | extractor interface contract + 1개 신규 type 추가 dry-run | AC-021 | R2, R3 | ADR-0006 |
 | NFR-008 | legal_safety | 모든 cloud 업로드 객체에 archive_policy 통과 audit log, raw third-party text 0건 cloud 저장 | policy_decisions ledger 검사 (block 케이스 빈도 + 모든 R2 upload의 source_material_policy check) | AC-032 | R8, R14 | ADR-0012, ADR-0017 |
 | NFR-009 | bidirectional_balance | publication 콘텐츠가 한 방향(direction 6값 중 하나)으로 trailing 50개 ≥ 70% 쏠리면 alert (v1+) | thesis_polarity_distribution metric | AC-033 | R23, R25 | ADR-0019, ADR-0020 |
+| NFR-010 | publish_traceability | 자체 사이트의 모든 publication URL은 canonical cite anchor — 외부 플랫폼 발행물 100%가 자체 사이트 URL을 cite footnote로 가리킨다 (cross-post lint 검사) | cross-post lint (ADR-0022 INV-0022-2) | AC-018 | R25 + v0 turn-key | ADR-0022 |
 
 ## Assumptions
 
@@ -194,12 +211,23 @@ Q-<NNN>.md`로 이동.
 - Q-012: graph DB 도입 후 SQLite ↔ Neo4j sync 정책 (CDC vs batch)
 - Q-020: Neo4j Community GPL v3 boundary (1인 internal use vs 배포)
 - Q-021: Tier A source universe 초기 seed 30~50개 + perspective 분포 균형
-- Q-022: v0 카테고리 8개 (core 7 + `digital_assets`) finalize + tag 5개 +
-  axis transmission_channel 신규
+- ~~Q-022~~: v0 카테고리 8개 — **resolved by DEC-004** (v0 4 메타
+  카테고리로 축소: 정책 / 경제 / 사회 / 대중문화. 8 enum + tag 5개는
+  subtopic_tags[] 로 강등 보존)
 - Q-024: Neo4j-specific 기능 활용 boundary (APOC standard vs extended, GDS
   Community 알고리즘 list, Cypher 5.x 범위)
 - Q-025: 외부 repo 부트스트랩 cadence (week 1-9)
-- Q-026: Vault sync trigger (publication 시점 자동 vs manual)
+- ~~Q-026~~: Vault sync trigger — **resolved by DEC-006** (ADR-0022 자체 사이트
+  stack 결정 후 git push 단일 trigger로 단순화. Cloudflare Pages git
+  integration이 publications/ 변경분 자동 build + deploy)
+- Q-031: TTS v1 timing + provider (외주 vs 자체) — DEC-005 v0 TTS deferred
+  연장
+- Q-032: ContentDraft 4-format auto-generate phasing (v1+ youtube_long /
+  shorts / newsletter) — DEC-005 v0 blog_long only 연장
+- Q-033: 외부 플랫폼 auto cross-post timing (Substack / YouTube / X) —
+  DEC-005 v0 manual 연장
+- Q-034: Auto retraction trigger 정책 v1+ (manual approve → auto 전환 기준)
+  — DEC-005 v0 manual approve 연장
 - Q-027: 백업 schedule + R2 lifecycle (Neo4j dump 일간 30d / SQLite snapshot
   일간 90d / JSONL audit 월간 1y / R2 derived 무기한 / open-license versioned)
 - Q-028: LLM API cost 통제 정책 (prompt caching + batch + per-day ceiling)

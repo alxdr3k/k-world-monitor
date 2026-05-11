@@ -49,6 +49,7 @@
 | 0019 | Bidirectional framing — scenario impact_targets, thesis stance+market_stance, EvidencePack multi-layer | accepted | 2026-05-11 |
 | 0020 | System metrics framework (6 categories + evaluation harness, staged v0/v1/v2) | accepted | 2026-05-11 |
 | 0021 | Policy learning framework (rule-based, auto-tighten allowed, auto-relax prohibited) | accepted | 2026-05-11 |
+| 0022 | Publishing site — Astro 5.0 + Cloudflare Pages + vault publications/ as source (resolves Q-026 via DEC-006, enables v0 turn-key publish via DEC-005) | accepted | 2026-05-11 |
 
 ## Template
 
