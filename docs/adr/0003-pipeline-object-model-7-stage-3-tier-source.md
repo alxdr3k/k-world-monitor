@@ -2,12 +2,12 @@
 id: adr-0003
 type: adr
 title: 7-stage pipeline object model with 3-tier source layer
-status: accepted
+status: superseded
 created_at: 2026-05-11
 updated_at: 2026-05-11
 deciders: [user, claude-opus-4-7, gpt]
 supersedes: []
-superseded_by: []
+superseded_by: [adr-0011]
 
 scope:
   in:
@@ -113,7 +113,7 @@ ai_include: true
 
 ## Status
 
-accepted — 2026-05-11
+superseded by ADR-0011 (2026-05-11). 이 문서는 Round 3 lock 시점의 7-stage 모델을 기록한다. ideation Round 6/Q1 + Round 12/Q7에서 Source(Tier 0 registry entity)와 Thesis(Scenario와 ContentDraft 사이 재사용 anchor)가 추가되어 9-stage로 확장됐다. 현 canonical은 ADR-0011.
 
 ## Context
 

@@ -40,6 +40,18 @@ Then  <기대 결과>
 | AC-019 | NFR-004 | Given 일별 LLM 비용 상한 (TBD). When run ledger 합산. Then 누적 비용이 상한 미만, 초과 시 큐 throttling 동작 | TEST-019 | defined |
 | AC-020 | NFR-006 | Given Snapshot row. When R2에서 객체 삭제 시도. Then 정책 위반(public bucket이 아니므로 차단)이거나 sha256 + r2_key로 회수 가능 | TEST-020 | defined |
 | AC-021 | NFR-007 | Given 신규 source type 추가 의도. When extractor interface 확장. Then 기존 article/dataset/report 분기에 영향 없이 dry-run 1건 추가 가능 | TEST-021 + manual | defined |
+| AC-022 | REQ-017 | Given Source registry row. When Tier 분류 / collectability_score / access_method / source_perspective 필드 검사. Then 모든 source가 4 dimension collectability + access_method + Tier (A/B/C/D) + source_perspective tag를 보유한다. source_reliability와 collectability는 독립 입력됐다 (Reuters case 검증) | TEST-022 | defined |
+| AC-023 | REQ-018 | Given fetch / extract / cache / embed / cloud upload 단계. When source_policy 3 필드(archive/raw_cloud/external_llm) + 8 위험 행동 트리거 검사. Then 위험 행동은 어느 mode에서도 inline_block 되고 모든 결정이 policy_decisions ledger에 기록된다 | TEST-023 | defined |
+| AC-024 | REQ-019 | Given 시나리오·콘텐츠 제작 세션. When 막힌 source N건 발생. Then access_interventions 노드 N건 누적되고 세션 종료 시 batch report 생성, severity 자동 산정(deterministic default), unresolved HIGH/CRITICAL은 publication 핵심 근거로 사용 시 cite check inline_block | TEST-024 | defined |
+| AC-025 | REQ-020 | Given access_intervention review. When `pipeline intervention review <id>` 호출. Then 3-option (ignore / manual_claim / temp_text) 중 하나 선택 가능. manual_claim 선택 시 `pipeline feedback add` 진입 후 user_written_claim / user_opinion / referenced_quote 3-way 중 하나만 채워진 manual_claim_entry 생성. raw_text_stored=false 강제 | TEST-025 | defined |
+| AC-026 | REQ-021 | Given Scenario 작성. When validate. Then impact_targets[] + impact_direction_by_target dict + transmission_channels[]이 채워졌고 (summary_valence는 optional). Thesis는 stance ∈ {constructive, cautionary, neutral, mixed, asymmetric, exploratory} + market_stance (optional v0 / 필수 v1) ∈ {bullish, bearish, range_bound, volatility_up, volatility_down, neutral} 보유 | TEST-026 | defined |
+| AC-027 | REQ-022 | Given Q21 Tier A seed 30~50개. When source_perspective 분포 검사. Then risk_observer ≤ 50% + opportunity_observer ≥ 25% + neutral ≥ 15% 충족 | TEST-027 + manual review | defined |
+| AC-028 | REQ-023 | Given build_evidence_pack 호출 (mode=balanced). When output 구조 검사. Then v0에서 4 section (supporting / opposing / mitigating·amplifying / monitoring) 모두 채워졌거나 명시 "no evidence found". LLM synthesis prompt에 "한쪽 방향 evidence만으로 결론 금지 / winners·losers 분리" 제약 포함 | TEST-028 | defined |
+| AC-029 | REQ-024 | Given pipeline run 종료. When metrics_run 기록 + daily aggregation. Then 6 카테고리 metrics 모두 row 생성. v0 9+ metrics (unsupported_sentence_rate / counterclaim_presence_rate / stale_violation_rate / policy_block_count / manual_claim_entry_rate / db_size_growth_rate / upside_claim_presence_rate / downside_claim_presence_rate / one_sided_warning_rate) 측정됐다 | TEST-029 | defined |
+| AC-030 | REQ-025 | Given 사용자가 같은 source ignore 3회. When policy_learning_events 검사. Then Pattern 1 rule_candidate 생성 (active=false), 사용자에게 confirm prompt 제시. 사용자 accept 시 rule active=true. 완화 방향 rule은 terms_url + license_url 입력 필수 | TEST-030 | defined |
+| AC-031 | REQ-026 | Given v0 카테고리 enum. When Source registry / Dossier topic 입력. Then core 7 (macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai) + secondary 1 (digital_assets) = 8개 + tag 5개 외 값은 reject (또는 manual review tag) | TEST-031 + manual | defined |
+| AC-032 | NFR-008 | Given 모든 R2 upload + 모든 외부 LLM 호출. When policy_decisions ledger + source_material_policy 검사. Then raw_cloud_policy=always_prohibited 위반 0건, 모든 upload에 archive_policy 통과 audit log 존재, raw third-party text의 클라우드 저장 0건 | TEST-032 | defined |
+| AC-033 | NFR-009 | Given trailing 50개 publication. When thesis_polarity_distribution 측정. Then 한 방향(direction 6값 중 하나) ≥ 70% 쏠림 0건 (v1+ 활성화) | TEST-033 (v1+) | defined |
 
 ## Status vocabulary
 
@@ -77,6 +89,18 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-019 | run ledger cost throttling | `tests/cost/ledger_test.ts` (planned) | AC-019 |
 | TEST-020 | R2 durability | `tests/storage/r2_durability_test.ts` (planned) | AC-020 |
 | TEST-021 | extractor interface dry-run | `tests/extraction/interface_test.ts` (planned) | AC-021 |
+| TEST-022 | Source registry Tier + collectability + perspective | `tests/source/registry_test.ts` (planned) | AC-022 |
+| TEST-023 | policy gate mode-aware + 8 위험 행동 | `tests/policy/gate_test.ts` (planned) | AC-023 |
+| TEST-024 | access_intervention batch report + severity | `tests/intervention/batch_test.ts` (planned) | AC-024 |
+| TEST-025 | manual_claim_entry 3-way 분리 CLI | `tests/feedback/cli_test.ts` (planned) | AC-025 |
+| TEST-026 | Scenario impact_targets + Thesis stance/market_stance | `tests/scenario/bidirectional_test.ts` (planned) | AC-026 |
+| TEST-027 | Tier A seed source_perspective 분포 | `tests/source/perspective_distribution_test.ts` (planned) | AC-027 |
+| TEST-028 | EvidencePack v0 4-section + LLM mode prompt | `tests/rag/evidence_pack_test.ts` (planned) | AC-028 |
+| TEST-029 | metrics 6 카테고리 + v0 9+ metrics 측정 | `tests/metrics/v0_metrics_test.ts` (planned) | AC-029 |
+| TEST-030 | policy learning Pattern 1 rule_candidate | `tests/policy_learning/pattern_1_test.ts` (planned) | AC-030 |
+| TEST-031 | 카테고리 8개 enum + tag 5개 | `tests/lint/category_enum_test.ts` (planned) | AC-031 |
+| TEST-032 | raw cloud upload 0건 audit | `tests/policy/raw_cloud_zero_test.ts` (planned) | AC-032 |
+| TEST-033 | thesis_polarity_distribution v1+ | `tests/metrics/polarity_distribution_test.ts` (planned, v1+) | AC-033 |
 
 ## CI/CD gates
 

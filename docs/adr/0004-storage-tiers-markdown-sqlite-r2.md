@@ -2,12 +2,12 @@
 id: adr-0004
 type: adr
 title: Storage tiers — Markdown (curated) / SQLite+FTS5 (canonical) / R2 (bytes)
-status: accepted
+status: superseded
 created_at: 2026-05-11
 updated_at: 2026-05-11
 deciders: [user, claude-opus-4-7, gpt]
 supersedes: []
-superseded_by: []
+superseded_by: [adr-0012]
 
 scope:
   in:
@@ -84,7 +84,7 @@ ai_include: true
 
 ## Status
 
-accepted — 2026-05-11
+superseded by ADR-0012 (2026-05-11). 이 문서는 Round 3 lock 시점의 storage 결정을 기록한다. ideation Round 8/Q3에서 Snapshot 의미를 binary→fingerprint로, Round 14/Q9-4에서 raw cloud upload를 영구 금지로 변경했고, Round 18에서 graph store를 SQLite에서 Neo4j Community Edition으로 이동했다. 현 canonical은 ADR-0012.
 
 ## Context
 

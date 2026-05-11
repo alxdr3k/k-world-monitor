@@ -2,12 +2,12 @@
 id: adr-0007
 type: adr
 title: Edge ledger — supports / contradicts / qualifies / updates / supersedes
-status: accepted
+status: superseded
 created_at: 2026-05-11
 updated_at: 2026-05-11
 deciders: [user, claude-opus-4-7, gpt]
 supersedes: []
-superseded_by: []
+superseded_by: [adr-0013]
 
 scope:
   in:
@@ -63,7 +63,7 @@ ai_include: true
 
 ## Status
 
-accepted — 2026-05-11
+superseded by ADR-0013 (2026-05-11). 이 문서는 Round 3 lock 시점의 SQLite edges 테이블 결정을 기록한다. Alternative D에서 "그래프 DB 별도 도입(e.g., Neo4j) — discarded"로 명시 거부했지만, ideation Round 15~17의 추가 조건(self-host, EOL critical, AI 코드 품질, GraphRAG 정렬)과 Round 18 사용자 결정으로 edge ledger를 Neo4j typed relationships로 이동했다. 현 canonical은 ADR-0013.
 
 ## Context
 

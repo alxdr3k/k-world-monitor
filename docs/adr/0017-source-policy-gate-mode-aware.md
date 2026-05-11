@@ -1,0 +1,274 @@
+---
+id: adr-0017
+type: adr
+title: Source policy gate (archive/raw_cloud/external_llm policy) — mode-aware (inline_block / inline_warn / batch_report) with access_interventions
+status: accepted
+created_at: 2026-05-11
+updated_at: 2026-05-11
+deciders: [user, claude-opus-4-7, gpt]
+supersedes: []
+superseded_by: []
+
+scope:
+  in:
+    - storage.sqlite.source_policy
+    - storage.sqlite.policy_decisions
+    - storage.neo4j.access_intervention_node
+    - pipeline.policy_gate
+    - pipeline.policy_gate.discovery_mode
+    - pipeline.policy_gate.extract_cache_embed_mode
+    - pipeline.policy_gate.exploration_mode
+    - pipeline.policy_gate.publication_preflight_mode
+    - pipeline.policy_gate.batch_report
+  out:
+    - storage.policy.tier_classification     # Tier A-D는 ADR-0016
+    - pipeline.manual_feedback               # manual feedback은 ADR-0018
+    - storage.sqlite.policy_learning_events  # policy learning은 ADR-0021
+
+invariants:
+  - id: INV-0017-1
+    statement: source_policy는 3 필드를 보유한다 — archive_policy ∈ {metadata_only, excerpt_only, full_snapshot_allowed, do_not_collect}, raw_cloud_policy ∈ {always_prohibited, allowed_public_data_only}, external_llm_policy ∈ {allowed, manual_review_required, prohibited}. default는 archive_policy=metadata_only / raw_cloud_policy=always_prohibited / external_llm_policy=manual_review_required (R7/Q2, R14/Q9-5)
+    status: active
+  - id: INV-0017-2
+    statement: policy_gate는 mode-aware다 — {inline_block, inline_warn, batch_report}. 단계별 default mode를 따른다 (R18)
+    status: active
+  - id: INV-0017-3
+    statement: 단계별 default policy_gate_mode — Discovery/Initial fetch=inline_warn / Extract/Cache/Embed/Cloud upload=inline_block / 탐색(scenario·thesis interactive)=batch_report / 콘텐츠 제작 추가 fetch=batch_report (단 위험 행동은 inline_block) / Publication preflight=inline_block
+    status: active
+  - id: INV-0017-4
+    statement: 위험 행동(raw cache / embedding / cloud upload / quote storage / wire-service full text / paywalled fetch / scraping ban 위반 / robots disallow 위반)은 어느 mode에서도 inline_block 유지 (R14/Q9-5 알림 트리거 8개)
+    status: active
+  - id: INV-0017-5
+    statement: 모든 policy_gate 결정은 policy_decisions ledger에 기록한다 — (decision_id, session_id, source_id, url, intended_action, decision, gate_mode, risk_level, reason, created_at)
+    status: active
+  - id: INV-0017-6
+    statement: 탐색·콘텐츠 제작 단계의 막힘은 access_interventions로 누적되고 세션 종료 시 batch 보고된다. access_interventions 필드 — (intervention_id, session_id, scenario_id, thesis_id, url, source_name, attempted_action, access_result, policy_result, related_query, why_it_matters, importance_score, severity, fallback_used_json, requested_user_action, status, created_at, resolved_at) (R18)
+    status: active
+  - id: INV-0017-7
+    statement: severity 자동 산정은 기본 deterministic (keyword overlap with scenario.assumptions[] / 명시적 related_assumption_ids). LLM 호출은 옵션(default off, 사용자 override 가능) — API cost 폭증 방지 (R24 자체 audit)
+
+preconditions:
+  - id: PRE-0017-1
+    statement: Source 객체 도입 (ADR-0011 9-stage)
+  - id: PRE-0017-2
+    statement: Tier A-D 분류 (ADR-0016) — source_policy 적용 단위가 Source
+
+defines:
+  - term: policy_gate
+    role: primary
+  - term: access_intervention
+    role: primary
+  - term: archive_policy
+    role: primary
+  - term: raw_cloud_policy
+    role: secondary  # ADR-0012에서 primary
+
+invariant_review:
+  status: pending
+  reviewed_at: null
+  fingerprint: null
+unresolved_warnings: []
+reviewed_terms:
+  - source
+  - policy_gate
+  - access_intervention
+  - archive_policy
+  - raw_cloud_policy
+  - manual_claim_entry
+reviewed_scopes:
+  - storage.sqlite.source_policy
+  - storage.sqlite.policy_decisions
+  - storage.neo4j.access_intervention_node
+  - pipeline.policy_gate
+  - pipeline.policy_gate.discovery_mode
+  - pipeline.policy_gate.extract_cache_embed_mode
+  - pipeline.policy_gate.exploration_mode
+  - pipeline.policy_gate.publication_preflight_mode
+  - pipeline.policy_gate.batch_report
+  - storage.policy.tier_classification
+  - pipeline.manual_feedback
+  - storage.sqlite.policy_learning_events
+
+provenance: user_confirmed
+sensitivity: private
+retention: long_term
+ai_include: true
+---
+
+# ADR-0017: Source policy gate — mode-aware + access_interventions
+
+## Status
+
+accepted — 2026-05-11
+
+## Context
+
+ideation Round 14/Q9-5는 policy_gate 단계를 신설하기로 결정 — 외부 LLM에 raw
+text 전송 / paywalled fetch / scraping ban 위반 / wire-service full text 등
+8개 트리거에 대해 자동 알림.
+
+그러나 Round 18에서 사용자가 발의: "탐색·콘텐츠 제작 단계의 추가 fetch는 inline
+중단이 비효율". 시나리오 탐색은 여러 sources를 가설 검증하며 빠르게 훑는 것이
+본질이라 중간에 block popup 뜨면 흐름 깨짐. 콘텐츠 제작 중 reference fetch도
+마찬가지.
+
+R18에서 mode-aware policy gate(inline_block / inline_warn / batch_report) +
+exploration_block_reports → GPT 정교화 흡수로 access_interventions로 격상.
+severity / importance_score / why_it_matters / related_query / fallback_used 등
+필드 추가.
+
+## Decision
+
+**source_policy** 3 필드 (R14/Q9-5에서 R7/Q2 단일 archive_policy를 3 필드로
+확장):
+
+| 필드 | enum | default |
+|---|---|---|
+| archive_policy | {metadata_only, excerpt_only, full_snapshot_allowed, do_not_collect} | metadata_only |
+| raw_cloud_policy | {always_prohibited, allowed_public_data_only} | always_prohibited |
+| external_llm_policy | {allowed, manual_review_required, prohibited} | manual_review_required |
+
+`source_material_policy` 테이블 (SQLite):
+```sql
+source_material_policy (
+  source_id text references source(source_id),
+  archive_policy text not null,
+  raw_cloud_policy text not null,
+  external_llm_policy text not null,
+  terms_url text,
+  license_url text,
+  checked_at text not null
+);
+```
+
+**policy_gate_mode** (3-mode):
+- `inline_block` — 즉시 중단, 사용자 응답 대기
+- `inline_warn` — 경고 로깅 후 계속 진행, 사용자 응답 안 받음
+- `batch_report` — 막힘 누적, 세션 종료 시 batch 보고
+
+**단계별 default mode**:
+
+| 단계 | Mode | 이유 |
+|---|---|---|
+| Discovery / Initial fetch | inline_warn | 자동 수집 중, 한 source 막혀도 다음으로 |
+| Extract / Cache / Embed / Cloud upload | **inline_block** | 위험 행동(저작권/약관/cloud raw) 즉시 중단 |
+| 시나리오·thesis 탐색 (interactive) | batch_report | 흐름 유지가 본질 |
+| 콘텐츠 제작 추가 fetch | batch_report (default) + inline_block (위험 행동) | 작업 흐름 유지, 위험은 차단 |
+| Publication preflight | inline_block | 최종 발행 전 차단 필수 |
+
+**위험 행동** (어느 mode에서도 inline_block, R14/Q9-5 트리거 8개):
+1. source policy unknown인데 raw text를 외부 LLM에 보내려 함
+2. source가 paywalled / proprietary로 분류됨
+3. terms에 no scraping / no AI / no archive / no redistribution 명시
+4. wire-service full text (Reuters/AP)
+5. article/report 원문을 quote 또는 cache하려 함
+6. 기사/리포트 도표·스크린샷을 콘텐츠에 추가하려 함
+7. raw source를 embedding/indexing하려 함
+8. raw source를 cloud에 upload하려 함
+
+**access_interventions 객체** (Neo4j 노드 — graph object로 분류):
+```cypher
+(:AccessIntervention {
+  intervention_id: string,           // `aci_<ULID>`
+  session_id: string,
+  scenario_id: string,                // optional FK to Scenario
+  thesis_id: string,                  // optional FK to Thesis
+  url: string,
+  source_name: string,
+  attempted_action: enum,             // fetch_for_claim | quote_for_publication | etc.
+  access_result: enum,                // blocked | paywalled | bot_protected | terms_unclear | 404
+  policy_result: enum,                // manual_only | metadata_only | excluded
+  related_query: string,
+  why_it_matters: string,
+  importance_score: float,            // 0~1
+  severity: enum,                     // LOW | MEDIUM | HIGH | CRITICAL
+  fallback_used_json: string,
+  requested_user_action: enum,        // read_manually_and_enter_claim | optional | ignore
+  status: enum,                       // pending_user_review | resolved | ignored
+  created_at: datetime,
+  resolved_at: datetime
+})
+```
+
+severity 자동 산정 (default deterministic, R24 자체 audit):
+- HIGH/CRITICAL: scenario.assumptions[] keyword overlap ≥ threshold OR 명시적
+  related_assumption_ids
+- MEDIUM: scenario topic 영역 포함
+- LOW: 핵심 영역 외 / 대체 source 충분
+- LLM 자동 평가는 옵션 (default off, 사용자 override 가능 — API cost 폭증 방지)
+
+projection edges (ADR-0014 native 활용과 일관):
+```cypher
+(:AccessIntervention)-[:RELATES_TO]->(:ScenarioAssumption)
+(:ManualClaimEntry)-[:RESOLVES]->(:AccessIntervention)
+```
+
+policy_decisions ledger (SQLite, audit trail):
+```sql
+policy_decisions (
+  decision_id text primary key,
+  session_id text not null,
+  source_id text,
+  url text,
+  intended_action text not null,
+  decision text not null,                  -- allow | warn | block
+  gate_mode text not null,                 -- inline_block | inline_warn | batch_report
+  risk_level text,
+  reason text,
+  intervention_id text references access_intervention(intervention_id),
+  created_at text not null
+);
+```
+
+## Alternatives Considered
+
+- **A** (chosen): mode-aware policy gate + 위험 행동 inline_block 보존 +
+  access_interventions Neo4j 노드
+  - pros: 탐색 흐름 유지, 위험 행동 즉시 차단, batch 보고로 사용자 부담 분산
+  - cons: mode 분기 로직 복잡도, severity 산정 정책 필요
+- **B** (discarded — R14 초안): policy_gate가 모든 단계에서 inline block / warn
+  - pros: 단순
+  - cons: 탐색·콘텐츠 제작 흐름이 매번 깨짐 (R18 사용자 발의 폐기)
+- **C** (discarded — R18 초안): exploration_block_reports 별도 객체
+  - pros: 보고만 분리
+  - cons: GPT 정교화로 access_interventions(severity, importance, related_query
+    등)로 격상이 더 정밀
+- **D** (discarded — R14/Q9-5 GPT 6 필드): source_policy 6 필드 (archive_policy
+  + raw_cloud_policy + raw_local_cache_policy + external_llm_policy +
+  quote_policy + visual_policy + dataset_vintage_policy)
+  - pros: 가장 명시적
+  - cons: v0에 과함; quote_policy/visual_policy는 기존 enum과 통합, dataset
+    vintage_policy는 v1 (Claude push back — R14/Q9-5)
+
+## Consequences
+
+- 긍정:
+  - 위험 행동은 즉시 차단 — 저작권/약관 안전
+  - 탐색·콘텐츠 제작 흐름이 batch_report로 자연스러움
+  - access_interventions가 unresolved HIGH/CRITICAL을 cite check 5번째
+    block(ADR-0015 INV-0015-6)으로 cascade
+  - severity / importance / why_it_matters로 사용자 검토 우선순위 명확
+
+- 부정 / trade-off:
+  - mode-aware 분기 로직이 단순 inline_block보다 구현 복잡
+  - severity 자동 산정의 fp/fn은 사용자 override 메커니즘 필요(ADR-0018 review
+    3-option)
+  - source_policy 3 필드 추가로 source registry seed 작성 부담 ↑ (Q21)
+
+- 후속 작업:
+  - INFRA-1B.1 슬라이스: source_policy 테이블 + policy_decisions ledger +
+    8 트리거 inline_block 구현
+  - INFRA-1B.2 슬라이스: access_interventions Neo4j 노드 + severity deterministic
+    산정 + batch_report 모드
+  - ADR-0015 INV-0015-6: cite check 5번째 block 활성화
+  - ADR-0018: manual_claim_entry CLI + `pipeline intervention review <id>`
+    3-option (ignore / manual_claim / temp_text)
+  - ADR-0021: policy_learning_events — intervention 결정(ignore/manual_claim)을
+    Pattern 1 학습으로 흡수
+
+## References
+
+- ideation 출처: Round 7/Q2 (archive_policy 단일), Round 14/Q9-5 (3 필드 확장 +
+  policy_decisions + manual_claim_entries + 8 트리거), Round 18 (mode-aware +
+  access_interventions GPT 정교화 흡수)
+- 관련 ADR: ADR-0011, ADR-0012, ADR-0015, ADR-0016, ADR-0018, ADR-0021
