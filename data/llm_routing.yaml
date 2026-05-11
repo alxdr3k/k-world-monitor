@@ -1,0 +1,162 @@
+# data/llm_routing.yaml — operational model snapshot config
+#
+# ADR-0023 + DEC-010 의 LLM routing v2 의 operational config.
+# ADR 본문은 capability tier + vendor role 만 stable lock,
+# 실제 model snapshot (정확한 model name / version / effort level) 은 본
+# yaml 이 운영 관리. vendor catalog (OpenAI / Anthropic / Google AI) 변경 시
+# 본 yaml 만 갱신 — ADR 본문 stable.
+#
+# Updated: 2026-05-11
+# Source-of-truth invariants: docs/adr/0023-llm-routing-v2-gpt-default-multi-vendor-minimal-cross-review.md
+# Run ledger 가 호출 시점의 snapshot sha256 을 기록 (운영 audit 의무).
+
+vendors:
+  openai:
+    role: default_llm_vendor
+    required: true
+    sdk: openai
+    strict_schema: "response_format: json_schema (anthropic-beta: structured-outputs-2025-11-13 equivalent)"
+  anthropic:
+    role: cross_vendor_review_and_domain_override
+    required: true
+    sdk: "@anthropic-ai/sdk"
+    strict_schema: "strict: true + anthropic-beta: structured-outputs-2025-11-13"
+  google:
+    role: search_grounding_optional_and_tier3_fallback
+    required: false
+    sdk: "@google/genai"
+    strict_schema: "responseSchema"
+
+tiers:
+  tier_0:
+    capability: frontier_reasoning_with_extended_thinking
+    used_in:
+      - scenario_validate_adversarial_pass
+      - high_stakes_thesis_composer_operator_flagged
+      - publication_preflight_cross_vendor_review_for_thesis
+    openai:
+      model: gpt-5.5-pro
+      effort: extended_thinking
+      role: default
+    anthropic:
+      model: claude-opus-4-7
+      effort: xhigh
+      role: cross_vendor_review_only
+    google:
+      role: disabled
+
+  tier_1:
+    capability: high_reasoning_primary_composer
+    used_in:
+      - scenario_composer
+      - thesis_composer_default
+      - dossier_composition_reasoning_heavy
+    openai:
+      model: gpt-5.5-pro
+      effort: standard
+      role: default
+    anthropic:
+      model: claude-sonnet-4-6
+      effort: high
+      role: domain_override
+      override_trigger: korean_long_context_ge_100k_tokens
+    google:
+      role: disabled
+
+  tier_2:
+    capability: mid_structured_extraction
+    used_in:
+      - article_extract_default
+      - report_extract
+      - dossier_composition_default
+      - evidence_pack_v0_four_section
+    openai:
+      model: gpt-5-mini
+      effort: standard
+      role: default
+    anthropic:
+      model: claude-sonnet-4-6
+      effort: standard
+      role: domain_override
+      override_trigger: korean_long_context_ge_10k_tokens
+    google:
+      role: disabled
+
+  tier_3:
+    capability: low_cost_high_volume_and_search_grounding
+    used_in:
+      - cite_check_overclaim_llm_judge_default
+      - evidence_pack_simple_conversion
+      - search_postprocess
+      - discovery_grounding_optional
+    openai:
+      model: gpt-5-nano
+      effort: standard
+      role: default
+    anthropic:
+      model: claude-haiku-4-5
+      effort: standard
+      role: cross_vendor_review_only
+    google:
+      model: gemini-2.5-flash
+      role: search_grounding_or_cost_effective_fallback
+      condition: "Google Search grounding 작업 OR 동일 tier 대비 비용효율 우위 입증"
+
+cross_vendor_review:
+  # ADR-0023 INV-0023-4 enforcement scope (3 종 한정)
+  enforcement_scope:
+    - publication_preflight_cite_check_overclaim       # Tier 3 cross (OpenAI nano → Anthropic Haiku)
+    - scenario_validate_adversarial_pass               # Tier 0 cross (OpenAI extended → Anthropic Opus)
+    - operator_flagged_high_stakes_thesis              # Tier 0 cross (OpenAI extended → Anthropic Opus)
+  out_of_scope:
+    # 그 외 단계 cross-vendor 의무 X (manual review + deterministic 검증만)
+    - article_extract
+    - dossier_composition
+    - evidence_pack_generation
+    - thesis_composer_non_high_stakes
+    - content_draft_composition
+    - cite_check_deterministic_5_rules
+
+cost_ceiling:
+  # DEC-010 lock
+  daily_soft_usd: 5
+  daily_hard_usd: 7.5
+  weekly_usd: 25
+  tier_0_daily_call_cap: 5    # GPT-5.5 Pro extended thinking + Opus 4.7 xhigh 합산
+  backfill_budget_bucket: separate    # backfill_run_id 태그로 평소 ceiling 과 분리 집계
+
+prompt_caching:
+  # ADR-0006 INV-0006-3 layering 그대로
+  layering_order:
+    - tools
+    - system
+    - glossary
+    - source_policy
+    - few_shot_exemplars
+    - breakpoint
+    - dynamic_user_message
+  ttl:
+    batch: 5_minutes
+    sync: 1_hour
+
+batch_api:
+  # ADR-0023 + DEC-010 batch 적용 단계
+  on:
+    - article_extract
+    - report_extract
+    - dossier_composition
+    - evidence_pack
+    - content_draft_v0_blog_long_only    # DEC-005 v0 boundary
+  off_sync:
+    - scenario_composer
+    - scenario_validate
+    - thesis_composer
+    - cite_check_preflight_gate
+
+domain_overrides:
+  # ADR-0023 INV-0023-1 (a) 의 운영 데이터 누적 후 SPIKE 결과로 lock 가능
+  # v0 entry 시점: specialty 도메인 (DEC-008 / DEC-010) 만
+  specialty_domains:
+    - macroeconomics_korea_real_estate_macro
+    - epidemiology_health_biosecurity
+    # 운영 누적 후 추가 도메인은 별도 SPIKE 채택 시 yaml 갱신

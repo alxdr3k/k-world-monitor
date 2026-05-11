@@ -54,13 +54,14 @@ INV-0012-4).
                        │  for metadata)    │  (ADR-0014)
                        └────────┬──────────┘
                                 ▼
-       ┌────── Aggregation / Scenario / Thesis Layer (Neo4j) ──────┐
-       │  Dossier  →  Scenario(impact_targets) →  Thesis  →  Draft │
-       │ (주제별)    (validate +                  (stance +        │
-       │             revisions +                   market_stance,  │
-       │             counterclaim                  4-format        │
-       │             polarity-symmetric)            재사용)        │
-       └───────────────────┬──────────────────────────────────────┘
+  ┌─── Aggregation / Scenario / EditorialIntent / Thesis Layer (Neo4j) ───┐
+  │  Dossier → Scenario(impact_targets) → EditorialIntent → Thesis → Draft │
+  │ (주제별)   (validate + revisions +    (운영자 명시   (stance +   (4-format│
+  │            counterclaim polarity-     lock,           market_     재사용,│
+  │            symmetric)                 ADR-0025)       stance,    intent  │
+  │                                                       intent     reuse  │
+  │                                                       align)    anchor) │
+  └────────────────────────────────┬────────────────────────────────────────┘
                            ▼
                   ┌────────────────────┐
                   │ Cite Check 5+1     │ (5 block + 1 warning v1+,
@@ -72,7 +73,29 @@ INV-0012-4).
                   ┌────────────────────┐
                   │   Publication      │  (live / corrected /
                   │   ledger           │   retracted, cascade)
-                  └────────────────────┘
+                  └────────┬───────────┘
+                           ▼
+        ┌──────────────────────────────────────────────────┐
+        │ Publishing Site (ADR-0022)                       │
+        │ ┌──────────────────────────────────────────────┐ │
+        │ │ vault/publications/ (single source)          │ │
+        │ │  ├─ blog_long/  → /posts/[slug]   (v0 활성)  │ │
+        │ │  ├─ newsletter/ → /newsletter/[slug] (v1+)   │ │
+        │ │  ├─ youtube_long/ → /videos/[slug]   (v1+)   │ │
+        │ │  └─ shorts/    → /shorts/[slug]      (v1+)   │ │
+        │ └──────────────────────────────────────────────┘ │
+        │ Astro 5.0 (Content Collection + Zod schema)      │
+        │   + <Cite/> / <RetractionBanner/> / <Correction- │
+        │     Ledger/> components (build-time cite gate)   │
+        │ + pagefind (client-side full-text)               │
+        │ + vega-lite / mermaid (chart / diagram)          │
+        │ + @astrojs/rss (4 format별 feed)                 │
+        │ → Cloudflare Pages (git push trigger, DEC-006)   │
+        │                                                  │
+        │ External cross-post (manual v0, auto v1+ Q-033): │
+        │   Substack / YouTube / X — cite anchor는 자체    │
+        │   사이트 URL canonical (INV-0022-2)              │
+        └──────────────────────────────────────────────────┘
 
 Lateral (모든 단계 횡단):
   ┌─────────────────────────────────────────────┐
@@ -85,7 +108,11 @@ Lateral (모든 단계 횡단):
   └─────────────────────────────────────────────┘
 
 Storage seams:
-  Markdown vault (curated)     ← promoted Claim, Dossier, Scenario, Thesis, Draft, Pub
+  Markdown vault (curated)     ← internal: Document hub, promoted Claim, Dossier,
+                                  Scenario, Thesis, ContentDraft (drafts)
+                                  publishing: vault/publications/{blog_long,
+                                  newsletter, youtube_long, shorts}/ —
+                                  자체 사이트 single source (ADR-0022 INV-0022-1)
   Neo4j Community (canonical)  ← Source, Document, Snapshot, Claim, Dossier, Scenario,
                                   Thesis, ContentDraft, Publication, Edge,
                                   ScenarioRevision, ManualClaimEntry, AccessIntervention
@@ -95,32 +122,39 @@ Storage seams:
                                   metrics_run/daily/alerts, evaluation_runs/cases,
                                   retrieval_pack_metrics, research_session, raw_cache_items
   R2 (permitted artifacts)     ← open-license dataset, 공식 허용 API 응답,
-                                  자체 산출물(차트/export), 월별 JSONL audit export
-                                  (raw third-party text 업로드 영구 금지)
+                                  자체 산출물(차트/export/v1+ TTS audio), 월별 JSONL
+                                  audit export (raw third-party text 업로드 영구 금지)
+  Cloudflare Pages (host)      ← vault/publications/ Astro build artifact —
+                                  git push trigger (DEC-006), incremental deploy.
+                                  vendor surface는 R2 + OpenAI (default LLM) + Anthropic (cross-vendor review + override) + Google AI Studio (optional 탐색 grounding, Tier 3 fallback) + CF Pages 통합
+                                  (ADR-0014 intentional lock-in 연장, ADR-0022 INV-0022-5)
 ```
 
 ## Components
 
 | 컴포넌트 | 책임 | 의존성 |
 |---|---|---|
-| Discovery | RSS / API / sitemap polling, manual intake CLI | Source Registry |
+| Discovery | RSS / API / sitemap polling, manual intake CLI. **검색 grounding 보조 = Gemini 2.5 Flash 의 Google Search tool** (선택, Tier 3, 메인/리뷰 X — ADR-0023 INV-0023-5) | Source Registry, Google AI SDK (선택) |
 | Source Registry | Source 정의(publisher) + Document URL 그룹 + reliability_tier + collectability_score + source_policy + source_perspective | Neo4j Source 노드 |
 | Collection Queue | fetch 대상 큐 (priority, dedup, throttle) | SQLite queue 테이블 |
 | Policy Gate | mode-aware 검사 (inline_block / inline_warn / batch_report) — 8 위험 행동 트리거 inline_block | SQLite source_policy + policy_decisions ledger, Neo4j AccessIntervention 노드 |
 | Fetcher | URL → fingerprint Snapshot 노드 (R2 binary는 permitted artifact만) | Neo4j Snapshot + R2, SQLite policy_decisions |
 | Chunker / Indexer | Snapshot 텍스트 → chunk + Neo4j native FTS 인덱스 | Neo4j FTS, SQLite raw_cache_items (TTL) |
-| Extractor (article) | Haiku 4.5 1차 + Sonnet 4.6 escalate (ADR-0006) | Anthropic SDK, run ledger |
-| Extractor (dataset) | parser only, LLM 미사용 | parser libs |
-| Extractor (report) | Haiku 4.5 with structure prompt | Anthropic SDK |
+| Extractor (article) | Tier 2 default = GPT-5 mini (OpenAI). 한국어 long-context 시 Sonnet 4.6 standard override. confidence < 0.85 시 Tier 1 escalate (GPT-5.5 Pro standard) — ADR-0023 + DEC-010 | OpenAI SDK + Anthropic SDK (vendor 추상화 layer), run ledger (vendor/tier/domain_override_reason 필드) |
+| Extractor (dataset) | **Data Science Module** (ADR-0024) — Polars + DuckDB + statsmodels + scipy deterministic. 1000+ rows / 50KB+ payload 는 LLM raw 입력 금지, derived metric 으로 압축 후 LLM (Tier 2) 합성 | Polars, DuckDB, statsmodels, scipy, derived_metric_ledger (SQLite) |
+| Extractor (report) | Tier 2 default = GPT-5 mini with structure prompt + section-by-section page locator | OpenAI SDK + Anthropic SDK |
 | Review Queue | reviewer manual + auto-accept threshold | SQLite review_queue 테이블 |
 | Edge Ledger | Neo4j typed relationships (SUPPORTS / CONTRADICTS / QUALIFIES / UPDATES / SUPERSEDES) (ADR-0013) | Neo4j |
 | Dossier Composer | 주제별 promoted claim + counterclaim 합성 | Neo4j + Markdown promoted_claim |
 | Scenario Composer | drivers/assumptions/branches/falsifier/counterclaim(polarity-symmetric)/monitoring/impact_targets/impact_direction_by_target/transmission_channels + ScenarioRevision ledger | Neo4j Scenario/ScenarioRevision, edges |
-| Scenario Validator | 5종 검사 (ADR-0009 INV-0009-1) + bidirectional balance | Edge Ledger |
-| Thesis Composer | Scenario 압축 → stance + market_stance(optional). 4-format ContentDraft 재사용 anchor | Neo4j Thesis |
-| ContentDraft Composer | Thesis + Dossier → draft (format별 분기) + 인용 ledger | Markdown vault |
-| Cite Check | 5 block (stale / retracted / horizon / unit / overclaim) + access_intervention block + 1 warning v1+ (one-sided thesis) | Edge Ledger, Scenario, Anthropic SDK (overclaim), AccessIntervention |
+| Scenario Validator | 5종 검사 (ADR-0009 INV-0009-1) + bidirectional balance + **Tier 0 adversarial pass cross-vendor review mandatory** (GPT-5.5 Pro xthink 생성 + Opus 4.7 xhigh review, ADR-0023 + DEC-010) | Edge Ledger, OpenAI SDK + Anthropic SDK (cross-vendor) |
+| Editorial Intent Composer | Scenario revision → EditorialIntent (purpose / audience / tone / call_to_action / alignment_criteria / exclusion_criteria / bidirectional_weight_intent). LLM 자동 propose (Tier 1 GPT-5.5 Pro standard) → **운영자 명시 lock 의무** (`decided_by_operator = true`, ADR-0025 INV-0025-4) | Neo4j EditorialIntent + Markdown vault `editorial_intents/<eit_id>.md` + CLI `pipeline intent compose / show / lock` |
+| Thesis Composer | EditorialIntent reference + Scenario revision 압축 → stance + market_stance (intent.bidirectional_weight_intent 와 align). 4-format ContentDraft 재사용 anchor. default = GPT-5.5 Pro standard (Tier 1). **high-stakes 운영자 flag 시 Tier 0 (GPT-5.5 Pro xthink + Opus 4.7 xhigh cross-review mandatory)** — ADR-0023 + DEC-010 + ADR-0025 | Neo4j Thesis (`:HAS_INTENT` → EditorialIntent), OpenAI SDK + Anthropic SDK (cross-vendor on flag) |
+| ContentDraft Composer | Thesis + EditorialIntent + Dossier → draft (format별 분기, v0 blog_long only DEC-005) + 인용 ledger. EditorialIntent `:USES_INTENT` reference 의무 (ADR-0025 INV-0025-2). Astro Zod schema 가 `editorial_intent_id` dead-link build fail (ADR-0022 INV-0022-3 확장) | Markdown vault, Neo4j ContentDraft |
+| Cite Check | 5 block (stale / retracted / horizon / unit / overclaim) + access_intervention block + 1 warning v1+ (one-sided thesis). overclaim LLM judge = GPT-5 nano 생성 + **Haiku 4.5 cross-vendor review mandatory** (Tier 3, ADR-0023 INV-0023-4 + DEC-010) | Edge Ledger, Scenario, OpenAI SDK + Anthropic SDK (cross-vendor), AccessIntervention |
 | Publication Ledger | live / corrected / retracted state + cascade alert | Neo4j Publication |
+| Publishing Site | Astro 5.0 (Content Collection + Zod schema) + Cite/Retraction/Correction 컴포넌트 + pagefind + RSS + vega-lite/mermaid → Cloudflare Pages 호스팅. vault publications/ single source. build-time cite gate (ADR-0015 일부 enforcement) | vault/publications/, Cloudflare Pages, R2 (chart/audio 산출물) |
+| Cross-post Surface | Substack / YouTube / X 발행 (v0 manual, v1+ API integration Q-033). 모든 외부 발행물의 cite footnote가 자체 사이트 URL canonical anchor (ADR-0022 INV-0022-2) | Publishing Site URL |
 | Run Ledger | 모든 LLM/parser run의 (model, tokens, cost, cached_tokens, batch_id) 기록 | SQLite run 테이블 |
 | Stale Worker | time / snapshot_diff / counterclaim 트리거 (ADR-0010) | Edge Ledger, snapshot content_hash |
 | Manual Feedback CLI | `pipeline feedback add\|bulk\|link\|from-report`, `pipeline intervention review <id>` 3-option | Neo4j ManualClaimEntry, AccessIntervention |
@@ -168,17 +202,27 @@ SQLite migration).
   - `pipeline feedback add|bulk|link|from-report`
   - `pipeline intervention review <id>` (ignore / manual_claim / temp_text)
   - `pipeline scenario validate <id>`
-  - `pipeline thesis compose <scenario_revision_id>`
-  - `pipeline draft compose <thesis_id> --format {blog_long|youtube_long|shorts|newsletter}`
-  - `pipeline publish <draft_id>` (cite check 5+1 gate)
+  - `pipeline intent compose <scenario_revision_id> [--tone ...] [--audience <str>] [--weight-intent ...]` (LLM 자동 propose + 운영자 명시 승인) — ADR-0025
+  - `pipeline intent show <eit_id>` / `pipeline intent lock <eit_id>`
+  - `pipeline thesis compose <scenario_revision_id> --intent <eit_id>`
+  - `pipeline draft compose <thesis_id> --format {blog_long|youtube_long|shorts|newsletter} --intent <eit_id>` (intent reference 의무 — ADR-0025 INV-0025-2)
+  - `pipeline publish <draft_id>` (cite check 5+1 gate — vault/publications/
+    하위 적합 subdirectory에 ContentDraft 파일 emit)
   - `pipeline metrics report --since <date>`
-  - `pipeline vault-sync` (publication 시점 자동 + manual trigger, Q-026)
+  - ~~`pipeline vault-sync`~~ — DEC-006 으로 v0에서 제거. vault publications/
+    가 자체 사이트 single source 이므로 git push 가 단일 sync trigger.
+    v1+ 외부 플랫폼 auto cross-post(Q-033) 도입 시 재도입 검토
+  - `pipeline site build` (선택, Astro local preview용 — Cloudflare Pages
+    가 git push 시 자동 build이므로 운영에는 불필요)
 - HTTP API는 PUB 단계 이후 검토.
 - 이벤트/메시지: GitHub Actions cron / 로컬·자체 서버 cron (self-host only)
 - 외부 통합:
   - Anthropic SDK (Haiku 4.5 + Sonnet 4.6, prompt caching, batch API)
   - Cloudflare R2 (S3 compatible API, permitted artifact only)
+  - **Cloudflare Pages** (자체 사이트 호스팅 — git push trigger, ADR-0022)
   - 소스별 RSS / API client (Discovery, Tier A)
+  - v1+ Substack / YouTube Data / X API (auto cross-post — Q-033)
+  - v1+ TTS provider API (ElevenLabs / OpenAI TTS / Coqui self-host — Q-031)
 - Neo4j 접속: bolt://localhost:7687 (self-host Docker / binary) + APOC + GDS
   plugin
 
@@ -216,8 +260,21 @@ SQLite migration).
   record. raw cloud upload 영구 금지.
 - ADR-0005: confidence 단일 필드 폐기 — reliability_tier / extraction_confidence
   / claim_status (8-state) / scenario weight / collectability_score 분해
-- ADR-0006: LLM routing (Haiku 1차 + Sonnet escalate) + parser split +
-  auto-accept
+- ~~ADR-0011~~ (object model superseded by ADR-0025): 9-stage object model
+- **ADR-0025** (supersedes ADR-0011 object model): 10-stage object model
+  with EditorialIntent — Scenario → EditorialIntent → Thesis anchor. 운영
+  자 명시 lock 의무, 4-format draft 재사용 anchor, NFR-002 reproducibility
+  강화
+- ~~ADR-0006~~ (superseded by ADR-0023): LLM routing v1 — Haiku 1차 + Sonnet
+  escalate (Anthropic only)
+- **ADR-0023** (supersedes ADR-0006): LLM routing v2 — GPT default +
+  Anthropic dual-vendor (performance-tiered) + Google exploration-only +
+  minimal 3-stage cross-vendor review (preflight cite check / scenario
+  validate adversarial / high-stakes thesis)
+- **ADR-0024**: Data Science Module — deterministic dataset processing
+  (Polars + DuckDB + statsmodels + scipy) + derived_metric_ledger
+  reproducibility 3-tuple + 1000 rows / 50KB raw dataset → LLM 직접 입력
+  금지
 - **ADR-0013** (supersedes ADR-0007): edge ledger via Neo4j typed
   relationships. v0 5 edge type, v1+ counterclaim multi-relation 4 추가.
 - **ADR-0014**: Neo4j-native feature adoption (APOC + GDS + native vector +
@@ -235,10 +292,17 @@ SQLite migration).
 - **ADR-0020**: System metrics framework (6 카테고리 + evaluation harness).
 - **ADR-0021**: Policy learning framework (rule-based, auto-tighten /
   auto-relax 분리).
+- **ADR-0022**: Publishing site — Astro 5.0 + Cloudflare Pages + vault
+  publications/ single source. Build-time cite gate (Zod schema), cite
+  anchor canonical, correction visibility 컴포넌트. ContentDraft 4-format
+  1:1 매핑.
 
 ## Open Questions
 
-- Q-001 ~ Q-030: PRD §Open Questions 참조 (per-file `docs/questions/Q-<NNN>.md`)
+- Q-001 ~ Q-034: PRD §Open Questions 참조 (per-file `docs/questions/Q-<NNN>.md`).
+  resolved: Q-022 (DEC-004), Q-026 (DEC-006).
+  신규 v1+: Q-031 (TTS), Q-032 (4-format auto-generate phasing), Q-033 (외부
+  플랫폼 auto cross-post), Q-034 (auto retraction trigger)
 
 ## Related Requirements
 
@@ -273,7 +337,10 @@ SQLite migration).
   build_evidence_pack (ADR-0019)
 - REQ-024 (metrics 6 카테고리 + harness) → Metrics Collector (ADR-0020)
 - REQ-025 (Policy learning rule-based) → Policy Learner (ADR-0021)
-- REQ-026 (카테고리 8개) → Source Registry tag + Dossier topic
+- REQ-026 (v0 4 메타 카테고리) → Source Registry tag + Dossier topic
+  (DEC-004 supersedes Q-022)
+- REQ-027 (자체 사이트 publishing primary + build-time cite gate +
+  cite anchor canonical) → Publishing Site 컴포넌트 (ADR-0022)
 - NFR-001 (1만건 < 1s p95) → Neo4j native FTS + index 정책 (SPIKE-001로 검증)
 - NFR-002 (reproducibility) → scenario_revisions + edge ledger (ADR-0009)
 - NFR-003 (5단계 trace) → 9-stage object model + ID propagation (ADR-0011)
@@ -286,3 +353,5 @@ SQLite migration).
   ADR-0017)
 - NFR-009 (bidirectional balance) → Metrics Framework + Cite Check warning
   (ADR-0019, ADR-0020)
+- NFR-010 (publish_traceability — 외부 플랫폼 cite footnote 100% 자체 사이트
+  URL anchor) → Cross-post lint + ADR-0022 INV-0022-2

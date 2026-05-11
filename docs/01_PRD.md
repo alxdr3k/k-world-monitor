@@ -28,7 +28,8 @@ ADR-0019).
   - 시나리오의 가정·반증조건·반대 증거를 모두 추적 (counterclaim first 강제,
     ADR-0009, ADR-0019 양방향)
   - 같은 Thesis로 블로그/유튜브 long/shorts/뉴스레터 4 format 재사용
-    (ADR-0011)
+    (ADR-0011). v0 turn-key 활성 format은 blog_long 1개 (DEC-005). 나머지
+    3 format은 v1+ phasing (Q-032)
   - 콘텐츠의 모든 주장이 source claim까지 5단계 이내 역추적 (publication
     preflight 5-check, ADR-0015)
 - 비즈니스 목표:
@@ -42,8 +43,10 @@ ADR-0019).
 
 ### In-scope
 
-- 9-stage 객체 모델 (Source → Document → Snapshot → Claim → Dossier → Scenario
-  → Thesis → ContentDraft → Publication, ADR-0011)
+- **10-stage 객체 모델** (Source → Document → Snapshot → Claim → Dossier
+  → Scenario → **EditorialIntent** → Thesis → ContentDraft → Publication,
+  ADR-0025 supersedes ADR-0011) — EditorialIntent 는 Scenario revision 과
+  Thesis 사이의 anchor, 운영자 명시 lock 의무
 - Source registry + Tier A-D 분류 + collectability_score (ADR-0016)
 - Discovery (RSS / API / sitemap) → Collection Queue → Fetcher (fingerprint
   record, R2 binary 보관은 예외) → Chunker / Indexer → Claim 추출
@@ -75,8 +78,15 @@ ADR-0019).
 - System metrics framework (6 categories + evaluation harness, ADR-0020)
 - Policy learning framework (rule-based, auto-tighten allowed / auto-relax
   prohibited, ADR-0021)
-- LLM 비용 가드(Haiku 1차 + Sonnet escalate, prompt caching, batch API,
-  auto-accept threshold, ADR-0006)
+- LLM 비용 / 품질 가드 (ADR-0023 4-tier multi-vendor 라우팅 + ADR-0024
+  Data Science Module + DEC-010 lock — GPT default + Anthropic dual-vendor
+  + Google exploration-only + minimal cross-vendor review at preflight)
+- **자체 사이트 publishing primary** (Astro 5.0 + Cloudflare Pages + vault
+  publications/ single source) — ContentDraft 4-format 매핑, build-time
+  cite gate (Zod schema), correction visibility 컴포넌트 (ADR-0022)
+- **v0 turn-key publish scope** — blog_long 1개 + 자체 사이트 + manual
+  Substack/YouTube/X cross-post + manual correction approve. TTS deferred,
+  auto retraction deferred (DEC-005)
 
 ### Out-of-scope
 
@@ -86,6 +96,14 @@ ADR-0019).
 - 단일 LLM extractor로 article / dataset / report 통합 처리 (parser 분리 —
   ADR-0006)
 - 자동 publish 자동화 (사람 운영자가 최종 발행 결정)
+- **v0 TTS 파이프라인** (youtube_long / shorts script → audio 변환은 v1+
+  외주 또는 자체 — Q-031)
+- **v0 외부 플랫폼 auto cross-post** (Substack / YouTube / X API
+  integration 은 v1+ — Q-033)
+- **v0 자동 retraction trigger** (manual approve only — auto trigger는 v1+
+  cite check / access_intervention 기반 일부 자동화 — Q-034)
+- **Dossier / Scenario / Thesis / promoted Claim 의 자체 사이트 공개 노출**
+  (internal canonical store 유지 — ADR-0022 INV-0022-4, DEC-005)
 - **봇 감지 우회를 production dependency로** (ADR-0016 INV-0016-1)
 - **Raw third-party text의 클라우드 업로드** (ADR-0012 INV-0012-3, raw_cloud_policy=always_prohibited default)
 - **다양한 graph DB 동시 지원 / vendor-neutral 마이그레이션 자동화** (ADR-0014
@@ -101,62 +119,71 @@ ADR-0019).
 
 | ID | 요구사항 | 우선순위 | 관련 AC | Source (Round) | ADR |
 |---|---|---|---|---|---|
-| REQ-001 | 객체 모델은 9-stage(Source → Document → Snapshot → Claim → Dossier → Scenario → Thesis → ContentDraft → Publication)이며 source layer는 4-tier(Source/Document/Snapshot/Claim)로 분리한다 | must | AC-001 | R3, R6 | ADR-0011 |
+| REQ-001 | 객체 모델은 **10-stage**(Source → Document → Snapshot → Claim → Dossier → Scenario → **EditorialIntent** → Thesis → ContentDraft → Publication)이며 source layer는 4-tier(Source/Document/Snapshot/Claim)로 분리한다. EditorialIntent 는 Scenario revision 과 Thesis 사이의 anchor — 운영자 명시 lock 의무 (ADR-0025 INV-0025-4) | must | AC-001 | R3, R6 + ADR-0025 | ADR-0025 (supersedes ADR-0011 object model) |
 | REQ-002 | graph objects(Source, Document, Snapshot, Claim, Dossier, Scenario, Thesis, ContentDraft, Publication, Edge, ScenarioRevision, ManualClaimEntry, AccessIntervention)는 Neo4j Community Edition을 canonical store로 사용한다 | must | AC-002 | R18, R19 | ADR-0012, ADR-0014 |
 | REQ-003 | Snapshot은 fingerprint record(URL, accessed_at, content_hash, locator)다. R2 binary 보관은 예외(open-license dataset / 공식 허용 API / 자체 산출물)로만 허용. 일반 raw text R2 업로드는 영구 금지 (raw_cloud_policy=always_prohibited) | must | AC-003 | R8, R14 | ADR-0012 |
 | REQ-004 | Markdown vault에는 Document hub, Dossier, Scenario, Thesis, ContentDraft, Publication, scenario에 인용된 promoted claim만 둔다. candidate claim 자동 markdown 생성은 금지 | must | AC-004 | R3 | ADR-0012 |
-| REQ-005 | ID 체계는 `src_/doc_/snap_/clm_/dos_/scn_/ths_/drf_/pub_/edge_/run_/aci_/mcl_` 접두 + 단조 증가 식별자다 | must | AC-005 | R3, R6, R18 | ADR-0011 |
+| REQ-005 | ID 체계는 `src_/doc_/snap_/clm_/dos_/scn_/eit_/ths_/drf_/pub_/edge_/run_/aci_/mcl_/met_` 접두 + 단조 증가 식별자다 (eit_ = EditorialIntent ADR-0025, met_ = derived_metric ADR-0024) | must | AC-005 | R3, R6, R18 + ADR-0024 + ADR-0025 | ADR-0025 (supersedes ADR-0011), ADR-0024 |
 | REQ-006 | confidence 단일 필드는 사용하지 않는다. Document `reliability_tier`, Claim `extraction_confidence` + `claim_status`(8-state), Scenario assumptions[] `weight`, Source `collectability_score`로 분해한다 | must | AC-006 | R3, R9, R17 | ADR-0005, ADR-0011, ADR-0016 |
 | REQ-007 | claim evidence는 (quote nullable + locator + quote_hash + quote_reason + storage_level) 5-tuple이다. quote는 schema-level nullable, storage_level=excerpt_evidence일 때만 채워지며 quote_reason 명시 필수 | must | AC-007 | R3, R10 | ADR-0015 |
 | REQ-008 | edge 관계는 Neo4j typed relationships로 저장한다. v0 5종(SUPPORTS / CONTRADICTS / QUALIFIES / UPDATES / SUPERSEDES). frontmatter `supports[]/contradicts[]` 배열은 금지 | must | AC-008 | R3, R18 | ADR-0013 |
-| REQ-009 | extractor는 article(LLM) / dataset(parser) / report(LLM with structure prompt)로 분리한다 | must | AC-009 | R2, R3 | ADR-0006 |
-| REQ-010 | LLM 호출은 Haiku 4.5 1차 + Sonnet 4.6 escalate, prompt caching, batch API를 사용한다. `reliability_tier=high` ∧ `extraction_confidence ≥ 0.85`일 때 auto-accept한다 | must | AC-010 | R3 A1 | ADR-0006 |
+| REQ-009 | extractor는 article(LLM) / **dataset(Data Science Module — Polars + DuckDB + statsmodels + scipy deterministic, ADR-0024)** / report(LLM with structure prompt)로 분리한다. 1000+ rows / 50KB+ raw payload dataset 은 LLM 에 raw 직접 입력 금지, derived metric 으로 압축 후 입력 (INV-0024-4 / INV-0023-6) | must | AC-009 | R2, R3 + ADR-0024 | ADR-0006 (superseded by ADR-0023), ADR-0024 |
+| REQ-010 | LLM 호출은 ADR-0023 의 4-tier × multi-vendor 라우팅 (Tier 2 default GPT-5 mini / Tier 1 escalate GPT-5.5 Pro / Tier 0 selective GPT-5.5 Pro xthink + Opus 4.7 xhigh cross-review) 를 사용한다. Anthropic Sonnet 4.6 / Opus 4.7 은 (a) 도메인 명확 우위 입증 (b) cross-vendor review 강제 단계 (c) high-stakes flag 시에만. Google Gemini 는 탐색 보조 + Tier 3 비용효율 우위 시만 (메인/리뷰 X). 모든 vendor 에 prompt caching + batch API + strict schema + quote substring 검증 의무. `reliability_tier=high` ∧ `extraction_confidence ≥ 0.85` 일 때 auto-accept | must | AC-010 | R3 A1 + DEC-010 reflow | ADR-0023 (supersedes ADR-0006), DEC-010 |
 | REQ-011 | discovery(RSS / API / sitemap) → Source Registry(Tier A-D + collectability_score) → Collection Queue → fetch / fingerprint Snapshot / chunk → extract → review → search / query → dossier → scenario validate(impact_targets/transmission_channels) → thesis(stance + market_stance) → content + cite check 순서로 구현한다 | must | AC-011 | R3, R6, R17, R19 | (roadmap) |
 | REQ-012 | scenario validate는 falsifier / counterclaim(polarity-symmetric) / monitoring signal 누락을 차단한다. counterclaim direction tag(bull/bear/regime/mixed) manual v0 | must | AC-012 | R3, R19 | ADR-0009, ADR-0019 |
 | REQ-013 | cite check는 v0에서 5종 block(stale / retracted / horizon mismatch / unit mismatch / overclaim) + unresolved HIGH/CRITICAL access_intervention block 추가 = 5+1 block. v1+에서 6번째 warning(one-sided thesis without opposing/mitigating/uncertainty) | must | AC-013 | R3, R18, R23 | ADR-0015 |
 | REQ-014 | scenario는 시간에 따라 진화한다. `scenario_revisions` ledger + `SUPERSEDES`/`UPDATES` edge로 변경 이력을 추적한다 | must | AC-014 | R3 A4 | ADR-0009, ADR-0013 |
-| REQ-015 | review queue는 throttling 정책을 적용한다(`reliability_tier=high` ∧ `extraction_confidence ≥ 0.85` 자동 confirm) | must | AC-015 | R3 A3 | ADR-0006, ADR-0010 |
+| REQ-015 | review queue는 throttling 정책을 적용한다(`reliability_tier=high` ∧ `extraction_confidence ≥ 0.85` 자동 confirm) | must | AC-015 | R3 A3 | ADR-0023 (supersedes ADR-0006), ADR-0010 |
 | REQ-016 | stale 트리거는 (a) 시간 기반 (b) snapshot diff 기반 (c) counterclaim 등록 시 셋 다 적용한다 | must | AC-016 | R3 A2 | ADR-0010 |
 | REQ-017 | Source registry는 Tier A-D 분류 + collectability_score(automation_reliability, legal_policy_clarity, anti_bot_friction, preferred_mode) + access_method + source_perspective tag를 보유한다. 봇 감지 우회는 production dependency 아님 | must | AC-022 | R17 | ADR-0016, ADR-0019 |
 | REQ-018 | Source policy 3 필드 (archive_policy / raw_cloud_policy / external_llm_policy) + mode-aware policy_gate (inline_block / inline_warn / batch_report). 위험 행동은 어느 mode에서도 inline_block. Discovery=inline_warn / Extract·Cache·Embed·Cloud upload=inline_block / 탐색·콘텐츠 제작=batch_report / Publication preflight=inline_block | must | AC-023 | R14, R18 | ADR-0017 |
 | REQ-019 | 탐색·콘텐츠 제작 중 막힌 source는 access_interventions Neo4j 노드에 누적되고 세션 종료 시 batch report. severity 자동 산정(deterministic default, LLM 옵션). unresolved HIGH/CRITICAL은 publication 핵심 근거 사용 금지 | must | AC-024 | R18 | ADR-0017, ADR-0015 |
 | REQ-020 | Manual feedback inbound — `pipeline feedback add|bulk|link|from-report` + `pipeline intervention review <id>` 3-option. manual_claim_entries는 user_written_claim / user_opinion / referenced_quote 3-way 분리 (한 row 한 필드만). raw_text_stored=false 강제 | must | AC-025 | R18 | ADR-0018 |
-| REQ-021 | Scenario는 impact_targets[] + impact_direction_by_target (dict, target별 upside/downside/mixed/neutral) + transmission_channels[]를 보유한다. asymmetric은 derive. Thesis는 stance(constructive/cautionary/neutral/mixed/asymmetric/exploratory) + market_stance(optional v0, 필수 v1; bullish/bearish/range_bound/volatility_up/volatility_down/neutral) | must | AC-026 | R23, R25 | ADR-0019 |
-| REQ-022 | Source는 source_perspective tag (risk_observer/opportunity_observer/neutral/mixed)를 보유한다. Q21 Tier A seed 작성 시 분포 균형 강제 (risk_observer ≤ 50%, opportunity_observer ≥ 25%, neutral ≥ 15%) | must | AC-027 | R23 | ADR-0019 |
+| REQ-021 | Scenario는 impact_targets[] + impact_direction_by_target (dict, target별 upside/downside/mixed/neutral) + transmission_channels[]를 보유한다. asymmetric은 derive. Thesis는 stance(constructive/cautionary/neutral/mixed/asymmetric/exploratory) + market_stance(optional v0, 필수 v1; bullish/bearish/range_bound/volatility_up/volatility_down/neutral) + **EditorialIntent reference (ADR-0025 INV-0025-2) — Thesis 1개당 정확히 1개 EditorialIntent 와 link. bidirectional_weight_intent (intent) 와 stance + market_stance (thesis) align 의무 (INV-0025-6)** | must | AC-026 | R23, R25 + ADR-0025 | ADR-0019, ADR-0025 |
+| REQ-022 | Source는 source_perspective tag (risk_observer/opportunity_observer/neutral/mixed)를 보유한다. Tier A seed set 전체(size 무관, upper cap 없음 — Q-021)에 대해 분포 균형 강제 (risk_observer ≤ 50%, opportunity_observer ≥ 25%, neutral ≥ 15%; mixed 는 valid value 이지만 ratio 의무 4 dim 중 3 dim 에만 적용) | must | AC-027 | R23 + DEC-009 reflow | ADR-0019 |
 | REQ-023 | RAG `build_evidence_pack`은 v0에서 4 section(supporting_evidence / opposing_evidence / mitigating·amplifying / monitoring_signals)을 출력한다. LLM synthesis prompt는 mode 분리(balanced / specific) | must | AC-028 | R23, R25 | ADR-0019 |
 | REQ-024 | System metrics — v0 측정 9+개 (unsupported_sentence_rate, counterclaim_presence_rate, stale_violation_rate, policy_block_count, manual_claim_entry_rate, db_size_growth_rate, upside_claim_presence_rate, downside_claim_presence_rate, one_sided_warning_rate). 6 카테고리(데이터 품질/운영 성능/Policy safety/콘텐츠 production/추적성/시스템 건강) + evaluation harness | must | AC-029 | R15, R23 | ADR-0020 |
 | REQ-025 | Policy learning은 rule-based, "auto-tighten allowed, auto-relax prohibited". v0 Pattern 1 (source policy refinement). 자동 적용 X — propose만, accept는 사용자. 잘못된 rule은 자동 demote | must | AC-030 | R15 | ADR-0021 |
-| REQ-026 | 도메인 카테고리는 v0 core 7 (macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai) + secondary 1 (`digital_assets` — bitcoin/stablecoin entity 분리) = 8개. tag 5개(social_stability_information / demographics_migration / food_water_security / governance_institutions / critical_infrastructure)로 시작 후 dossier 승격 | must | AC-031 | R22 | (Q22) |
+| REQ-026 | 도메인 카테고리는 v0에서 **4 메타 카테고리** (정책 / 경제 / 사회 / 대중문화) 로 lock한다 (DEC-004, Q-022 supersede). 기존 8 enum(macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai / digital_assets) + tag 5개는 4 메타 카테고리의 `subtopic_tags[]` 로 강등 보존 — v1+ 누적 dossier 기반 재승격(Q-032) | must | AC-031 | R22 | DEC-004 (supersedes Q-022) |
+| REQ-027 | Publishing primary 는 **자체 사이트 (Astro 5.0 + Cloudflare Pages)** 이고 vault `publications/` 디렉토리(4 subdirectory: blog_long / newsletter / youtube_long / shorts)가 single source 다 (ADR-0022). 외부 플랫폼(Substack / YouTube / X)은 cross-post target — 모든 외부 발행물의 cite footnote는 자체 사이트 URL을 canonical anchor 로 가리킨다 (ADR-0022 INV-0022-2). v0 turn-key 발행 scope 는 blog_long 1개 + 자체 사이트 + manual cross-post + manual correction approve (DEC-005). TTS / auto cross-post / 자동 retraction trigger 는 v1+ (Q-031 / Q-033 / Q-034). cite check 5+1(ADR-0015)의 일부는 Astro Content Collection + Zod schema 로 **build-time enforce** (dead-link cite_refs / invalid status / dead-link editorial_intent_id / editorial_quality_rubric_passed = false 는 build fail, ADR-0022 INV-0022-3 + ADR-0025 + DEC-012). **PUB-1A.5 accept 시 운영자 Editorial Quality Rubric (AC-036~042, DEC-012) manual verify 의무 — Editorial gate (DEC-012) vs Technical gate (ADR-0015 cite check 5+1) 분리** | must | AC-013, AC-018, AC-028, AC-034, AC-035, **AC-036, AC-037, AC-038, AC-039, AC-040, AC-041, AC-042** | (R25 + v0 turn-key + GPT meta-review) | ADR-0022, DEC-005, DEC-006, DEC-012 |
 
 ### Non-functional (NFR-###)
 
 | ID | 카테고리 | 목표 | 측정 방법 | 관련 AC | Source (Round) | ADR |
 |---|---|---|---|---|---|---|
 | NFR-001 | performance | graph object 1만 건 시점에서 단일 검색 < 1초 (p95) | bench script: Neo4j Community + native FTS cold cache 검색, 1만 graph object fixture (SPIKE-001 갱신 — SQLite+FTS5에서 Neo4j로 대상 변경) | AC-002 | (rubric) | ADR-0012, ADR-0014 |
-| NFR-002 | reproducibility | 동일 source set + scenario 모델로 다른 운영자가 같은 결론 도달 가능 | scenario evidence + edge ledger reproducibility test (수동 + diff) | AC-017 | (rubric) R3 A4 | ADR-0009 |
+| NFR-002 | reproducibility | 동일 source set + scenario revision + **EditorialIntent** 로 다른 운영자가 같은 thesis + draft 결론 도달 가능. (ADR-0024 Data Science Module 의 derived_metric reproducibility 3-tuple + ADR-0025 EditorialIntent anchor 보강) | scenario evidence + edge ledger + EditorialIntent + derived_metric_ledger reproducibility test (수동 + diff) | AC-017 | (rubric) R3 A4 + ADR-0024 + ADR-0025 | ADR-0009, ADR-0024, ADR-0025 |
 | NFR-003 | traceability | 콘텐츠 한 문장 → 원 source까지 5단계 이내 (Publication → ContentDraft → Thesis → Scenario → Claim → Snapshot → Source) — 9-stage 안에서 5단계 이내 유지(선택적 단계 skip) | cite check report에서 trace depth 측정 | AC-018 | (rubric) | ADR-0011 |
-| NFR-004 | cost | 일일 LLM 비용 상한 설정 + 초과 시 조용한 backoff | `run_` 단위 비용 ledger + threshold alert | AC-019 | R3 A1 | ADR-0006 |
+| NFR-004 | cost | 일일 LLM 비용 상한 soft $5/hard $7.5 + 주간 $25 + Tier 0 호출 일일 cap 5회 + backfill 별도 budget bucket (DEC-010). 초과 시 큐 backoff + 알람 | `run_` 단위 비용 ledger (vendor + tier + cross_vendor_review_of + domain_override_reason 필드 포함) + threshold alert + cross_vendor_review_coverage ≥ 0.95 KPI | AC-019 | R3 A1 + DEC-010 reflow | ADR-0023 (supersedes ADR-0006), DEC-010 |
 | NFR-005 | safety | 외부 인용 시 `quote ≤ 200자` 강제 + quote_reason 명시 필수 + storage_level=excerpt_evidence | extract pipeline assertion + cite check | AC-007 | R3, R10 | ADR-0015 |
 | NFR-006 | durability | snapshot은 fingerprint(URL+content_hash+locator)로 변경 감지 가능. 원문 변경 후 재검증 시 새 fetch 필요 (raw bytes 미보관) | content_hash diff 검출 + R2 round-trip은 permitted artifact만 | AC-020 | R8 | ADR-0012 |
-| NFR-007 | maintainability | 새로운 source type을 LLM/parser 분리 원칙 안에서 추가 가능 | extractor interface contract + 1개 신규 type 추가 dry-run | AC-021 | R2, R3 | ADR-0006 |
+| NFR-007 | maintainability | 새로운 source type을 LLM/parser/data-science-module 분리 원칙 안에서 추가 가능 | extractor interface contract + 1개 신규 type 추가 dry-run | AC-021 | R2, R3 + ADR-0024 | ADR-0023 (supersedes ADR-0006), ADR-0024 |
 | NFR-008 | legal_safety | 모든 cloud 업로드 객체에 archive_policy 통과 audit log, raw third-party text 0건 cloud 저장 | policy_decisions ledger 검사 (block 케이스 빈도 + 모든 R2 upload의 source_material_policy check) | AC-032 | R8, R14 | ADR-0012, ADR-0017 |
 | NFR-009 | bidirectional_balance | publication 콘텐츠가 한 방향(direction 6값 중 하나)으로 trailing 50개 ≥ 70% 쏠리면 alert (v1+) | thesis_polarity_distribution metric | AC-033 | R23, R25 | ADR-0019, ADR-0020 |
+| NFR-010 | publish_traceability | 자체 사이트의 모든 publication URL은 canonical cite anchor — 외부 플랫폼 발행물 100%가 자체 사이트 URL을 cite footnote로 가리킨다 (cross-post lint 검사) | cross-post lint (ADR-0022 INV-0022-2) | AC-034 | R25 + v0 turn-key | ADR-0022 |
 
 ## Assumptions
 
 - ASM-001: 운영자가 Cloudflare R2 + SQLite(local) + self-host Neo4j Community
   Edition(Docker / binary) 운영을 감당할 수 있다.
-- ASM-002: Haiku 4.5 + Sonnet 4.6의 prompt caching + batch API가 비용 모델을
-  유지할 만큼 캐시 적중률을 만든다.
+- ASM-002: ADR-0023 의 multi-vendor (OpenAI GPT-5 nano/mini/standard/xthink
+  + Anthropic Haiku 4.5/Sonnet 4.6/Opus 4.7 + Google Gemini 2.5 Flash)
+  4-tier 라우팅이 prompt caching + batch API + Data Science Module 통과
+  를 통해 DEC-010 의 cost ceiling (soft $5/hard $7.5/weekly $25/Tier 0
+  cap 5회/day) 안에서 운영 가능. 운영 200+ 호출 후 vendor 별 cache_hit_rate
+  / cost_per_promoted_claim / faithfulness_rate 실측 SPIKE 로 재조정.
 - ASM-003: Markdown vault에 promoted claim만 들어가도 운영자가 컨텍스트를
   잃지 않는다.
 - ASM-004: Neo4j Community Edition + native FTS가 1만 graph object 규모에서
   NFR-001을 만족한다 (SPIKE-001로 검증, 대상 SQLite+FTS5에서 Neo4j로 갱신).
 - ASM-005: 외부 source 대부분이 fetch 시점 sha256 content_hash로 변경 감지가
   충분하다.
-- ASM-006: Tier A source(공식 API/RSS/open dataset) 30~50개 seed로 1인 콘텐츠
-  production scale을 충족 (매일 수천 RSS items + 주당 수십~수백 reports).
-  Tier B/C/D는 manual fallback으로 흡수.
+- ASM-006: Tier A source(공식 API/RSS/open dataset) seed 가 1인 콘텐츠
+  production scale을 충족 — 개수 상한 없음 (Q-021 cap 폐기, 운영 부담
+  안에서 누적 자유). v0 turn-key 진입 분포는 `docs/research/source-seed-
+  list-2026-05.md` 72 source proposed (경제 22 + 정책 17 + 사회 18 +
+  대중문화 15, 한국 24개 + 글로벌 48개). Tier B/C/D는 manual fallback으로
+  흡수.
 - ASM-007: Neo4j Community GPL v3 boundary는 1인 internal use에서 contagion
   없다 (Q-020 검토 후 확인).
 
@@ -193,16 +220,38 @@ Q-<NNN>.md`로 이동.
 - Q-008: Thesis ID 체계 (`ths_<sha256[0:10]>` vs draft 내부 thesis_text)
 - Q-012: graph DB 도입 후 SQLite ↔ Neo4j sync 정책 (CDC vs batch)
 - Q-020: Neo4j Community GPL v3 boundary (1인 internal use vs 배포)
-- Q-021: Tier A source universe 초기 seed 30~50개 + perspective 분포 균형
-- Q-022: v0 카테고리 8개 (core 7 + `digital_assets`) finalize + tag 5개 +
-  axis transmission_channel 신규
+- Q-021: Tier A source seed (size cap 없음 — DEC-009 reflow 후 v0 entry
+  72 source `docs/research/source-seed-list-2026-05.md`, 경제 22 + 정책
+  17 + 사회 18 + 대중문화 15, 한국 24개 + 글로벌 48개) + perspective
+  분포 균형 (전체 seed 기준 risk 19% / opportunity 29% / neutral 42% /
+  mixed 10%, AC-027 안전 마진 4%)
+- ~~Q-022~~: v0 카테고리 8개 — **resolved by DEC-004** (v0 4 메타
+  카테고리로 축소: 정책 / 경제 / 사회 / 대중문화. 8 enum + tag 5개는
+  subtopic_tags[] 로 강등 보존)
 - Q-024: Neo4j-specific 기능 활용 boundary (APOC standard vs extended, GDS
   Community 알고리즘 list, Cypher 5.x 범위)
-- Q-025: 외부 repo 부트스트랩 cadence (week 1-9)
-- Q-026: Vault sync trigger (publication 시점 자동 vs manual)
-- Q-027: 백업 schedule + R2 lifecycle (Neo4j dump 일간 30d / SQLite snapshot
-  일간 90d / JSONL audit 월간 1y / R2 derived 무기한 / open-license versioned)
-- Q-028: LLM API cost 통제 정책 (prompt caching + batch + per-day ceiling)
+- Q-025: 이 repo (= second-brain vault 기준 "외부 repo") 부트스트랩 cadence
+  (week 1-9 가이드)
+- ~~Q-026~~: Vault sync trigger — **resolved by DEC-006** (ADR-0022 자체 사이트
+  stack 결정 후 git push 단일 trigger로 단순화. Cloudflare Pages git
+  integration이 publications/ 변경분 자동 build + deploy)
+- Q-031: TTS v1 timing + provider (외주 vs 자체) — DEC-005 v0 TTS deferred
+  연장
+- Q-032: ContentDraft 4-format auto-generate phasing (v1+ youtube_long /
+  shorts / newsletter) — DEC-005 v0 blog_long only 연장
+- Q-033: 외부 플랫폼 auto cross-post timing (Substack / YouTube / X) —
+  DEC-005 v0 manual 연장
+- Q-034: Auto retraction trigger 정책 v1+ (manual approve → auto 전환 기준)
+  — DEC-005 v0 manual approve 연장
+- ~~Q-027~~: **resolved by DEC-007** (retention / R2 lifecycle 3 expire
+  rule + 의미적 GC batch 3개 + soft-delete tombstone 14d grace +
+  RETENTION_PROTECTED_KINDS 상수 + raw_cache 24h~7d ceiling)
+- ~~Q-028~~: **resolved by DEC-008 → re-resolved by DEC-010** (LLM routing
+  v2 multi-vendor — OpenAI GPT default + Anthropic dual-vendor + Google
+  exploration-only + minimal cross-vendor review at preflight + Data
+  Science Module (ADR-0024) for dataset + cost ceiling soft $5/hard $7.5/
+  weekly $25 + Tier 0 일일 cap 5회 + backfill bucket + KPI 6개. DEC-008
+  의 Anthropic-only 라우팅은 supersede 됨)
 - Q-029: ImpactAssessment v0 embedded dict vs v1 별도 Neo4j 노드
 - Q-030: counterclaim multi-relation v1 도입 우선순위 (weakens/strengthens/
   mitigates/amplifies)
