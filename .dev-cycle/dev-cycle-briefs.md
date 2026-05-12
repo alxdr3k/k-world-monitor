@@ -117,3 +117,33 @@
 - 리뷰/반영: 상태 문서 변경만 (INFRA-1A.8 landed). PR 불필요.
 - 리스크: 없음
 
+
+---
+
+사이클 6 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일:
+  - Tier A source seed 72개(data/sources_seed.yaml) 작성 및 commit — economy 22, policy 17, society 18, pop_culture 15. 모든 소스 required 필드, 고유 slug, raw_cloud_policy=always_prohibited, reliability_tier=0 검증 완료.
+  - TEST-027 신규 생성(tests/unit/perspective_distribution_test.ts) — REQ-022 canonical label 검증, count=72 확인, AC-027 분포 경계값 3개 검증 (5 assertions).
+  - Q-021 status: resolved, resolution 필드 채움. docs/context/current-state.md 활성 slice 및 Q-021 항목 갱신. docs/04_IMPLEMENTATION_PLAN.md INFRA-1A.6 planned→in_progress.
+- 결론: INFRA-1A.6 landed (PR #12 merged 2026-05-12). 72개 Tier A source seed commit, Q-021 resolved, AC-027 분포 lint test 신규. 분포: risk_observer 19.4% / opportunity_observer 29.2% / neutral 41.7% / mixed 9.7% — AC-027 통과 (안전 마진 4%). INFRA-1B.1 의존성(source seed) 해소. RSS endpoint 검증은 INFRA-1B.1에서.
+- 검증: bun test 119 pass / 0 fail; tsc clean; invariant:check 0 errors; 72 slugs 고유 및 enum 유효
+- 리뷰/반영: Step 6 review pass 1/20: 0 actionable findings. PR #12 CI pass, squash merged 2026-05-12.
+- 리스크: 없음 (evidence update는 cycle 7에서 처리 완료)
+사이클 7 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일: docs/04_IMPLEMENTATION_PLAN.md INFRA-1A.6 status in_progress→landed + evidence (PR #12) 기록. docs/context/current-state.md active slice 갱신. PR #13 merged.
+- 결론: INFRA-1A.6 implementation plan 상태 정정 완료. status=landed, evidence=PR #12. cycle 6에서 PR merge 후 implementation plan 업데이트 누락 — status-only docs fix.
+- 변경 범위: docs_only_status (2 files)
+- 검증 계획: docs_only, full CI 필요
+- 다음 검토 후보:
+  - INFRA-1A.3: R2 버킷 + permitted_artifact prefix 정책 + raw_cloud_policy=always_prohibited 강제 + sha256 round-trip 테스트. R2 credentials Doppler 확보됨(s3_* × 4). (planned) 시작 조건: INFRA-1A.1 완료, credentials 확보.
+  - INFRA-1B.1: Source Registry + Collection Queue + manual_intake CLI. INFRA-1A.6 landed으로 의존성 해소. (planned) 시작 조건: INFRA-1A.2, INFRA-1A.6 모두 landed.
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증: PR #13 CI pass (squash merge 2026-05-12)
+- 리뷰/반영: PR #13 CI pass, no review comments, squash merged 2026-05-12.
+- 리스크: 없음
+
