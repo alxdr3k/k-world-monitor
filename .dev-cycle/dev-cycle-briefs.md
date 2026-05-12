@@ -47,3 +47,51 @@
 - 리스크:
   - PR #9 CI 아직 pending — merge 전 CI 결과 대기 필요 (이슈 생성 실패: /home/user/k-world-monitor/.agents/scripts/dev-cycle-helper/brief-render.sh: line 206: gh: command not found) 다음 조치: CI 완료 후 merge, INFRA-1A.7 landed 처리 후 다음 사이클
 
+사이클 3 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일:
+  - Codex P1 finding 수락: SOURCE_PERSPECTIVE enum 값을 PRD REQ-022 canonical 값(risk_observer/opportunity_observer/neutral/mixed)으로 수정
+  - Codex P2 finding 수락: impact_direction_by_target 방향 레이블을 REQ-021 canonical 값(upside/downside/mixed/neutral)으로 수정 (기존 positive/negative/mixed 틀림)
+  - 기존 v1_schema.cypher의 source_perspective comment도 동일하게 수정 (pre-existing bug)
+  - bidirectional_schema_test.ts — isSourcePerspective 테스트 + AC-027 distribution helper를 canonical enum 값 기준으로 수정
+  - INFRA-1A.7 status landed 처리, current-state.md 업데이트
+  - PR #9 merge (squash), main sync, 작업 branch 삭제
+- 결론: INFRA-1A.7 PR #9 merge 완료. Codex P1/P2 finding 수락 후 fix 반영. SOURCE_PERSPECTIVE=risk_observer/opportunity_observer, direction=upside/downside/mixed/neutral (REQ-021/REQ-022 준수) CI pass, all review comments outdated (fix 반영), mergeable_state clean
+- 변경 범위: code_or_runtime (5 files), contract surface
+- 검증 계획: full, full CI 필요
+- 다음 검토 후보:
+  - INFRA-1A.8: Backup runbook — docs-only, AC-032. INFRA-1A.2 landed이나 Q-027 resolution 상태 확인 필요 (planned) 시작 조건: Q-027 resolution 여부 확인
+  - INFRA-1A.6: Source registry seed 72개 + source_perspective 분포 균형 (planned) 시작 조건: Q-021 resolution 필요
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증:
+  - bun test — 113개 테스트 pass (0 fail)
+  - tsc --noEmit — 0 에러
+  - GitHub Actions check: completed/success
+- 리뷰/반영: PR #9 squash merge 완료 (2026-05-12). Codex review outdated (all findings fixed). main sync 완료.
+- 리스크: 없음
+
+사이클 4 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일:
+  - INFRA-1A.8: docs/05_RUNBOOK.md Data Operations 섹션 전면 업데이트 — backup schedule 표(Neo4j 일간 30d / SQLite 일간 90d / JSONL audit 월간 무기한), R2 lifecycle rules(expire 3개 + transition 6개), retention batch 3 cadence, RETENTION_PROTECTED_KINDS 9개 상수 코드 블록, soft-delete 2단계 패턴, 복구 절차, 연간 retention drill (AC-032 / DEC-007)
+  - INFRA-1A.8 status in_progress, active slice 업데이트 (04_IMPLEMENTATION_PLAN.md, current-state.md)
+- 결론: INFRA-1A.8 구현 완료 — docs-only change, AC-032 gate 요건 전부 충족. PR #10 open (CI queued) DEC-007 accepted 기준 backup runbook 전면 반영. 리뷰 Pass 1+2 각 0 actionable findings
+- 변경 범위: docs_only_contract (3 files), contract surface
+- 검증 계획: docs_contract, full CI 필요
+- 다음 검토 후보:
+  - INFRA-1B.1: Source Registry + Collection Queue + manual_intake CLI + source_policy 3 필드 + 8 위험 행동 트리거 (planned) 시작 조건: INFRA-1A.2 landed (완료) + INFRA-1A.6 완료 필요 (Q-021 open)
+  - INFRA-1A.6: Source registry seed 72개 + source_perspective 분포 균형 + collectability_score 초기치 (planned) 시작 조건: Q-021 resolution — 사용자 list review + accept 필요
+  - INFRA-1A.3: Cloudflare R2 wrapper (storage/r2/) (planned) 시작 조건: INFRA-1A.2 landed (완료) + R2 credential 등록
+- 자동 승격 검토:
+  - INFRA-1A.8: 이번 사이클에서 구현 중 — auto-promotion 대상 아님 (in_progress) - 자동 승격 제외 이유: 이미 in_progress
+- 자동 승격: 없음
+- 검증:
+  - git diff --check — OK, typecheck 0 에러
+  - Self-adversarial review Pass 1 + Pass 2 — F1~F9 검토, 0 actionable findings
+- 리뷰/반영: PR #10 open (claude/infra-1a8-backup-runbook → main), CI queued; 리스크 이슈 생성 실패
+- 리스크:
+  - PR #10 CI 아직 queued — merge 전 완료 대기 (이슈 생성 실패: /home/user/k-world-monitor/.agents/scripts/dev-cycle-helper/brief-render.sh: line 206: gh: command not found) 다음 조치: CI 완료 후 merge, INFRA-1A.8 landed 처리 후 다음 사이클
+
