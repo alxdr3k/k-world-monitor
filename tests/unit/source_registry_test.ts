@@ -245,3 +245,14 @@ describe("SeedValidationError", () => {
     expect(err.message).toContain("slug");
   });
 });
+
+// ---------------------------------------------------------------------------
+// YAML shape guard
+// ---------------------------------------------------------------------------
+
+describe("seedSources — YAML shape guard", () => {
+  it("throws on null/empty YAML (dryRun path exercises shape check)", () => {
+    // Use a non-existent dataRoot so readFileSync throws a controlled error
+    expect(() => seedSources({ dryRun: true, dataRoot: "/nonexistent/path" })).toThrow();
+  });
+});

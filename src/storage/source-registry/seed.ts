@@ -111,8 +111,17 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
   const seedPath = join(dataRoot, "sources_seed.yaml");
 
   const raw = readFileSync(seedPath, "utf-8");
-  const parsed = yamlLoad(raw) as SeedFile;
-  const sources = parsed.sources;
+  const parsed = yamlLoad(raw);
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !Array.isArray((parsed as Record<string, unknown>)["sources"])
+  ) {
+    throw new Error(
+      `sources_seed.yaml must be an object with a sources array (got ${parsed === null ? "null" : typeof parsed})`
+    );
+  }
+  const sources = (parsed as SeedFile).sources;
 
   // Validate all sources and check slug uniqueness before any DB writes
   const slugsSeen = new Set<string>();
