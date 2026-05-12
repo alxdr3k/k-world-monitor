@@ -192,7 +192,7 @@ export async function createManualClaimEntry(
           quoteReason: input.quoteReason ?? null,
           attributionJson: input.attribution ? JSON.stringify(input.attribution) : null,
           selfAssessedConfidence: input.selfAssessedConfidence,
-          interventionId: input.interventionId ?? null,
+          interventionId: input.interventionId || null,
           createdAt: now,
         }
       );

@@ -9,11 +9,13 @@
 // Status guard: only interventions with status 'pending_user_review' can be resolved;
 // re-resolving is rejected to prevent conflicting terminal-action writes.
 //
-// Ordering invariant (P1):
-//   manual_claim — claim is created BEFORE the intervention is resolved; if resolve fails
-//     the claim exists but the intervention stays pending and can be retried.
-//   temp_text — SQLite cache row is inserted BEFORE resolve; if resolve fails the cache
-//     row is deleted (compensation) so the intervention stays pending and can be retried.
+// Ordering invariant:
+//   manual_claim — intervention context (status, provenance) is fetched first to guard
+//     against creating claims for already-resolved interventions. Claim is created BEFORE
+//     the status is transitioned; if resolve fails the intervention stays pending and retryable.
+//   temp_text — intervention context is fetched first (same guard). SQLite cache row is
+//     inserted BEFORE resolve; if resolve fails the cache row is deleted (compensation)
+//     so no orphan rows accumulate.
 
 import { ulid } from "ulid";
 import { withSession } from "../../storage/neo4j/connection";
@@ -32,6 +34,13 @@ export interface ReviewResult {
   resolvedAt: string;
   manualClaimRecord?: ManualClaimRecord;
   rawCacheItemId?: string;
+}
+
+interface InterventionContext {
+  status: string;
+  sessionId: string;
+  sourceId: string;
+  url: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,23 +86,32 @@ async function resolveIntervention(
 }
 
 // ---------------------------------------------------------------------------
-// Neo4j: fetch the source URL stored on an AccessIntervention node.
-// Used by temp_text to ensure cache provenance matches the intervention record.
+// Neo4j: fetch intervention context (status, provenance) for pre-validation.
+// Loaded before any side effects (claim creation, cache insert) so already-resolved
+// interventions are rejected without mutating Neo4j or SQLite.
+// Provenance fields (sessionId, sourceId, url) are used to keep ManualClaimEntry
+// and raw_cache_items data consistent with the AccessIntervention they resolve.
 // ---------------------------------------------------------------------------
 
-async function fetchInterventionUrl(interventionId: string): Promise<string> {
+async function fetchInterventionContext(interventionId: string): Promise<InterventionContext> {
   return withSession(async (session) => {
     const result = await session.run(
-      `MATCH (i:AccessIntervention {intervention_id: $interventionId}) RETURN i.url AS url`,
+      `MATCH (i:AccessIntervention {intervention_id: $interventionId})
+       RETURN i.status AS status, i.session_id AS sessionId, i.source_id AS sourceId, i.url AS url`,
       { interventionId }
     );
-    const url = result.records[0]?.get("url") as string | null;
-    if (!url) {
+    const record = result.records[0];
+    if (!record) {
       throw new Error(
-        `temp_text: AccessIntervention not found or has no url for id='${interventionId}'.`
+        `reviewIntervention: AccessIntervention not found for id='${interventionId}'.`
       );
     }
-    return url;
+    return {
+      status: record.get("status") as string,
+      sessionId: record.get("sessionId") as string,
+      sourceId: record.get("sourceId") as string,
+      url: record.get("url") as string,
+    };
   });
 }
 
@@ -101,7 +119,6 @@ async function fetchInterventionUrl(interventionId: string): Promise<string> {
 // SQLite: raw_cache_items for temp_text (ADR-0021 integration).
 // Stores the intervention source URL (loaded from Neo4j) as a cache reference.
 // Raw text is NOT persisted (INV-0018-3, ADR-0012 INV-0012-3).
-// sessionId is required (FK to research_session; no "unknown" fallback).
 // Returns the cache_id, or throws on any error.
 // ---------------------------------------------------------------------------
 
@@ -131,8 +148,6 @@ export async function reviewIntervention(
   opts: {
     /** Required for manual_claim. */
     manualClaimInput?: ManualClaimInput;
-    /** Required for temp_text: FK to research_session(session_id). */
-    sessionId?: string;
   } = {}
 ): Promise<ReviewResult> {
   const resolvedAt = new Date().toISOString();
@@ -148,12 +163,21 @@ export async function reviewIntervention(
     if (!opts.manualClaimInput) {
       throw new Error("manualClaimInput is required for manual_claim action.");
     }
-    // Claim-first ordering: createManualClaimEntry runs before resolveIntervention so
-    // that if claim creation fails the intervention stays pending and can be retried.
-    // If resolveIntervention fails after claim creation the intervention stays pending;
-    // the orphan claim is detectable via the :RESOLVES edge it already carries.
+    // Load intervention context before creating any Neo4j nodes:
+    // 1. Reject already-resolved interventions so we don't create orphan claims.
+    // 2. Override provenance fields (sessionId, sourceId, url) from the intervention
+    //    record so the ManualClaimEntry is consistent with the AccessIntervention it resolves.
+    const ctx = await fetchInterventionContext(interventionId);
+    if (ctx.status !== "pending_user_review") {
+      throw new Error(
+        `reviewIntervention: intervention '${interventionId}' is not reviewable (status='${ctx.status}').`
+      );
+    }
     const record = await createManualClaimEntry({
       ...opts.manualClaimInput,
+      sessionId: ctx.sessionId,
+      sourceId: ctx.sourceId,
+      url: ctx.url,
       interventionId,
     });
     await resolveIntervention(interventionId, "resolved_manual_claim", resolvedAt);
@@ -161,21 +185,30 @@ export async function reviewIntervention(
   }
 
   if (action === "temp_text") {
-    if (!opts.sessionId) {
-      throw new Error("sessionId is required for temp_text action (FK to research_session).");
+    // Load intervention context for:
+    // 1. Pending-state pre-check — avoids creating SQLite rows for already-resolved interventions.
+    // 2. URL provenance — cache entry must use the intervention's own source URL.
+    // 3. Session consistency — cache row must belong to the intervention's session.
+    const ctx = await fetchInterventionContext(interventionId);
+    if (ctx.status !== "pending_user_review") {
+      throw new Error(
+        `reviewIntervention: intervention '${interventionId}' is not reviewable (status='${ctx.status}').`
+      );
     }
-    // Load URL from the intervention node so cache provenance matches the Neo4j record
-    // exactly — caller-supplied URLs could silently diverge (P2 guard).
-    const interventionUrl = await fetchInterventionUrl(interventionId);
-    // SQLite-first ordering: insert the cache row before resolving so that if
-    // resolveIntervention fails the intervention stays pending and can be retried.
-    // Compensate (delete the cache row) on Neo4j failure to avoid orphan cache entries.
-    const rawCacheItemId = registerTempTextUrl(interventionUrl, opts.sessionId);
+    // SQLite-first: insert cache row before resolving so a Neo4j failure leaves the
+    // intervention pending and retryable. Delete the row (compensate) on resolve failure
+    // so orphan cache entries don't accumulate. Wrap the delete in try/catch so a cleanup
+    // failure does not mask the original resolve error.
+    const rawCacheItemId = registerTempTextUrl(ctx.url, ctx.sessionId);
     try {
       await resolveIntervention(interventionId, "resolved_temp_text", resolvedAt);
-    } catch (err) {
-      getDb().prepare("DELETE FROM raw_cache_items WHERE cache_id = ?").run(rawCacheItemId);
-      throw err;
+    } catch (resolveErr) {
+      try {
+        getDb().prepare("DELETE FROM raw_cache_items WHERE cache_id = ?").run(rawCacheItemId);
+      } catch {
+        // swallow cleanup error — original resolve error is authoritative
+      }
+      throw resolveErr;
     }
     return { interventionId, action, resolvedAt, rawCacheItemId };
   }

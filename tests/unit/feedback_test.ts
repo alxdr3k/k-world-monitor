@@ -15,17 +15,28 @@ process.env["SQLITE_PATH"] = ":memory:";
 
 const neo4jRuns: Array<{ query: string; params: Record<string, unknown> }> = [];
 let neo4jShouldThrow = false;
+// Controls the status returned by fetchInterventionContext (used by manual_claim/temp_text).
+let mockInterventionStatus = "pending_user_review";
 
 mock.module("../../src/storage/neo4j/connection", () => ({
   withSession: async <T>(fn: (session: unknown) => Promise<T>): Promise<T> => {
-    // Returns matched=1 for all existence-check queries (count(i)/count(s) AS matched)
-    // so node-exists guards in resolveIntervention / createManualClaimEntry pass in unit tests.
-    // Returns a stable URL for fetchInterventionUrl (used by temp_text path).
+    // Returns context row for fetchInterventionContext queries (AS sessionId distinguishes them).
+    // Returns matched=1 for existence-check queries (AS matched / RETURN count).
     const mockRun = async (query: string, params: Record<string, unknown>) => {
       if (neo4jShouldThrow) throw new Error("Neo4j error");
       neo4jRuns.push({ query, params });
-      if (query.includes("RETURN i.url AS url")) {
-        return { records: [{ get: (_k: string) => "https://graph.example.com/intervention-source" }] };
+      if (query.includes("AS sessionId")) {
+        return {
+          records: [{
+            get: (k: string) => {
+              if (k === "status") return mockInterventionStatus;
+              if (k === "sessionId") return "sess_TMP";
+              if (k === "sourceId") return "src_TEST";
+              if (k === "url") return "https://graph.example.com/intervention-source";
+              return null;
+            },
+          }],
+        };
       }
       if (
         query.includes("AS matched") ||
@@ -96,6 +107,7 @@ function setupDb() {
 beforeEach(() => {
   neo4jRuns.length = 0;
   neo4jShouldThrow = false;
+  mockInterventionStatus = "pending_user_review";
   setupDb();
 });
 
@@ -324,6 +336,26 @@ describe("reviewIntervention — manual_claim", () => {
     expect(resolveQ).toBeTruthy();
   });
 
+  it("overrides provenance (sessionId, sourceId, url) from intervention context", async () => {
+    // baseInput uses sess_TEST/src_TEST/example.com; mock returns sess_TMP/src_TEST/graph URL.
+    await reviewIntervention("aci_TEST003b", "manual_claim", {
+      manualClaimInput: baseInput(),
+    });
+    const createQ = neo4jRuns.find((r) => r.query.includes("CREATE (m:ManualClaimEntry"))!;
+    expect(createQ.params["sessionId"]).toBe("sess_TMP");
+    expect(createQ.params["sourceId"]).toBe("src_TEST");
+    expect(createQ.params["url"]).toBe("https://graph.example.com/intervention-source");
+  });
+
+  it("throws when intervention is already resolved (pending-state pre-check)", async () => {
+    mockInterventionStatus = "resolved_ignore";
+    await expect(
+      reviewIntervention("aci_TEST003c", "manual_claim", { manualClaimInput: baseInput() })
+    ).rejects.toThrow("not reviewable");
+    // No ManualClaimEntry should have been created.
+    expect(neo4jRuns.find((r) => r.query.includes("CREATE (m:ManualClaimEntry"))).toBeUndefined();
+  });
+
   it("throws when manualClaimInput is missing", async () => {
     await expect(
       reviewIntervention("aci_TEST004", "manual_claim")
@@ -333,10 +365,8 @@ describe("reviewIntervention — manual_claim", () => {
 
 describe("reviewIntervention — temp_text", () => {
   it("registers URL in raw_cache_items and marks resolved_temp_text", async () => {
-    // URL is loaded from the intervention node (mock returns graph.example.com URL).
-    const result = await reviewIntervention("aci_TEST005", "temp_text", {
-      sessionId: "sess_TMP",
-    });
+    // URL and sessionId are loaded from the intervention node (fetchInterventionContext).
+    const result = await reviewIntervention("aci_TEST005", "temp_text");
     expect(result.action).toBe("temp_text");
     expect(result.rawCacheItemId).toMatch(/^rcache_/);
 
@@ -344,7 +374,7 @@ describe("reviewIntervention — temp_text", () => {
     expect(resolveQ).toBeTruthy();
 
     // Verify SQLite row uses real v1 schema columns (no raw text stored — INV-0018-3).
-    // URL is sourced from the intervention graph node, not caller-supplied.
+    // URL and session_id are sourced from the intervention context, not caller-supplied.
     const { getDb } = require("../../src/storage/sqlite/connection");
     const row = getDb()
       .prepare("SELECT * FROM raw_cache_items WHERE cache_id = ?")
@@ -356,10 +386,13 @@ describe("reviewIntervention — temp_text", () => {
     expect(row!["embedded"]).toBe(0);
   });
 
-  it("throws when sessionId is missing", async () => {
-    await expect(
-      reviewIntervention("aci_TEST007", "temp_text", {})
-    ).rejects.toThrow("sessionId is required");
+  it("throws when intervention is already resolved (pending-state pre-check)", async () => {
+    mockInterventionStatus = "resolved_temp_text";
+    await expect(reviewIntervention("aci_TEST007b", "temp_text")).rejects.toThrow("not reviewable");
+    // No cache row should have been inserted.
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const count = (getDb().prepare("SELECT COUNT(*) AS n FROM raw_cache_items").get() as { n: number }).n;
+    expect(count).toBe(0);
   });
 });
 
