@@ -7,7 +7,7 @@
 
 import { ulid } from "ulid";
 import { withSession } from "../../storage/neo4j/connection";
-import { computeSeverity, type PolicyResult, type Severity } from "./severity";
+import { computeSeverity, type GateMode, type PolicyResult, type Severity } from "./severity";
 
 export interface InterventionInput {
   sessionId: string;
@@ -16,6 +16,9 @@ export interface InterventionInput {
   sourceName: string;
   attemptedAction: string;
   accessResult: string;
+  /** Gate mode: determines severity and inline vs batch disposition. */
+  gateMode: GateMode;
+  /** Canonical policy outcome for this source (manual_only | metadata_only | excluded). */
   policyResult: PolicyResult;
   importanceScore: number;
   scenarioId?: string;
@@ -37,7 +40,7 @@ export async function recordIntervention(
 ): Promise<InterventionRecord> {
   const interventionId = `aci_${ulid()}`;
   const severity = computeSeverity({
-    policyResult: input.policyResult,
+    gateMode: input.gateMode,
     importanceScore: input.importanceScore,
     relatedAssumptionIds: input.relatedAssumptionIds,
   });
@@ -45,6 +48,7 @@ export async function recordIntervention(
 
   await withSession(async (session) => {
     const tx = session.beginTransaction();
+    let rolledBack = false;
     try {
       await tx.run(
         `CREATE (i:AccessIntervention {
@@ -101,6 +105,7 @@ export async function recordIntervention(
       );
       const linked = (linkResult.records[0]?.get("linked") as number | undefined) ?? 0;
       if (Number(linked) === 0) {
+        rolledBack = true;
         await tx.rollback();
         throw new Error(
           `recordIntervention: Source node not found for sourceId='${input.sourceId}'. ` +
@@ -110,7 +115,9 @@ export async function recordIntervention(
 
       await tx.commit();
     } catch (err) {
-      await tx.rollback();
+      if (!rolledBack) {
+        await tx.rollback();
+      }
       throw err;
     }
   });

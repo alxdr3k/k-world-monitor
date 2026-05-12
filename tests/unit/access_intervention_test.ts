@@ -56,18 +56,18 @@ import { generateBatchReport } from "../../src/pipeline/access-intervention/batc
 
 describe("computeSeverity — inline_block", () => {
   it("LOW importance → HIGH", () => {
-    expect(computeSeverity({ policyResult: "inline_block", importanceScore: 0.2 })).toBe("HIGH");
+    expect(computeSeverity({ gateMode: "inline_block", importanceScore: 0.2 })).toBe("HIGH");
   });
   it("MID importance → HIGH", () => {
-    expect(computeSeverity({ policyResult: "inline_block", importanceScore: 0.5 })).toBe("HIGH");
+    expect(computeSeverity({ gateMode: "inline_block", importanceScore: 0.5 })).toBe("HIGH");
   });
   it("HIGH importance → CRITICAL", () => {
-    expect(computeSeverity({ policyResult: "inline_block", importanceScore: 0.8 })).toBe("CRITICAL");
+    expect(computeSeverity({ gateMode: "inline_block", importanceScore: 0.8 })).toBe("CRITICAL");
   });
   it("assumption link elevates HIGH → CRITICAL", () => {
     expect(
       computeSeverity({
-        policyResult: "inline_block",
+        gateMode: "inline_block",
         importanceScore: 0.2,
         relatedAssumptionIds: ["assum_001"],
       })
@@ -77,18 +77,18 @@ describe("computeSeverity — inline_block", () => {
 
 describe("computeSeverity — inline_warn", () => {
   it("LOW importance → LOW", () => {
-    expect(computeSeverity({ policyResult: "inline_warn", importanceScore: 0.1 })).toBe("LOW");
+    expect(computeSeverity({ gateMode: "inline_warn", importanceScore: 0.1 })).toBe("LOW");
   });
   it("MID importance → MEDIUM", () => {
-    expect(computeSeverity({ policyResult: "inline_warn", importanceScore: 0.5 })).toBe("MEDIUM");
+    expect(computeSeverity({ gateMode: "inline_warn", importanceScore: 0.5 })).toBe("MEDIUM");
   });
   it("HIGH importance → HIGH", () => {
-    expect(computeSeverity({ policyResult: "inline_warn", importanceScore: 0.9 })).toBe("HIGH");
+    expect(computeSeverity({ gateMode: "inline_warn", importanceScore: 0.9 })).toBe("HIGH");
   });
   it("assumption link elevates LOW → MEDIUM", () => {
     expect(
       computeSeverity({
-        policyResult: "inline_warn",
+        gateMode: "inline_warn",
         importanceScore: 0.1,
         relatedAssumptionIds: ["assum_002"],
       })
@@ -98,14 +98,14 @@ describe("computeSeverity — inline_warn", () => {
 
 describe("computeSeverity — batch_report", () => {
   it("any importance → LOW or MEDIUM", () => {
-    expect(computeSeverity({ policyResult: "batch_report", importanceScore: 0.1 })).toBe("LOW");
-    expect(computeSeverity({ policyResult: "batch_report", importanceScore: 0.5 })).toBe("LOW");
-    expect(computeSeverity({ policyResult: "batch_report", importanceScore: 0.9 })).toBe("MEDIUM");
+    expect(computeSeverity({ gateMode: "batch_report", importanceScore: 0.1 })).toBe("LOW");
+    expect(computeSeverity({ gateMode: "batch_report", importanceScore: 0.5 })).toBe("LOW");
+    expect(computeSeverity({ gateMode: "batch_report", importanceScore: 0.9 })).toBe("MEDIUM");
   });
   it("assumption link elevates LOW → MEDIUM for batch_report", () => {
     expect(
       computeSeverity({
-        policyResult: "batch_report",
+        gateMode: "batch_report",
         importanceScore: 0.1,
         relatedAssumptionIds: ["assum_003"],
       })
@@ -115,15 +115,15 @@ describe("computeSeverity — batch_report", () => {
 
 describe("computeSeverity — edge cases", () => {
   it("clamps importanceScore below 0 to 0 bucket", () => {
-    expect(computeSeverity({ policyResult: "inline_warn", importanceScore: -1 })).toBe("LOW");
+    expect(computeSeverity({ gateMode: "inline_warn", importanceScore: -1 })).toBe("LOW");
   });
   it("clamps importanceScore above 1 to high bucket", () => {
-    expect(computeSeverity({ policyResult: "inline_warn", importanceScore: 2 })).toBe("HIGH");
+    expect(computeSeverity({ gateMode: "inline_warn", importanceScore: 2 })).toBe("HIGH");
   });
   it("empty relatedAssumptionIds does not elevate", () => {
     expect(
       computeSeverity({
-        policyResult: "inline_warn",
+        gateMode: "inline_warn",
         importanceScore: 0.1,
         relatedAssumptionIds: [],
       })
@@ -133,7 +133,7 @@ describe("computeSeverity — edge cases", () => {
     // inline_block HIGH bucket = CRITICAL → elevate → still CRITICAL
     expect(
       computeSeverity({
-        policyResult: "inline_block",
+        gateMode: "inline_block",
         importanceScore: 0.9,
         relatedAssumptionIds: ["assum_004"],
       })
@@ -153,7 +153,8 @@ function baseInput(): InterventionInput {
     sourceName: "Example Source",
     attemptedAction: "fetch_full_text",
     accessResult: "403_forbidden",
-    policyResult: "inline_block",
+    gateMode: "inline_block",
+    policyResult: "manual_only",
     importanceScore: 0.8,
   };
 }

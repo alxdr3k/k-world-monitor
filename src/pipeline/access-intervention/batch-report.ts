@@ -78,7 +78,7 @@ export async function generateBatchReport(sessionId: string): Promise<BatchRepor
     LOW: [],
   };
   for (const item of interventions) {
-    if (item.severity in bySeverity) {
+    if (Object.hasOwn(bySeverity, item.severity)) {
       bySeverity[item.severity].push(item);
     }
     // Unknown severity values (e.g. legacy data) are silently skipped to avoid
