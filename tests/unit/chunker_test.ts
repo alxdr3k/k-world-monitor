@@ -169,13 +169,35 @@ describe("splitIntoChunks — basic splitting", () => {
 // ---------------------------------------------------------------------------
 
 describe("chunkSnapshot", () => {
-  it("returns chunkCount=0 and empty chunkIds for empty text", async () => {
+  it("returns chunkCount=0 and empty chunkIds for empty text, but still runs guard + stale cleanup", async () => {
     neo4jRuns.length = 0;
     const result = await chunkSnapshot({ snapId: "snap_TEST001", text: "" });
     expect(result.chunkCount).toBe(0);
     expect(result.chunkIds).toHaveLength(0);
-    // No Neo4j writes for empty text
-    expect(neo4jRuns).toHaveLength(0);
+    // Guard query must still run even for empty text (no silent success for invalid snapIds).
+    const guardQueries = neo4jRuns.filter((r) => r.query.includes("RETURN count(s) AS matched"));
+    expect(guardQueries).toHaveLength(1);
+    // Stale-chunk cleanup must also run with chunkCount=0 so prior chunks are deleted.
+    const cleanupQueries = neo4jRuns.filter(
+      (r) => r.query.includes("DETACH DELETE") && r.query.includes("chunk_index")
+    );
+    expect(cleanupQueries).toHaveLength(1);
+    expect(cleanupQueries[0]!.params["chunkCount"]).toBe(0);
+    // No Chunk MERGE or HAS_CHUNK writes.
+    const chunkCreates = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
+    expect(chunkCreates).toHaveLength(0);
+  });
+
+  it("throws when Snapshot not found even for empty text (orphan guard not bypassed)", async () => {
+    neo4jRuns.length = 0;
+    neo4jSnapshotMissing = true;
+    try {
+      await expect(
+        chunkSnapshot({ snapId: "snap_EMPTYNOTEXIST", text: "" })
+      ).rejects.toThrow("Snapshot not found: snap_EMPTYNOTEXIST");
+    } finally {
+      neo4jSnapshotMissing = false;
+    }
   });
 
   it("writes CREATE Chunk + HAS_CHUNK for each chunk", async () => {

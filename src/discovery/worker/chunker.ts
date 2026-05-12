@@ -76,7 +76,11 @@ async function writeChunks(
   snapId: string,
   chunks: TextChunk[]
 ): Promise<string[]> {
-  if (chunks.length === 0) return [];
+  // NOTE: do NOT short-circuit on chunks.length === 0 here.
+  // Even with empty chunks we must: (1) verify the Snapshot exists, and
+  // (2) delete any stale Chunk nodes from a prior run that produced more chunks.
+  // Returning early would leave orphaned Chunk nodes and silently succeed for
+  // invalid snapIds.
 
   const now = new Date().toISOString();
 
