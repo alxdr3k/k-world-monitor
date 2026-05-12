@@ -268,21 +268,17 @@ async function ensureSourceLinkage(
 
 // P2-8: Pass computed contentHash directly — the old code was a self-copy no-op
 //        (SELECT content_hash FROM discovery_queue WHERE queue_id = ?).
+// Single UPDATE to ensure status, content_hash, and error_detail are written atomically.
+// error_detail stores snap_id as result metadata; a dedicated snap_id column will be
+// added in a later migration if needed.
 function markQueueItemDone(queueId: string, snapId: string, contentHash: string): void {
   getDb()
     .prepare(
       `UPDATE discovery_queue
-       SET status = 'done', content_hash = ?
+       SET status = 'done', content_hash = ?, error_detail = ?
        WHERE queue_id = ?`
     )
-    .run(contentHash, queueId);
-  // Store snap_id reference in error_detail column repurposed as result metadata.
-  // (A dedicated snap_id column will be added in a later migration if needed.)
-  getDb()
-    .prepare(
-      `UPDATE discovery_queue SET error_detail = ? WHERE queue_id = ?`
-    )
-    .run(`snap_id:${snapId}`, queueId);
+    .run(contentHash, `snap_id:${snapId}`, queueId);
 }
 
 function markQueueItemError(queueId: string, detail: string): void {
