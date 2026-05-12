@@ -87,7 +87,7 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-005 | ID prefix lint | `tests/lint/id_prefix_test.ts` (planned) | AC-005 |
 | TEST-006 | confidence 분해 lint | `tests/lint/no_single_confidence_test.ts` (planned) | AC-006 |
 | TEST-007 | evidence quote 200자 + 3-tuple | `tests/extraction/evidence_test.ts` (planned) | AC-007 |
-| TEST-008 | frontmatter 관계 배열 lint | `tests/lint/no_frontmatter_relation_array_test.ts` (planned) | AC-008 |
+| TEST-008 | frontmatter 관계 배열 lint | `tests/lint/no_frontmatter_relation_array_test.ts` ✓ 9 tests pass | AC-008 |
 | TEST-009 | extractor type 분기 | `tests/extraction/router_test.ts` (planned) | AC-009 |
 | TEST-010 | auto-confirm threshold | `tests/review/auto_confirm_test.ts` (planned) | AC-010 |
 | TEST-012 | scenario validate 5종 | `tests/scenario/validate_test.ts` (planned) | AC-012 |

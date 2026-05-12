@@ -34,9 +34,9 @@ ADR-0011~0021로 supersede됐다.
   access_interventions)
 - active phase: `INFRA-1A` (ADR scaffold + 9-stage 글로서리 + Round 25
   canonical 확정)
-- active slice: **`INFRA-1A.2` in_progress** — Neo4j Cypher schema v1 +
-  SQLite relational schema v1 + 마이그레이션 commit. Q-004/Q-020/Q-024 resolved.
-  `INFRA-1A.1` 완료 선행됨.
+- active slice: **`INFRA-1A.4` in_progress** — frontmatter 관계 배열 lint
+  (AC-008/TEST-008). `INFRA-1A.2` landed (PR #4 merged 2026-05-12):
+  Neo4j schema v1 + SQLite schema v1 + migration runner + ID prefix table.
 - last accepted gate: none yet
 - next gate: `AC-001` (도메인 객체 9-stage 모델 + 4-tier source layer + Neo4j
   graph store가 ADR로 lock — ADR-0011 + ADR-0012 + ADR-0013); `AC-005`
@@ -52,7 +52,20 @@ ADR-0011~0021로 supersede됐다.
 
 ## Implemented
 
-코드 구현은 아직 없다. 현재까지 채워진 것은 문서 기반 architecture 합의:
+### 코드 (INFRA-1A.2 landed 2026-05-12 via PR #4)
+- `migrations/neo4j/v1_schema.cypher` — 13 node UNIQUE + 5 edge UNIQUE + 5 FTS index + lookup index
+- `migrations/sqlite/v1_schema.sql` — 17 tables (run_ledger, cross_vendor_review_ledger, source_material_policy, policy_decisions, policy_learning_events, source_policy_rules, dataset_vintage, derived_metric_ledger, metrics_*, evaluation_*, research_session, raw_cache_items, schema_migrations)
+- `scripts/migrate.ts` — idempotent migration CLI (--neo4j / --sqlite / --dry-run)
+- `scripts/validate_invariants.ts` — ADR-0002 invariant validator (exit 0, warning-level)
+- `src/domain/ids.ts` — ID_PREFIXES map + validateIdPrefix() / assertIdPrefix() (AC-005)
+- `src/storage/neo4j/connection.ts`, `src/storage/sqlite/connection.ts` — driver singletons (bun:sqlite native)
+- `tests/lint/id_prefix_test.ts` — 28 tests (TEST-005/AC-005) ✓
+- `tests/bench/neo4j_fts_search_bench.ts` — SPIKE-001 bench scaffold (runs when NEO4J_PASSWORD set)
+
+### 코드 (INFRA-1A.4 in_progress)
+- `tests/lint/no_frontmatter_relation_array_test.ts` — 9 tests (TEST-008/AC-008) ✓
+
+### 문서 기반 architecture 합의
 - ADR 0001~0010 (boilerplate placeholder 1개 + 0002 invariant tracking +
   Round 3 lock 시점 0003~0010 8개. 0003/0004/0007/0008은 0011~0015로
   superseded)
