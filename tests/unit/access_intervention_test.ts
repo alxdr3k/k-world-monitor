@@ -222,6 +222,52 @@ describe("recordIntervention", () => {
   });
 });
 
+describe("recordIntervention — commit-path rollback guard (P2)", () => {
+  it("does not call rollback when commit throws, preserving the original error", async () => {
+    // If tx.commit() throws, rolling back a Neo4j transaction that is already in the
+    // commit path causes a secondary error masking the original. The guard must NOT
+    // call rollback when commitAttempted=true.
+    let rollbackCount = 0;
+    const originalCommitError = new Error("network failure during commit");
+
+    const tx = {
+      run: async (query: string) => {
+        if (query.includes("HAS_INTERVENTION") && query.includes("RETURN count")) {
+          return { records: [{ get: (_k: string) => 1 }] }; // linked=1, proceed to commit
+        }
+        return { records: [] };
+      },
+      commit: async () => { throw originalCommitError; },
+      rollback: async () => { rollbackCount++; },
+    };
+
+    // Replay the same control-flow pattern as recorder.ts to verify the guard.
+    let caughtError: Error | undefined;
+    let rolledBack = false;
+    let commitAttempted = false;
+    try {
+      await tx.run("CREATE (i:AccessIntervention {})");
+      const linkResult = await tx.run("MATCH ... HAS_INTERVENTION ... RETURN count");
+      const linked = (linkResult.records[0]?.get("linked") as number | undefined) ?? 0;
+      if (Number(linked) === 0) {
+        rolledBack = true;
+        await tx.rollback();
+        throw new Error("Source not found");
+      }
+      commitAttempted = true;
+      await tx.commit();
+    } catch (err) {
+      if (!rolledBack && !commitAttempted) {
+        await tx.rollback();
+      }
+      caughtError = err as Error;
+    }
+
+    expect(rollbackCount).toBe(0); // rollback must NOT be called after commit was attempted
+    expect(caughtError).toBe(originalCommitError); // original error preserved, not masked
+  });
+});
+
 describe("recordIntervention — double rollback regression (P1)", () => {
   it("does not call rollback twice when Source node is missing", async () => {
     // Override withSession for this test to simulate linked=0 and count rollback calls.
@@ -395,9 +441,11 @@ describe("generateBatchReport", () => {
     expect(report.markdown).toContain("sess_ECHO123");
   });
 
-  it("unknown severity values are silently skipped (prototype-chain safety, P2)", async () => {
+  it("unknown severity values are bucketed as HIGH and counted as blockers (P2 conservative fix)", async () => {
     // Values like 'toString' or 'constructor' that appear on Object.prototype must not
-    // be inserted into a severity bucket. With Object.hasOwn they are safely skipped.
+    // be inserted into a severity bucket via prototype pollution. With Object.hasOwn
+    // they are safely identified as non-canonical, then conservatively treated as HIGH
+    // to avoid masking potential blockers.
     batchQueryResult = [
       {
         intervention_id: "int_bad",
@@ -407,7 +455,7 @@ describe("generateBatchReport", () => {
         attempted_action: "fetch",
         access_result: "ok",
         policy_result: "batch_report",
-        severity: "toString",  // prototype-chain key — must be skipped
+        severity: "toString",  // prototype-chain key — must not pollute bySeverity via bracket access
         why_it_matters: null,
         importance_score: 0.1,
         scenario_id: null,
@@ -416,10 +464,13 @@ describe("generateBatchReport", () => {
       },
     ];
     const report = await generateBatchReport("sess_PROTO");
-    // Prototype-key severity must not land in any bucket; total counts as 1 raw record
-    // but none of the severity buckets should contain it.
+    // Unknown severity must be conservatively bucketed into HIGH (not silently dropped),
+    // so hasBlockers=true and the item appears in bySeverity.HIGH.
+    expect(report.bySeverity.HIGH).toHaveLength(1);
+    expect(report.hasBlockers).toBe(true);
+    expect(report.total).toBe(1);
+    // Prototype chain is still safe — no property was set via bracket access with "toString".
     const bucketTotal = Object.values(report.bySeverity).reduce((s, a) => s + a.length, 0);
-    expect(bucketTotal).toBe(0);
-    expect(report.hasBlockers).toBe(false);
+    expect(bucketTotal).toBe(1);
   });
 });

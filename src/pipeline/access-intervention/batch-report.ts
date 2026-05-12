@@ -80,21 +80,25 @@ export async function generateBatchReport(sessionId: string): Promise<BatchRepor
   for (const item of interventions) {
     if (Object.hasOwn(bySeverity, item.severity)) {
       bySeverity[item.severity].push(item);
+    } else {
+      // Unknown severity values (e.g. legacy data) are treated conservatively
+      // as HIGH to avoid masking potential blockers. They are bucketed into
+      // bySeverity.HIGH so the total and hasBlockers remain consistent.
+      bySeverity.HIGH.push(item);
     }
-    // Unknown severity values (e.g. legacy data) are silently skipped to avoid
-    // crashing report generation; they do not contribute to hasBlockers.
   }
 
+  const total = Object.values(bySeverity).reduce((s, a) => s + a.length, 0);
   const hasBlockers =
     bySeverity.CRITICAL.length > 0 || bySeverity.HIGH.length > 0;
   const generatedAt = new Date().toISOString();
 
-  const markdown = renderMarkdown(sessionId, generatedAt, bySeverity, hasBlockers);
+  const markdown = renderMarkdown(sessionId, generatedAt, total, bySeverity, hasBlockers);
 
   return {
     sessionId,
     generatedAt,
-    total: interventions.length,
+    total,
     bySeverity,
     hasBlockers,
     markdown,
@@ -104,10 +108,10 @@ export async function generateBatchReport(sessionId: string): Promise<BatchRepor
 function renderMarkdown(
   sessionId: string,
   generatedAt: string,
+  total: number,
   bySeverity: Record<Severity, InterventionSummary[]>,
   hasBlockers: boolean
 ): string {
-  const total = Object.values(bySeverity).reduce((s, a) => s + a.length, 0);
   const lines: string[] = [
     `# Access Intervention Batch Report`,
     ``,

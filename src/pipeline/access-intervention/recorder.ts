@@ -49,6 +49,7 @@ export async function recordIntervention(
   await withSession(async (session) => {
     const tx = session.beginTransaction();
     let rolledBack = false;
+    let commitAttempted = false;
     try {
       await tx.run(
         `CREATE (i:AccessIntervention {
@@ -113,9 +114,14 @@ export async function recordIntervention(
         );
       }
 
+      commitAttempted = true;
       await tx.commit();
     } catch (err) {
-      if (!rolledBack) {
+      // Only rollback if commit was not yet attempted. Neo4j transactions
+      // cannot be rolled back after commit() is called (even if commit fails),
+      // so attempting rollback on a commit-path failure would throw a secondary
+      // error masking the original.
+      if (!rolledBack && !commitAttempted) {
         await tx.rollback();
       }
       throw err;
