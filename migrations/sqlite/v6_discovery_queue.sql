@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS discovery_queue (
   title           TEXT,                         -- feed item title (optional)
   published_at    TEXT,                         -- ISO-8601 UTC from feed, or NULL
   discovered_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  content_hash    TEXT,                         -- sha256 of url for dedup (set by enqueue)
+  content_hash    TEXT,                         -- sha256 of url — stored for future change-detection (not used for dedup)
   status          TEXT NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('pending','processing','done','error')),
   error_detail    TEXT
