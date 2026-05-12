@@ -34,11 +34,10 @@ ADR-0011~0021로 supersede됐다.
   access_interventions)
 - active phase: `INFRA-1A` (ADR scaffold + 9-stage 글로서리 + Round 25
   canonical 확정)
-- active slice: **`INFRA-1A.7` in_progress** — Scenario/Thesis/Source bidirectional
-  schema fields (impact_targets, impact_direction_by_target, transmission_channels,
-  stance, market_stance, source_perspective) + enum validators + indexes (AC-026, AC-027).
+- active slice: **`INFRA-1A.8` in_progress** — Backup runbook docs-only (AC-032).
+  `INFRA-1A.7` landed (PR #9 merged 2026-05-12): Scenario/Thesis/Source bidirectional
+  schema fields + enum validators + indexes (AC-026, AC-027).
   `INFRA-1A.5` landed (PR #8 merged 2026-05-12): text normalization + sha256 + enum validators.
-  `INFRA-1A.4` landed (PR #5 merged 2026-05-12): frontmatter relation array lint.
 - last accepted gate: none yet
 - next gate: `AC-001` (도메인 객체 9-stage 모델 + 4-tier source layer + Neo4j
   graph store가 ADR로 lock — ADR-0011 + ADR-0012 + ADR-0013); `AC-005`
@@ -74,9 +73,9 @@ ADR-0011~0021로 supersede됐다.
 - `migrations/sqlite/v2_enum_constraints.sql` — enum-validating triggers (run_ledger, cross_vendor_review_ledger) ✓
 - `tests/unit/text_hash_test.ts` — 49 tests ✓
 
-### 코드 (INFRA-1A.7 in_progress)
+### 코드 (INFRA-1A.7 landed — PR #9)
 - `migrations/neo4j/v1_schema.cypher` — Scenario property schema extended (impact_targets, impact_direction_by_target, transmission_channels); thesis_stance_idx + source_perspective_idx added ✓
-- `src/utils/enums.ts` — THESIS_STANCE (6), THESIS_MARKET_STANCE (6), SOURCE_PERSPECTIVE (4) + validators ✓
+- `src/utils/enums.ts` — THESIS_STANCE (6), THESIS_MARKET_STANCE (6), SOURCE_PERSPECTIVE (4: risk_observer/opportunity_observer/neutral/mixed) + validators ✓
 - `src/domain/nodes.ts` — SourceNode, ScenarioNode, ThesisNode TypeScript interfaces ✓
 - `tests/unit/bidirectional_schema_test.ts` — 27 tests (AC-026, AC-027) ✓
 
