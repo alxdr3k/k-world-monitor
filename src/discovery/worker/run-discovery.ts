@@ -99,21 +99,24 @@ function loadRssSources(filterSlug?: string): DiscoverySource[] {
 // Main
 // ---------------------------------------------------------------------------
 
-// Known CLI flags; unknown flags abort to avoid an accidental full crawl from
-// a typo (e.g. `--soruce foo` silently falling through to all sources).
+// Known CLI flags; anything else (including single-dash typos like `-source`
+// or stray positional tokens) aborts to avoid an accidental full crawl from a
+// malformed invocation silently falling back to "no filter = all sources".
 const KNOWN_FLAGS = new Set(["--dry-run", "--source"]);
 const rawArgs = process.argv.slice(2);
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i]!;
-  if (!a.startsWith("--")) continue; // positional/value
-  if (!KNOWN_FLAGS.has(a)) {
-    console.error(`[discovery] Error: unknown flag ${a}`);
-    process.exit(1);
+  if (a === "--source") {
+    // --source consumes the next token as its value (validated below).
+    i++;
+    continue;
   }
-  if (a === "--source") i++; // skip the slug value following --source
+  if (KNOWN_FLAGS.has(a)) continue; // valueless known flag (--dry-run)
+  // Reject any other token: unknown long flag, single-dash form, or stray positional.
+  console.error(`[discovery] Error: unknown argument ${a}`);
+  process.exit(1);
 }
-const args = new Set(rawArgs);
-const dryRun = args.has("--dry-run");
+const dryRun = rawArgs.includes("--dry-run");
 const filterSlug = (() => {
   const idx = process.argv.indexOf("--source");
   if (idx < 0) return undefined;
@@ -191,18 +194,6 @@ async function main(): Promise<void> {
       continue;
     }
 
-    // DEC-013 daily cap: skip parse + enqueue once the cap is reached, but
-    // still record the ok fetch outcome so ETag/Last-Modified state stays
-    // fresh and we avoid spurious full re-fetches on the next run.
-    if (totalInserted >= DAILY_CANDIDATE_CAP) {
-      if (!capLogged) {
-        console.log(`[discovery] Daily candidate cap (${DAILY_CANDIDATE_CAP}) reached — recording ok for remaining sources without enqueue`);
-        capLogged = true;
-      }
-      recordFetchOutcome(source_id, outcome);
-      continue;
-    }
-
     try {
       // Detect charset: Content-Type first, then XML prolog (`<?xml ... encoding="..."?>`).
       // Fall back to UTF-8 if neither is present.
@@ -222,14 +213,15 @@ async function main(): Promise<void> {
       }
       let decoder: TextDecoder;
       try {
-        // charset is a runtime string from Content-Type — Bun's TextDecoder
-        // types restrict the label parameter to a literal union, so we cast
-        // through unknown to satisfy the type checker while keeping runtime safety.
-        // The inner try/catch falls back to UTF-8 for any unrecognised label.
+        // charset is a runtime string from Content-Type / XML prolog — Bun's
+        // TextDecoder types restrict the label parameter to a literal union,
+        // so we cast through unknown. Unsupported labels (e.g. some bundles
+        // lack EUC-KR) throw RangeError — surface as a parse error rather
+        // than silently mojibake'ing into UTF-8, so the source enters backoff.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         decoder = new TextDecoder(charset as any, { fatal: false });
       } catch {
-        decoder = new TextDecoder("utf-8", { fatal: false });
+        throw new Error(`unsupported declared charset: ${charset}`);
       }
       const xmlText = decoder.decode(body);
       const items = parseRssFeed(xmlText);
@@ -244,10 +236,16 @@ async function main(): Promise<void> {
         continue;
       }
 
-      // Respect the daily cap: pass maxInsert budget to enqueue so later non-duplicate
-      // items in the same feed are still attempted even when early items are dupes.
-      // (Pre-slicing would miss valid items if the first N entries all conflict.)
-      const remaining = DAILY_CANDIDATE_CAP - totalInserted;
+      // DEC-013 daily cap: parse every source for health validation but cap the
+      // insert budget. With remaining=0 the enqueue is a no-op while parse still
+      // surfaces empty/malformed feeds via the items.length === 0 / catch paths
+      // so they enter backoff (codex finding: cap-reached sources must still be
+      // validated, not silently marked ok).
+      const remaining = Math.max(0, DAILY_CANDIDATE_CAP - totalInserted);
+      if (remaining === 0 && !capLogged) {
+        console.log(`[discovery] Daily candidate cap (${DAILY_CANDIDATE_CAP}) reached — parsing remaining sources for health validation only`);
+        capLogged = true;
+      }
       const { inserted, skipped } = enqueueDiscoveredItems(source_id, items, remaining);
       totalInserted += inserted;
       totalSkipped += skipped;
