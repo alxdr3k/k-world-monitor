@@ -31,7 +31,7 @@ ADR-0011~0021로 supersede됐다.
 - current milestone: `P0-M2` (Source Registry & Collection Queue) — INFRA-1B.1 시작으로 M2 진입. P0-M1 게이트는 별도로 통과 필요.
 - active tracks: `INFRA` (primary — INFRA-1B collection pipeline), `OPS` (cross-cutting — OPS-1A.1 run ledger, P0-M3 slice landing opportunistically while M2 in-flight)
 - active phase: `INFRA-1B` (primary); `OPS-1A` (cross-cutting)
-- active slice: **INFRA-1B.2a/2b/2/3/4/5/6 in-flight** + **OPS-1A.1 in-flight** — In-flight PRs (pending review/merge): #16 (INFRA-1B.2a safe-fetch), #17 (INFRA-1B.2b scheduler), #18-#20 (INFRA-1B.3/4 fingerprint/chunker), #21 (INFRA-1B.5 access-interventions), #22 (INFRA-1B.6 feedback CLI), #23 (OPS-1A.1 run ledger — cross-milestone, P0-M3 scope). Previously landed: `INFRA-1B.1.x` — Hotfix shipped in c51b2ce (PR #15).
+- active slice: **INFRA-1B.2a/2b/2/3/4/6 in-flight** + **OPS-1A.1 in-flight** — In-flight PRs (pending review/merge): #16 (INFRA-1B.2a safe-fetch), #17 (INFRA-1B.2b scheduler), #18-#20 (INFRA-1B.3/4 fingerprint/chunker), #22 (INFRA-1B.6 feedback CLI — base retargeted to main after PR #21 merged), #23 (OPS-1A.1 run ledger — cross-milestone, P0-M3 scope). Previously landed: `INFRA-1B.5` — PR #21 merged 2026-05-12 (c3b19c4): access-intervention recorder + severity + batch-report (26 tests). `INFRA-1B.1.x` — Hotfix shipped in c51b2ce (PR #15).
   `INFRA-1A.3` landed (PR #14 merged 2026-05-12): R2 permitted-artifact prefix policy + sha256 round-trip tests.
   `INFRA-1A.6` landed (PR #12 merged 2026-05-12): Tier A source seed 72 sources + TEST-027.
   `INFRA-1A.8` landed (PR #10 merged 2026-05-12): Backup runbook docs-only (AC-032).

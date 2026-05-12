@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: f436e7a (2026-05-12) — INFRA-1B.1.x review-8 P2 fixes (scheme allowlist, field guard, NaN guard)
+> Last verified against code: c3b19c4 (2026-05-12) — INFRA-1B.5 AccessIntervention recorder + severity + batch report (PR #21 merged)
 
 ## Runtime stack
 
@@ -40,6 +40,9 @@
 | `src/storage/r2/policy.ts` | PERMITTED_PREFIXES + `checkPermittedPrefix()` + sha256 helpers (ADR-0012 INV-0012-4, INFRA-1A.3) |
 | `src/storage/r2/client.ts` | Bun.S3Client wrapper — `r2Put/r2Get/r2Delete` with policy enforcement (INFRA-1A.3) |
 | `src/storage/source-registry/seed.ts` | Parse `data/sources_seed.yaml`, validate enums, upsert `source_material_policy` rows (INFRA-1B.1) |
+| `src/pipeline/access-intervention/severity.ts` | `computeSeverity()` — deterministic severity: `GateMode × importance_score × relatedAssumptionIds`, no LLM (INFRA-1B.5, AC-024) |
+| `src/pipeline/access-intervention/recorder.ts` | `recordIntervention()` — creates `AccessIntervention` Neo4j node (`aci_<ULID>`) + `(Source)-[:HAS_INTERVENTION]->(AccessIntervention)` (INFRA-1B.5) |
+| `src/pipeline/access-intervention/batch-report.ts` | `generateBatchReport()` — severity-bucketed Markdown + `hasBlockers` cite-check flag (INFRA-1B.5, AC-024) |
 
 ## Tests
 
@@ -52,6 +55,7 @@
 | `tests/unit/perspective_distribution_test.ts` | AC-027 Tier A seed distribution lint — reads data/sources_seed.yaml (AC-027, REQ-022) | TEST-027 |
 | `tests/unit/r2_policy_test.ts` | R2 permitted-prefix + sha256 round-trip integrity (AC-003, AC-020, AC-032) | — |
 | `tests/unit/source_registry_test.ts` | Source registry seed dry-run + enum validation + YAML structure (INFRA-1B.1) | — |
+| `tests/unit/access_intervention_test.ts` | severity scoring + recorder integration + batch-report generation (INFRA-1B.5, AC-024) | — |
 | `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
 
 ## Scripts
