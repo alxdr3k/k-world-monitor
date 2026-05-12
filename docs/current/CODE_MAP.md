@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: a581e72 (2026-05-12) — INFRA-1A.2 schema commit
+> Last verified against code: 23eed29 (2026-05-12) — INFRA-1A.3 R2 policy + client
 
 ## Runtime stack
 
@@ -37,6 +37,8 @@
 | `src/utils/enums.ts` | All domain enum const arrays + `is*()` validators (INFRA-1A.5/1A.7) |
 | `src/storage/neo4j/connection.ts` | Neo4j driver singleton + `withSession()` |
 | `src/storage/sqlite/connection.ts` | SQLite DB singleton + migration helper |
+| `src/storage/r2/policy.ts` | PERMITTED_PREFIXES + `checkPermittedPrefix()` + sha256 helpers (ADR-0012 INV-0012-4, INFRA-1A.3) |
+| `src/storage/r2/client.ts` | Bun.S3Client wrapper — `r2Put/r2Get/r2Delete` with policy enforcement (INFRA-1A.3) |
 
 ## Tests
 
@@ -46,6 +48,8 @@
 | `tests/lint/no_frontmatter_relation_array_test.ts` | Frontmatter relation array lint (TEST-008/AC-008) | TEST-008 |
 | `tests/unit/text_hash_test.ts` | normalizeText / sha256 / enum validator tests (AC-007) | — |
 | `tests/unit/bidirectional_schema_test.ts` | Thesis stance / source perspective enum + AC-027 distribution (AC-026, AC-027) | — |
+| `tests/unit/perspective_distribution_test.ts` | AC-027 Tier A seed distribution lint — reads data/sources_seed.yaml (AC-027, REQ-022) | TEST-027 |
+| `tests/unit/r2_policy_test.ts` | R2 permitted-prefix + sha256 round-trip integrity (AC-003, AC-020, AC-032) | — |
 | `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
 
 ## Scripts
@@ -64,12 +68,11 @@
 | `package.json` | bun scripts + dependencies |
 | `tsconfig.json` | TypeScript compiler options |
 
-## Planned (INFRA-1A.3+)
+## Planned (INFRA-1B.1+)
 
 | Path | Purpose |
 |---|---|
 | `src/cli/` | CLI entrypoints (INFRA-1B.1) |
-| `src/storage/r2/` | Cloudflare R2 wrapper (INFRA-1A.3) |
 | `src/domain/` | Full domain model types (INFRA-1B) |
 | `src/discovery/` | RSS/API/sitemap discovery worker (INFRA-1B.1) |
 | `src/extraction/` | Extractor + LLM router (P0-M3) |
