@@ -137,6 +137,20 @@ describe("startRun", () => {
       startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "   " })
     ).toThrow("modelId must be a non-empty string");
   });
+
+  it("throws when stage is not a valid RunStage (JS-caller guard)", () => {
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      startRun({ stage: "unknown_stage" as any, vendor: "openai", tier: 2, modelId: "gpt-5-mini" })
+    ).toThrow("unknown stage");
+  });
+
+  it("throws when vendor is not a valid RunVendor (JS-caller guard)", () => {
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      startRun({ stage: "extract", vendor: "cohere" as any, tier: 2, modelId: "command-r" })
+    ).toThrow("unknown vendor");
+  });
 });
 
 describe("completeRun", () => {

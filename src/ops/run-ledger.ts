@@ -53,10 +53,18 @@ export interface DailyCostRow {
 }
 
 const VALID_TIERS = new Set([0, 1, 2, 3]);
+const VALID_STAGES = new Set<string>([
+  "discover", "extract", "dossier", "scenario", "thesis", "cite_check", "publication",
+]);
+const VALID_VENDORS = new Set<string>(["openai", "anthropic", "google"]);
 
 export function startRun(input: StartRunInput): string {
   if (!VALID_TIERS.has(input.tier))
     throw new Error(`startRun: tier must be 0–3, got ${input.tier}`);
+  if (!VALID_STAGES.has(input.stage))
+    throw new Error(`startRun: unknown stage '${input.stage}'`);
+  if (!VALID_VENDORS.has(input.vendor))
+    throw new Error(`startRun: unknown vendor '${input.vendor}'`);
   if (!input.modelId?.trim())
     throw new Error("startRun: modelId must be a non-empty string");
   // ADR-0023: non-default vendor routing must record a non-blank override reason.
