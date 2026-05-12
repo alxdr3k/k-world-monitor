@@ -124,6 +124,28 @@ describe("failRun", () => {
     expect(row["status"]).toBe("failed");
     expect(row["completed_at"]).toBeTruthy();
   });
+
+  it("throws when run_id does not exist", () => {
+    expect(() => failRun("run_NONEXISTENT")).toThrow("no running row");
+  });
+
+  it("throws when run is already completed (no terminal overwrite)", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    completeRun(id, { totalCostUsd: 0.01 });
+    expect(() => failRun(id)).toThrow("no running row");
+  });
+});
+
+describe("completeRun terminal-state guard", () => {
+  it("throws when run_id does not exist", () => {
+    expect(() => completeRun("run_NONEXISTENT")).toThrow("no running row");
+  });
+
+  it("throws when run is already failed (no terminal overwrite)", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    failRun(id);
+    expect(() => completeRun(id, { totalCostUsd: 0.01 })).toThrow("no running row");
+  });
 });
 
 describe("getDailyCostUsd", () => {

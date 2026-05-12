@@ -87,13 +87,13 @@ export function startRun(input: StartRunInput): string {
 
 export function completeRun(runId: string, output: CompleteRunInput = {}): void {
   const now = new Date().toISOString();
-  getDb()
+  const result = getDb()
     .prepare(
       `UPDATE run_ledger
        SET status = 'completed', completed_at = ?,
            input_tokens = ?, output_tokens = ?, cached_tokens = ?,
            total_cost_usd = ?
-       WHERE run_id = ?`
+       WHERE run_id = ? AND status = 'running'`
     )
     .run(
       now,
@@ -103,20 +103,27 @@ export function completeRun(runId: string, output: CompleteRunInput = {}): void 
       output.totalCostUsd ?? null,
       runId
     );
+  if (result.changes === 0) {
+    throw new Error(`completeRun: no running row found for run_id=${runId}`);
+  }
 }
 
 export function failRun(runId: string): void {
   const now = new Date().toISOString();
-  getDb()
+  const result = getDb()
     .prepare(
       `UPDATE run_ledger
        SET status = 'failed', completed_at = ?
-       WHERE run_id = ?`
+       WHERE run_id = ? AND status = 'running'`
     )
     .run(now, runId);
+  if (result.changes === 0) {
+    throw new Error(`failRun: no running row found for run_id=${runId}`);
+  }
 }
 
 // Returns total cost in USD for all completed runs on a UTC calendar date (YYYY-MM-DD).
+// Filters by completed_at so cross-midnight runs are attributed to the day they billed.
 // Optional vendor filter.
 export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
   const like = `${date}%`;
@@ -125,14 +132,14 @@ export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
         .prepare(
           `SELECT COALESCE(SUM(total_cost_usd), 0) AS total
            FROM run_ledger
-           WHERE started_at LIKE ? AND vendor = ? AND status = 'completed'`
+           WHERE completed_at LIKE ? AND vendor = ? AND status = 'completed'`
         )
         .get(like, vendor) as { total: number })
     : (getDb()
         .prepare(
           `SELECT COALESCE(SUM(total_cost_usd), 0) AS total
            FROM run_ledger
-           WHERE started_at LIKE ? AND status = 'completed'`
+           WHERE completed_at LIKE ? AND status = 'completed'`
         )
         .get(like) as { total: number });
   return row.total;
@@ -143,12 +150,12 @@ export function getDailyCostBreakdown(date: string): DailyCostRow[] {
   const like = `${date}%`;
   return getDb()
     .prepare(
-      `SELECT substr(started_at, 1, 10) AS date,
+      `SELECT substr(completed_at, 1, 10) AS date,
               vendor,
               COALESCE(SUM(total_cost_usd), 0) AS totalCostUsd,
               COUNT(*) AS runCount
        FROM run_ledger
-       WHERE started_at LIKE ? AND status = 'completed'
+       WHERE completed_at LIKE ? AND status = 'completed'
        GROUP BY vendor`
     )
     .all(like) as DailyCostRow[];
