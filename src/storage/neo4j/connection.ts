@@ -1,8 +1,11 @@
 import neo4j, { type Driver, type Session } from "neo4j-driver";
 
 function parsePositiveInt(val: string | undefined, fallback: number): number {
-  const n = parseInt(val ?? "", 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  // Require pure digit string to reject "5e3" → 5 (parseInt stops at 'e') and
+  // other malformed values that parseInt silently accepts as a numeric prefix.
+  if (!val || !/^\d+$/.test(val)) return fallback;
+  const n = parseInt(val, 10);
+  return n > 0 ? n : fallback;
 }
 
 let _driver: Driver | null = null;
