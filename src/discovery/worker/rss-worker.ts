@@ -31,24 +31,38 @@ function extractItems(parsed: unknown): FeedItem[] {
   if (typeof parsed !== "object" || parsed === null) return [];
   const obj = parsed as Record<string, unknown>;
 
-  // RSS 2.0: rss.channel.item[]
-  const rss = obj["rss"] as Record<string, unknown> | undefined;
+  // RSS 2.0: rss.channel.item[]  (also handles namespace-prefixed root like rss:rss)
+  const rssKey = Object.keys(obj).find((k) => k === "rss" || k.endsWith(":rss"));
+  const rss = rssKey ? (obj[rssKey] as Record<string, unknown> | undefined) : undefined;
   if (rss) {
-    const channel = rss["channel"] as Record<string, unknown> | undefined;
+    const channelKey = Object.keys(rss).find((k) => k === "channel" || k.endsWith(":channel"));
+    const channel = channelKey ? (rss[channelKey] as Record<string, unknown> | undefined) : undefined;
     if (channel) {
-      const items = channel["item"];
+      const itemKey = Object.keys(channel).find((k) => k === "item" || k.endsWith(":item"));
+      const items = itemKey ? channel[itemKey] : undefined;
       return normalizeItems(Array.isArray(items) ? items : items ? [items] : [], "rss");
     }
   }
 
-  // Atom 1.0: feed.entry[]
-  const feed = obj["feed"] as Record<string, unknown> | undefined;
+  // Atom 1.0: feed.entry[]  (also handles namespace-prefixed root like atom:feed)
+  const feedKey = Object.keys(obj).find((k) => k === "feed" || k.endsWith(":feed"));
+  const feed = feedKey ? (obj[feedKey] as Record<string, unknown> | undefined) : undefined;
   if (feed) {
-    const entries = feed["entry"];
+    const entryKey = Object.keys(feed).find((k) => k === "entry" || k.endsWith(":entry"));
+    const entries = entryKey ? feed[entryKey] : undefined;
     return normalizeItems(Array.isArray(entries) ? entries : entries ? [entries] : [], "atom");
   }
 
   return [];
+}
+
+// Look up a field from a parsed XML element by its local name, ignoring any
+// namespace prefix (e.g. "atom:link" matches localKey "link").
+function getLocal(obj: Record<string, unknown>, localKey: string): unknown {
+  if (localKey in obj) return obj[localKey];
+  const suffixed = `:${localKey}`;
+  const key = Object.keys(obj).find((k) => k === localKey || k.endsWith(suffixed));
+  return key ? obj[key] : undefined;
 }
 
 function normalizeItems(raw: unknown[], format: "rss" | "atom"): FeedItem[] {
@@ -62,19 +76,27 @@ function normalizeItems(raw: unknown[], format: "rss" | "atom"): FeedItem[] {
     let publishedAt: string | undefined;
 
     if (format === "rss") {
-      url = str(entry["link"]);
-      title = str(entry["title"]);
-      publishedAt = parseDate(str(entry["pubDate"]));
+      url = str(getLocal(entry, "link"));
+      title = str(getLocal(entry, "title"));
+      publishedAt = parseDate(str(getLocal(entry, "pubDate")));
     } else {
-      // Atom: link can be a string or an object with @href
-      const linkVal = entry["link"];
+      // Atom: link can be a string, an object with @href, or an array of link
+      // objects (e.g. rel="alternate" + rel="self").  Prefer the rel="alternate"
+      // entry; fall back to the first entry that has an @href.
+      const linkVal = getLocal(entry, "link");
       if (typeof linkVal === "string") {
         url = linkVal;
+      } else if (Array.isArray(linkVal)) {
+        const links = linkVal as Record<string, unknown>[];
+        const alt = links.find((l) => l["@rel"] === "alternate" || !l["@rel"]);
+        const chosen = alt ?? links[0];
+        if (chosen) url = str(chosen["@href"]);
       } else if (typeof linkVal === "object" && linkVal !== null) {
         url = str((linkVal as Record<string, unknown>)["@href"]);
       }
-      title = str(entry["title"]);
-      publishedAt = parseDate(str(entry["published"] ?? entry["updated"]));
+      title = str(getLocal(entry, "title"));
+      const pub = getLocal(entry, "published") ?? getLocal(entry, "updated");
+      publishedAt = parseDate(str(pub));
     }
 
     if (url && isValidHttpUrl(url)) {

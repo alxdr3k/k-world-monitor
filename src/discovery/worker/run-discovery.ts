@@ -7,6 +7,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { pollEligibleSources, type DiscoverySource } from "../scheduler/scheduler";
+import { recordFetchOutcome } from "../scheduler/crawl-state";
 import { parseRssFeed, enqueueDiscoveredItems } from "./rss-worker";
 
 interface SeedSource {
@@ -89,7 +90,14 @@ const args = new Set(process.argv.slice(2));
 const dryRun = args.has("--dry-run");
 const filterSlug = (() => {
   const idx = process.argv.indexOf("--source");
-  return idx >= 0 ? process.argv[idx + 1] : undefined;
+  if (idx < 0) return undefined;
+  const next = process.argv[idx + 1];
+  // Reject missing value or another flag passed as the slug argument.
+  if (!next || next.startsWith("--")) {
+    console.error("[discovery] Error: --source requires a slug argument");
+    process.exit(1);
+  }
+  return next;
 })();
 
 async function main(): Promise<void> {
@@ -128,6 +136,8 @@ async function main(): Promise<void> {
 
     if (!body || body.byteLength === 0) {
       console.log(`  [empty] ${source_id}: empty body`);
+      recordFetchOutcome(source_id, { status: "error" });
+      totalErrors++;
       continue;
     }
 
@@ -139,7 +149,25 @@ async function main(): Promise<void> {
     }
 
     try {
-      const xmlText = new TextDecoder("utf-8", { fatal: false }).decode(body);
+      // Detect charset from Content-Type (e.g. "text/xml; charset=euc-kr").
+      // Fall back to UTF-8 if absent or unrecognised.
+      let charset = "utf-8";
+      const charsetMatch = ct.match(/charset=([^\s;]+)/i);
+      if (charsetMatch) {
+        charset = charsetMatch[1]!.toLowerCase().replace(/^"(.*)"$/, "$1");
+      }
+      let decoder: TextDecoder;
+      try {
+        // charset is a runtime string from Content-Type — Bun's TextDecoder
+        // types restrict the label parameter to a literal union, so we cast
+        // through unknown to satisfy the type checker while keeping runtime safety.
+        // The inner try/catch falls back to UTF-8 for any unrecognised label.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        decoder = new TextDecoder(charset as any, { fatal: false });
+      } catch {
+        decoder = new TextDecoder("utf-8", { fatal: false });
+      }
+      const xmlText = decoder.decode(body);
       const items = parseRssFeed(xmlText);
       const { inserted, skipped } = enqueueDiscoveredItems(source_id, items);
       totalInserted += inserted;
@@ -149,6 +177,7 @@ async function main(): Promise<void> {
       );
     } catch (err) {
       console.error(`  [parse-error] ${source_id}:`, err instanceof Error ? err.message : err);
+      recordFetchOutcome(source_id, { status: "error" });
       totalErrors++;
     }
   }

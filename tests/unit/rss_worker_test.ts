@@ -127,6 +127,49 @@ describe("parseRssFeed — edge cases", () => {
     expect(parseRssFeed("<foo><bar/></foo>")).toHaveLength(0);
   });
 
+  it("handles Atom link array — prefers rel=alternate", () => {
+    const xml = `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Multi-link</title>
+    <link rel="alternate" href="https://example.com/article"/>
+    <link rel="self" href="https://example.com/feed/entry/1"/>
+    <published>2026-01-01T00:00:00Z</published>
+  </entry>
+</feed>`;
+    const items = parseRssFeed(xml);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.url).toBe("https://example.com/article");
+  });
+
+  it("handles Atom link array — falls back to first when no rel=alternate", () => {
+    const xml = `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Self-only</title>
+    <link rel="self" href="https://example.com/self-only"/>
+    <published>2026-01-01T00:00:00Z</published>
+  </entry>
+</feed>`;
+    const items = parseRssFeed(xml);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.url).toBe("https://example.com/self-only");
+  });
+
+  it("handles namespace-prefixed Atom root (atom:feed)", () => {
+    const xml = `<?xml version="1.0"?>
+<atom:feed xmlns:atom="http://www.w3.org/2005/Atom">
+  <atom:entry>
+    <atom:title>NS Article</atom:title>
+    <atom:link href="https://example.com/ns-atom"/>
+    <atom:published>2026-02-01T00:00:00Z</atom:published>
+  </atom:entry>
+</atom:feed>`;
+    const items = parseRssFeed(xml);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.url).toBe("https://example.com/ns-atom");
+  });
+
   it("handles single item (non-array) in RSS channel", () => {
     const xml = `<rss version="2.0"><channel>
       <item><link>https://example.com/single</link><title>Single</title></item>

@@ -1,4 +1,4 @@
--- v5: discovery_queue table for INFRA-1B.2 Discovery Worker
+-- v6: discovery_queue table for INFRA-1B.2 Discovery Worker
 -- Stores discovered document URLs from RSS/Atom feed polling,
 -- pending Snapshot fingerprint creation (INFRA-1B.3).
 
@@ -24,4 +24,4 @@ CREATE INDEX IF NOT EXISTS discovery_queue_status_idx
   ON discovery_queue (status, discovered_at);
 
 INSERT OR IGNORE INTO schema_migrations (version, description)
-  VALUES ('v5', 'discovery_queue table — discovered document URLs pending snapshot creation');
+  VALUES ('v6', 'discovery_queue table — discovered document URLs pending snapshot creation');
