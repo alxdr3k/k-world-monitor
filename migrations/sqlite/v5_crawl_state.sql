@@ -1,4 +1,4 @@
--- v4: crawl_state table for discovery scheduler (ADR-0030 INV-0030-5)
+-- v5: crawl_state table for discovery scheduler (ADR-0030 INV-0030-5)
 -- Tracks per-source polling state: etag/Last-Modified for conditional fetch,
 -- consecutive failure count for 24h backoff, and next eligible poll time.
 
@@ -13,4 +13,4 @@ CREATE TABLE IF NOT EXISTS crawl_state (
 );
 
 INSERT OR IGNORE INTO schema_migrations (version, description)
-  VALUES ('v4', 'crawl_state table — per-source polling state, etag, backoff');
+  VALUES ('v5', 'crawl_state table — per-source polling state, etag, backoff');
