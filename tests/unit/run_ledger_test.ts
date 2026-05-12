@@ -141,6 +141,16 @@ describe("completeRun terminal-state guard", () => {
     expect(() => completeRun("run_NONEXISTENT")).toThrow("no running row");
   });
 
+  it("throws when totalCostUsd is negative", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    expect(() => completeRun(id, { totalCostUsd: -0.01 })).toThrow("totalCostUsd must be non-negative");
+  });
+
+  it("throws when inputTokens is negative", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    expect(() => completeRun(id, { inputTokens: -1 })).toThrow("inputTokens must be non-negative");
+  });
+
   it("throws when run is already failed (no terminal overwrite)", () => {
     const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
     failRun(id);

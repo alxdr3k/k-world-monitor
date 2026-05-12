@@ -86,6 +86,14 @@ export function startRun(input: StartRunInput): string {
 }
 
 export function completeRun(runId: string, output: CompleteRunInput = {}): void {
+  if (output.inputTokens !== undefined && output.inputTokens < 0)
+    throw new Error(`completeRun: inputTokens must be non-negative, got ${output.inputTokens}`);
+  if (output.outputTokens !== undefined && output.outputTokens < 0)
+    throw new Error(`completeRun: outputTokens must be non-negative, got ${output.outputTokens}`);
+  if (output.cachedTokens !== undefined && output.cachedTokens < 0)
+    throw new Error(`completeRun: cachedTokens must be non-negative, got ${output.cachedTokens}`);
+  if (output.totalCostUsd !== undefined && output.totalCostUsd < 0)
+    throw new Error(`completeRun: totalCostUsd must be non-negative, got ${output.totalCostUsd}`);
   const now = new Date().toISOString();
   const result = getDb()
     .prepare(
