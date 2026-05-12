@@ -147,3 +147,45 @@
 - 리뷰/반영: PR #13 CI pass, no review comments, squash merged 2026-05-12.
 - 리스크: 없음
 
+사이클 8 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일:
+  - src/storage/r2/policy.ts 신규 — PERMITTED_PREFIXES 9개 (DEC-007), checkPermittedPrefix() PermittedPrefixViolation, sha256HexBuf() + assertSha256() 콘텐츠 무결성 헬퍼 (ADR-0012 INV-0012-4).
+  - src/storage/r2/client.ts 신규 — Bun.S3Client 래퍼. r2Put() 모든 쓰기 전 checkPermittedPrefix 강제. r2Get/r2Delete/r2CredentialsAvailable. Doppler s3_* 환경변수 (소문자).
+  - tests/unit/r2_policy_test.ts 신규 32개 단위 테스트 (네트워크 없음). AC-003 prefix 레지스트리, AC-020 raw 키 거부, AC-032 sha256 round-trip (공백 문자열 known vector 포함).
+  - docs/current/CODE_MAP.md r2 모듈 + 테스트 항목 추가. planned 섹션 INFRA-1B.1+로 갱신.
+- 결론: INFRA-1A.3 landed (PR #14 merged 2026-05-12). R2 permitted-artifact prefix 정책 + raw_cloud_policy=always_prohibited 강제 + sha256 round-trip 단위 테스트 완료. 151 tests pass. AC-003, AC-020, AC-032 충족. INFRA-1B.3(Fetcher → Snapshot fingerprint) 의존성 해소.
+- 변경 범위: impl_and_test (7 files)
+- 검증 계획: impl_test, full CI 필요
+- 다음 검토 후보:
+  - INFRA-1B.1: Source Registry + Collection Queue + manual_intake CLI. INFRA-1A.2, INFRA-1A.6 모두 landed. (planned) 시작 조건: INFRA-1A.2, INFRA-1A.6 landed (OK).
+  - INFRA-1B.2: Discovery worker (RSS/API 1종 각각, Tier A 한정) → 큐 적재. (planned) 시작 조건: INFRA-1B.1 완료 후 진입 가능.
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증:
+  - bun test 151 pass / 0 fail (32 신규 포함)
+  - tsc --noEmit clean
+  - invariant:check 0 errors
+  - PR #14 CI pass, squash merged 2026-05-12
+- 리뷰/반영: Step 6 review pass 1/20: 0 actionable findings (sha256Hex 이름 충돌 + env var 대소문자 fix 적용 후). PR #14 CI pass, squash merged.
+- 리스크: 없음
+
+사이클 9 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일: INFRA-1B.1 Source Registry Bootstrap 구현: data/sources_seed.yaml 파싱 → 72개 소스 enum 검증 → SQLite source_material_policy upsert. seed.ts, seed-sources.ts CLI, 12개 unit test 작성.
+- 결론: INFRA-1B.1 Source Registry Bootstrap 완료. 72개 Tier A 소스를 source_material_policy 테이블에 idempotent하게 적재하는 시드 모듈과 CLI, 단위 테스트를 작성했다. 163개 전체 테스트 통과, typecheck clean. PR #15 생성 후 codex-loop 진행 중. 구현
+- 변경 범위: code_or_runtime (8 files), contract surface
+- 검증 계획: full, full CI 필요
+- 다음 검토 후보:
+  - INFRA-1B.2: Discovery worker (RSS/sitemap 1종 + API 1종, Tier A 한정) → 큐 적재 (planned) 시작 조건: INFRA-1B.1 merge 후
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증:
+  - bun test 163/163 통과
+  - tsc --noEmit clean
+  - Review Pass 1/20 — 0 actionable findings (dead code cleanup 후 완료)
+- 리뷰/반영: PR #15 생성 완료 (claude/infra-1b1-source-registry → main). codex-loop 대기 중.
+- 리스크: 없음
+

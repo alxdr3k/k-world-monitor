@@ -1,5 +1,13 @@
 import neo4j, { type Driver, type Session } from "neo4j-driver";
 
+function parsePositiveInt(val: string | undefined, fallback: number): number {
+  // Require pure digit string to reject "5e3" → 5 (parseInt stops at 'e') and
+  // other malformed values that parseInt silently accepts as a numeric prefix.
+  if (!val || !/^\d+$/.test(val)) return fallback;
+  const n = parseInt(val, 10);
+  return n > 0 ? n : fallback;
+}
+
 let _driver: Driver | null = null;
 
 export function getDriver(): Driver {
@@ -11,8 +19,8 @@ export function getDriver(): Driver {
       throw new Error("NEO4J_PASSWORD env var is required");
     }
     _driver = neo4j.driver(uri, neo4j.auth.basic(user, password), {
-      maxConnectionPoolSize: 10,
-      connectionAcquisitionTimeout: 5000,
+      maxConnectionPoolSize: parsePositiveInt(process.env["NEO4J_MAX_POOL_SIZE"], 10),
+      connectionAcquisitionTimeout: parsePositiveInt(process.env["NEO4J_ACQ_TIMEOUT_MS"], 5000),
     });
   }
   return _driver;

@@ -11,6 +11,7 @@ export function getDb(): Database {
     _db.run("PRAGMA journal_mode = WAL");
     _db.run("PRAGMA foreign_keys = ON");
     _db.run("PRAGMA auto_vacuum = INCREMENTAL");
+    _db.run("PRAGMA busy_timeout = 5000");
   }
   return _db;
 }
