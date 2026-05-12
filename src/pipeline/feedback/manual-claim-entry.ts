@@ -157,7 +157,7 @@ export async function createManualClaimEntry(
            quote_reason:            $quoteReason,
            attribution_json:        $attributionJson,
            self_assessed_confidence: $selfAssessedConfidence,
-           policy_gate_passed:      true,
+           policy_gate_passed:      false,
            raw_text_stored:         false,
            intervention_id:         $interventionId,
            created_at:              $createdAt
