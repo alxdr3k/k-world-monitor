@@ -1,60 +1,89 @@
 # Data Model
 
-> Last verified against code: n/a (no implementation yet — 2026-05-11)
+> Last verified against code: a581e72 (2026-05-12) — INFRA-1A.2 schema commit
 
 ## Source of truth
 
-Code, migrations, schemas, and generated references are authoritative.
+`migrations/neo4j/v1_schema.cypher` 와 `migrations/sqlite/v1_schema.sql` 이
+canonical 스키마다. 이 문서는 얇은 navigation layer다.
 
-This document is a human-readable map. 마이그레이션 파일이 commit되면 이 문서는
-얇은 navigation layer로만 유지되고 generated schema 문서가 별도로 들어선다
-(`docs/generated/schema.md` — 미래).
+ADR-0011(superseded by ADR-0025), ADR-0012, ADR-0013, ADR-0017, ADR-0018,
+ADR-0020, ADR-0021, ADR-0023, ADR-0024, ADR-0025 가 의도된 모델의 canonical 설계다.
 
-ADR-0003 (객체 모델), ADR-0004 (storage tiers), ADR-0005 (confidence 분해),
-ADR-0007 (edge ledger), ADR-0009 (scenario_revisions)이 의도된 모델의 canonical
-설계이다.
+## Graph objects — Neo4j (`migrations/neo4j/v1_schema.cypher`)
 
-## Current entities
+10-stage 객체 모델 (ADR-0025, supersedes ADR-0011 9-stage):
 
-| Entity | Purpose | Source |
+| Node label | ID prefix | Purpose |
 |---|---|---|
-| (no implementation yet) | — | ADR-0003 의도된 객체 모델 참조 |
+| `Source` | `src_` | publisher/registry entity, Tier 0 컨테이너 (ADR-0011 INV-0011-2) |
+| `Document` | `doc_` | URL 그룹 + publisher FK + reliability_tier |
+| `Snapshot` | `snap_` | fingerprint record: url/accessed_at/content_hash/locator (ADR-0012) |
+| `Claim` | `clm_` | atomic 사실 + 8-state lifecycle (ADR-0011 INV-0011-5) |
+| `Dossier` | `dos_` | 주제별 promoted claim 합성 |
+| `Scenario` | `scn_` | drivers/assumptions/branches/falsifiers/counterclaims |
+| `ScenarioRevision` | `scn_<id>_r<n>` | append-only revision ledger (ADR-0009) |
+| `EditorialIntent` | `eit_` | 운영자 명시 lock 필수 (ADR-0025 INV-0025-4) |
+| `Thesis` | `ths_` | 재사용 가능한 핵심 주장 (ADR-0025) |
+| `ContentDraft` | `drf_` | v0=blog_long only (DEC-005), eit_id FK 필수 |
+| `Publication` | `pub_` | cite_check 5+1 gate 통과 후 승격, NFR-003 trace anchor |
+| `AccessIntervention` | `aci_` | source policy 위반 intercept 기록 (ADR-0017) |
+| `ManualClaimEntry` | `mcl_` | 운영자 수동 claim 입력, raw_text_stored=false 강제 (ADR-0018) |
 
-## Planned entities (ADR 기반 의도)
+### Edge relations (ADR-0013, ADR-0025)
 
-| Entity | Purpose | Storage |
+| Relation | v0 | Purpose |
 |---|---|---|
-| Document | publisher 메타 + URL 그룹 + reliability_tier | SQLite documents + Markdown hub |
-| Snapshot | fetch 시점 immutable bytes 메타 | SQLite snapshots + R2 bytes |
-| Claim | atomic 사실 + evidence + lifecycle | SQLite claims (모든 candidate) + Markdown promoted only |
-| Dossier | 주제별 promoted claim 합성 | SQLite dossiers + Markdown |
-| Scenario | drivers / assumptions / branches / falsifiers | SQLite scenarios + Markdown |
-| ScenarioRevision | scenario 변경 append-only ledger | SQLite scenario_revisions |
-| ContentDraft | Dossier+Scenario → 초고 | Markdown drafts |
-| Publication | 발행 콘텐츠 + correction ledger | SQLite publications + Markdown |
-| Edge | 객체간 관계 record | SQLite edges |
-| Run | LLM/parser run 비용 ledger | SQLite runs |
-| Chunk | snapshot 텍스트 청크 (FTS5 인덱스 row) | SQLite fts5 |
+| `SUPPORTS` | ✓ | A가 B를 뒷받침 |
+| `CONTRADICTS` | ✓ | counterclaim trigger |
+| `QUALIFIES` | ✓ | A가 B의 조건/범위 한정 |
+| `UPDATES` | ✓ | 최신 갱신 |
+| `SUPERSEDES` | ✓ | scenario revision lineage |
+| `HAS_INTENT` | ✓ | Thesis → EditorialIntent (ADR-0025) |
+| `USES_INTENT` | ✓ | ContentDraft → EditorialIntent (ADR-0025) |
+| `RESOLVES` | ✓ | ManualClaimEntry → AccessIntervention (ADR-0018) |
+| `DERIVED_FROM_MANUAL_REVIEW_OF` | ✓ | ManualClaimEntry → Source (ADR-0018) |
 
-## Storage
+FTS indexes (Lucene): claim_fts, source_fts, document_fts, scenario_fts, thesis_fts
 
-| Store | Purpose | Source |
+## Relational tables — SQLite (`migrations/sqlite/v1_schema.sql`)
+
+| Table | ADR | Purpose |
 |---|---|---|
-| Markdown vault | Document hub, Dossier, Scenario, ContentDraft, Publication, promoted Claim | git tree (this repo) — INFRA-1B 단계에서 첫 노트 생성 |
-| SQLite + FTS5 | 모든 candidate claim, snapshot 메타, chunk 인덱스, edge ledger, run ledger | `research.db` (INFRA-1A.2 slice 도입) |
-| R2 | Snapshot 원본 bytes(HTML/PDF) + 추출 텍스트 캐시 | Cloudflare R2 bucket (INFRA-1A.3 slice 도입) |
-| JSONL | import / export 전용 (canonical 아님) | INFRA-1B+ 단계에서 backup/migration용 |
+| `run_ledger` | ADR-0023 INV-0023-7 | 모든 LLM call + cost + vendor + tier + batch_id |
+| `cross_vendor_review_ledger` | ADR-0023 INV-0023-4 | 3종 mandatory cross-vendor review |
+| `source_material_policy` | ADR-0017 | source별 archive/raw_cloud/external_llm policy |
+| `policy_decisions` | ADR-0017 | 운영자 policy gate 결정 기록 |
+| `policy_learning_events` | ADR-0021 | pattern 1–5 학습 이벤트 |
+| `source_policy_rules` | ADR-0021 | propose/confirm 규칙 (auto-tighten only) |
+| `dataset_vintage` | ADR-0024 PRE-0024-2 | dataset fetch 시점 vintage + checksum |
+| `derived_metric_ledger` | ADR-0024 PRE-0024-3 | reproducibility 3-tuple (vintage+spec+lib sha256) |
+| `metrics_run` | ADR-0020 | per-run metric 집계 |
+| `metrics_daily` | ADR-0020 | 일별 집계 |
+| `metric_alerts` | ADR-0020 | threshold 초과 알림 |
+| `evaluation_runs` | ADR-0020 | gold query set 기반 평가 실행 |
+| `evaluation_cases` | ADR-0020 | 개별 평가 케이스 |
+| `retrieval_pack_metrics` | ADR-0020 | recall@k / diversity / bidirectional_balance |
+| `research_session` | ADR-0021 | interactive session scoping |
+| `raw_cache_items` | ADR-0021 | ephemeral URL 참조 (raw text 미저장, DEC-007 lifecycle) |
+| `schema_migrations` | — | applied migration version tracking |
 
 ## Lifecycle states
 
 | Entity | States | Notes |
 |---|---|---|
-| Claim | draft → confirmed → disputed → stale → retracted | 글로서리 [`claim`](../glossary/claim.md) state machine. transitions / forbidden_paths 명시 |
-| ContentDraft | draft → reviewing → ready → published / dropped | 글로서리 [`content_draft`](../glossary/content-draft.md) state machine |
-| Publication | live → corrected → retracted | 글로서리 [`publication`](../glossary/publication.md) state machine |
+| Claim | draft → confirmed → disputed → stale → retracted → source_changed → source_unavailable → needs_recorroboration | ADR-0011 INV-0011-5 (8-state) |
+| ContentDraft | draft → reviewing → ready → published → dropped | ADR-0025 |
+| Publication | live → corrected → retracted | ADR-0011 INV-0011-7 + ADR-0015 cite check gate |
+| AccessIntervention | pending_user_review → resolved → ignored | ADR-0017 |
+| PolicyRule | proposed (active=0) → confirmed (active=1) → demoted | ADR-0021 auto-tighten only |
 
-## Needs audit
+## ID prefix table (AC-005)
 
-- 모든 entity 가 코드 도입 전이므로 "needs audit" 대상은 현 시점에 없음.
-- INFRA-1A.2 slice 첫 마이그레이션 commit 시 이 표를 실제 SQL DDL 기반으로
-  갱신하고 generated 문서로 일부 분리.
+See `src/domain/ids.ts` for the full `ID_PREFIXES` map and `validateIdPrefix()`.
+All prefixes enforced at Neo4j (UNIQUE constraint) and in TEST-005 (`tests/lint/id_prefix_test.ts`).
+
+## Pending
+
+- `docs/_generated/schema.md` — 마이그레이션 파일에서 자동 생성 (INFRA-1A.2 이후 단계)
+- SPIKE-001 결과 입력 후 Neo4j FTS 인덱스 tuning (AC-002 검증)

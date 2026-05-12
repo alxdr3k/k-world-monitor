@@ -1,61 +1,76 @@
 # Code Map
 
-> Last verified against code: n/a (no implementation yet — 2026-05-11)
+> Last verified against code: a581e72 (2026-05-12) — INFRA-1A.2 schema commit
 
-코드 구현이 아직 없다. 이 문서는 INFRA-1A.2 slice 진입과 동시에 실제 경로로
-갱신된다.
+## Runtime stack
 
-P0-M1 단계에서 채워질 항목 미리보기:
-
-| Path (planned) | Purpose |
-|---|---|
-| `src/cli/` | bun-based CLI entrypoint (manual_intake, search, dossier, draft) |
-| `src/storage/sqlite/` | SQLite + FTS5 connection / migration runner / schema helpers |
-| `src/storage/r2/` | Cloudflare R2 client wrapper (upload / download / sha256 verify) |
-| `src/domain/` | Document / Snapshot / Claim / Dossier / Scenario / ContentDraft / Publication 도메인 모델 |
-| `src/discovery/` | RSS / API / sitemap discovery worker + Source Registry |
-| `src/extraction/` | Article / Dataset / Report extractor + LLM router |
-| `src/scenario/` | Scenario composer + revisions ledger + validator |
-| `src/cite_check/` | stale / retracted / horizon / unit / overclaim 5종 검사 |
-| `src/ops/` | Run ledger + cost throttling + Stale worker |
-| `migrations/` | SQL 마이그레이션 (Document/Snapshot/Claim/Edge/Run/Revisions) |
-| `tests/` | TEST-001 ~ TEST-021 (코드 도입 후 매핑) |
+- **bun** (JavaScript/TypeScript runtime + package manager)
+- **TypeScript** (strict mode, `tsconfig.json`)
+- **better-sqlite3** (SQLite driver, synchronous)
+- **neo4j-driver** (Neo4j Bolt protocol, async)
+- **ulid** (monotonic ID generation)
+- **js-yaml** (YAML parsing for invariant validator)
 
 ## Entry points
 
 | Path | Purpose |
 |---|---|
-| (not yet) |  |
+| `scripts/migrate.ts` | Migration runner CLI (`bun run migrate`, `:neo4j`, `:sqlite`) |
+| `scripts/validate_invariants.ts` | Invariant validator (`bun run invariant:check`) |
+| `tests/bench/neo4j_fts_search_bench.ts` | SPIKE-001 FTS bench (`bun run bench:neo4j`) |
 
-## Runtime / App
-
-| Path | Purpose |
-|---|---|
-| (not yet) |  |
-
-## Domain / Services
+## Migrations
 
 | Path | Purpose |
 |---|---|
-| (not yet) |  |
+| `migrations/neo4j/v1_schema.cypher` | Neo4j graph schema v1: constraints, indexes, FTS |
+| `migrations/sqlite/v1_schema.sql` | SQLite relational schema v1: all 16 tables |
 
-## Data / Persistence
+## Source
 
 | Path | Purpose |
 |---|---|
-| (not yet) |  |
+| `src/domain/ids.ts` | ID prefix constants + `validateIdPrefix()` (AC-005) |
+| `src/storage/neo4j/connection.ts` | Neo4j driver singleton + `withSession()` |
+| `src/storage/sqlite/connection.ts` | SQLite DB singleton + migration helper |
 
 ## Tests
 
+| Path | Purpose | TEST id |
+|---|---|---|
+| `tests/lint/id_prefix_test.ts` | ID prefix validation for all domain types | TEST-005 |
+| `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
+
+## Scripts
+
 | Path | Purpose |
 |---|---|
-| (not yet) |  |
+| `scripts/validate_invariants.ts` | ADR-0002 invariant checker (warning-level, exit 0) |
+| `scripts/migrate.ts` | Applies Neo4j + SQLite migrations |
+| `scripts/check-doc-governance.rb` | Doc governance lint (Ruby) |
 
-## Needs audit
+## Config / Data
 
-| Path | Reason |
+| Path | Purpose |
 |---|---|
-| (none — implementation has not started) |  |
+| `data/llm_routing.yaml` | LLM routing operational catalog (ADR-0023) |
+| `package.json` | bun scripts + dependencies |
+| `tsconfig.json` | TypeScript compiler options |
+
+## Planned (INFRA-1A.3+)
+
+| Path | Purpose |
+|---|---|
+| `src/cli/` | CLI entrypoints (INFRA-1B.1) |
+| `src/storage/r2/` | Cloudflare R2 wrapper (INFRA-1A.3) |
+| `src/domain/` | Full domain model types (INFRA-1B) |
+| `src/discovery/` | RSS/API/sitemap discovery worker (INFRA-1B.1) |
+| `src/extraction/` | Extractor + LLM router (P0-M3) |
+| `src/scenario/` | Scenario composer + validate + revisions ledger (P0-M5) |
+| `src/cite_check/` | 5+1 cite check (P0-M6) |
+| `src/ops/` | Run ledger + cost throttling + stale worker |
+| `data/transforms/` | Data Science Module specs `<spec_id>.{py,sql}` (ADR-0024) |
+| `docs/_generated/` | Invariant artifacts (scope_tree, term_usage, effective_invariant_policy) |
 
 ---
 

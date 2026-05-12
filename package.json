@@ -1,0 +1,29 @@
+{
+  "name": "k-world-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit --pretty false",
+    "lint": "bun run typecheck",
+    "test": "bun test",
+    "migrate": "bun run scripts/migrate.ts",
+    "migrate:neo4j": "bun run scripts/migrate.ts --neo4j",
+    "migrate:sqlite": "bun run scripts/migrate.ts --sqlite",
+    "invariant:check": "bun run scripts/validate_invariants.ts",
+    "invariant:regen": "bun run scripts/validate_invariants.ts --regenerate",
+    "invariant:write": "bun run scripts/validate_invariants.ts --write-warnings",
+    "invariant:fixture:scope-creep": "bun run scripts/validate_invariants.ts --fixture scope-creep",
+    "invariant:fixture:glossary-drift": "bun run scripts/validate_invariants.ts --fixture glossary-drift",
+    "bench:neo4j": "bun run tests/bench/neo4j_fts_search_bench.ts"
+  },
+  "dependencies": {
+    "neo4j-driver": "^5.26.0",
+    "ulid": "^2.3.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.4.0"
+  }
+}
