@@ -40,6 +40,7 @@
 | `src/storage/r2/policy.ts` | PERMITTED_PREFIXES + `checkPermittedPrefix()` + sha256 helpers (ADR-0012 INV-0012-4, INFRA-1A.3) |
 | `src/storage/r2/client.ts` | Bun.S3Client wrapper — `r2Put/r2Get/r2Delete` with policy enforcement (INFRA-1A.3) |
 | `src/storage/source-registry/seed.ts` | Parse `data/sources_seed.yaml`, validate enums, upsert `source_material_policy` rows (INFRA-1B.1) |
+| `src/ops/run-ledger.ts` | `startRun` / `completeRun` / `failRun` / `getDailyCostUsd` / `getDailyCostBreakdown` — run_<ULID> IDs, SQLite-backed LLM cost ledger (OPS-1A.1, AC-019) |
 
 ## Tests
 
@@ -52,6 +53,7 @@
 | `tests/unit/perspective_distribution_test.ts` | AC-027 Tier A seed distribution lint — reads data/sources_seed.yaml (AC-027, REQ-022) | TEST-027 |
 | `tests/unit/r2_policy_test.ts` | R2 permitted-prefix + sha256 round-trip integrity (AC-003, AC-020, AC-032) | — |
 | `tests/unit/source_registry_test.ts` | Source registry seed dry-run + enum validation + YAML structure (INFRA-1B.1) | — |
+| `tests/unit/run_ledger_test.ts` | run-ledger startRun / completeRun / failRun / getDailyCostUsd / getDailyCostBreakdown — 13 in-memory SQLite tests (OPS-1A.1) | — |
 | `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
 
 ## Scripts
