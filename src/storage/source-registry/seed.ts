@@ -114,8 +114,13 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
   const parsed = yamlLoad(raw) as SeedFile;
   const sources = parsed.sources;
 
-  // Validate all sources before any DB writes
+  // Validate all sources and check slug uniqueness before any DB writes
+  const slugsSeen = new Set<string>();
   for (const s of sources) {
+    if (slugsSeen.has(s.slug)) {
+      throw new SeedValidationError(s.slug, "slug", `duplicate slug in sources_seed.yaml`);
+    }
+    slugsSeen.add(s.slug);
     validateSource(s);
   }
 
@@ -153,6 +158,7 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
   );
 
   // Upsert policy fields so re-runs propagate YAML changes to existing rows.
+  // updated_at is explicitly set on UPDATE because SQLite DEFAULT only fires on INSERT.
   const upsertPolicy = db.prepare(`
     INSERT INTO source_material_policy
       (source_id, archive_policy, raw_cloud_policy, external_llm_policy, checked_at)
@@ -161,7 +167,8 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
       archive_policy      = excluded.archive_policy,
       raw_cloud_policy    = excluded.raw_cloud_policy,
       external_llm_policy = excluded.external_llm_policy,
-      checked_at          = excluded.checked_at
+      checked_at          = excluded.checked_at,
+      updated_at          = strftime('%Y-%m-%dT%H:%M:%SZ','now')
   `);
 
   const rows: SeedRow[] = [];

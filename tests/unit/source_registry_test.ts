@@ -217,6 +217,11 @@ describe("sources_seed.yaml structure", () => {
       expect(s.slug.length).toBeGreaterThan(0);
     }
   });
+
+  it("all 72 slugs are unique (no duplicates in seed file)", () => {
+    const slugs = parsed.sources.map((s) => s.slug);
+    expect(new Set(slugs).size).toBe(72);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -231,5 +236,12 @@ describe("SeedValidationError", () => {
     expect(err.message).toContain("test_slug");
     expect(err.message).toContain("source_perspective");
     expect(err.message).toContain("unknown_value");
+  });
+
+  it("is thrown for duplicate slug (data quality guard)", () => {
+    const err = new SeedValidationError("dup_slug", "slug", "duplicate slug in sources_seed.yaml");
+    expect(err).toBeInstanceOf(SeedValidationError);
+    expect(err.message).toContain("dup_slug");
+    expect(err.message).toContain("slug");
   });
 });
