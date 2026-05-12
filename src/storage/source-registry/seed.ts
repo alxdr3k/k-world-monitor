@@ -70,7 +70,24 @@ export class SeedValidationError extends Error {
   }
 }
 
+const ALLOWED_SCHEMES = new Set(["https:", "http:"]);
+
+function validateWebUrl(slug: string, field: string, value: string): void {
+  let parsed: URL;
+  try { parsed = new URL(value); } catch {
+    throw new SeedValidationError(slug, field, value);
+  }
+  if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
+    throw new SeedValidationError(slug, field, `non-web scheme: ${parsed.protocol}`);
+  }
+}
+
 function validateSource(s: SeedSource): void {
+  // Required string fields (data quality guard — catch undefined before DB write)
+  for (const field of ["name", "publisher", "access_method", "meta_category"] as const) {
+    if (typeof s[field] !== "string" || (s[field] as string).length === 0)
+      throw new SeedValidationError(s.slug, field, s[field]);
+  }
   if (!isSourcePerspective(s.source_perspective))
     throw new SeedValidationError(s.slug, "source_perspective", s.source_perspective);
   if (!isArchivePolicy(s.archive_policy))
@@ -79,19 +96,9 @@ function validateSource(s: SeedSource): void {
     throw new SeedValidationError(s.slug, "raw_cloud_policy", s.raw_cloud_policy);
   if (!isExternalLlmPolicy(s.external_llm_policy))
     throw new SeedValidationError(s.slug, "external_llm_policy", s.external_llm_policy);
-  try { new URL(s.url); } catch {
-    throw new SeedValidationError(s.slug, "url", s.url);
-  }
-  if (s.rss_url !== undefined) {
-    try { new URL(s.rss_url); } catch {
-      throw new SeedValidationError(s.slug, "rss_url", s.rss_url);
-    }
-  }
-  if (s.api_base !== undefined) {
-    try { new URL(s.api_base); } catch {
-      throw new SeedValidationError(s.slug, "api_base", s.api_base);
-    }
-  }
+  validateWebUrl(s.slug, "url", s.url);
+  if (s.rss_url !== undefined) validateWebUrl(s.slug, "rss_url", s.rss_url);
+  if (s.api_base !== undefined) validateWebUrl(s.slug, "api_base", s.api_base);
 }
 
 // ---------------------------------------------------------------------------
