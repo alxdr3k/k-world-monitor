@@ -15,6 +15,8 @@ process.env["SQLITE_PATH"] = ":memory:";
 
 const neo4jRuns: Array<{ query: string; params: Record<string, unknown> }> = [];
 let neo4jShouldThrow = false;
+// When true, only the resolveIntervention query (SET i.status) throws; context fetch succeeds.
+let neo4jThrowOnResolve = false;
 // Controls the status returned by fetchInterventionContext (used by manual_claim/temp_text).
 let mockInterventionStatus = "pending_user_review";
 
@@ -24,6 +26,10 @@ mock.module("../../src/storage/neo4j/connection", () => ({
     // Returns matched=1 for existence-check queries (AS matched / RETURN count).
     const mockRun = async (query: string, params: Record<string, unknown>) => {
       if (neo4jShouldThrow) throw new Error("Neo4j error");
+      // resolveIntervention uses a plain session.run with SET i.status; detect by pattern.
+      if (neo4jThrowOnResolve && query.includes("SET i.status")) {
+        throw new Error("Neo4j resolve error");
+      }
       neo4jRuns.push({ query, params });
       if (query.includes("AS sessionId")) {
         return {
@@ -107,6 +113,7 @@ function setupDb() {
 beforeEach(() => {
   neo4jRuns.length = 0;
   neo4jShouldThrow = false;
+  neo4jThrowOnResolve = false;
   mockInterventionStatus = "pending_user_review";
   setupDb();
 });
@@ -391,6 +398,21 @@ describe("reviewIntervention — temp_text", () => {
     await expect(reviewIntervention("aci_TEST007b", "temp_text")).rejects.toThrow("not reviewable");
     // No cache row should have been inserted.
     const { getDb } = require("../../src/storage/sqlite/connection");
+    const count = (getDb().prepare("SELECT COUNT(*) AS n FROM raw_cache_items").get() as { n: number }).n;
+    expect(count).toBe(0);
+  });
+
+  it("compensates SQLite row on resolveIntervention failure — original error propagates (INV-0018-3 error preservation)", async () => {
+    // Simulate: fetchInterventionContext succeeds, SQLite insert succeeds,
+    // but resolveIntervention (Neo4j SET i.status) throws.
+    // Expected: the SQLite cache row is deleted (compensation), and the
+    // original Neo4j resolve error — not a cleanup error — is thrown.
+    neo4jThrowOnResolve = true;
+    const { getDb } = require("../../src/storage/sqlite/connection");
+
+    await expect(reviewIntervention("aci_TEST006", "temp_text")).rejects.toThrow("Neo4j resolve error");
+
+    // SQLite row must have been deleted by the compensation handler.
     const count = (getDb().prepare("SELECT COUNT(*) AS n FROM raw_cache_items").get() as { n: number }).n;
     expect(count).toBe(0);
   });
