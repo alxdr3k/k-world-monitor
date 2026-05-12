@@ -268,6 +268,11 @@ describe("getDailyCostUsd", () => {
     expect(() => getDailyCostUsd("not-a-date")).toThrow("date must be YYYY-MM-DD");
   });
 
+  it("throws for impossible calendar dates (e.g. month 99)", () => {
+    expect(() => getDailyCostUsd("2026-99-99")).toThrow("not a valid calendar date");
+    expect(() => getDailyCostUsd("2026-02-30")).toThrow("not a valid calendar date");
+  });
+
   it("sums completed runs for the date", () => {
     const today = new Date().toISOString().slice(0, 10);
     const id1 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
@@ -353,5 +358,9 @@ describe("getDailyCostBreakdown", () => {
 
   it("throws for invalid date format", () => {
     expect(() => getDailyCostBreakdown("2026-01")).toThrow("date must be YYYY-MM-DD");
+  });
+
+  it("throws for impossible calendar dates", () => {
+    expect(() => getDailyCostBreakdown("2026-13-01")).toThrow("not a valid calendar date");
   });
 });
