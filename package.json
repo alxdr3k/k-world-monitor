@@ -16,7 +16,9 @@
     "invariant:fixture:glossary-drift": "bun run scripts/validate_invariants.ts --fixture glossary-drift",
     "bench:neo4j": "bun run tests/bench/neo4j_fts_search_bench.ts",
     "seed-sources": "bun run scripts/seed-sources.ts",
-    "seed-sources:dry-run": "bun run scripts/seed-sources.ts --dry-run"
+    "seed-sources:dry-run": "bun run scripts/seed-sources.ts --dry-run",
+    "discovery:run": "bun run src/discovery/worker/run-discovery.ts",
+    "discovery:dry-run": "bun run src/discovery/worker/run-discovery.ts --dry-run"
   },
   "dependencies": {
     "fast-xml-parser": "^5.8.0",
