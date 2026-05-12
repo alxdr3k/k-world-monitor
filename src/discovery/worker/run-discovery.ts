@@ -83,6 +83,17 @@ function loadRssSources(filterSlug?: string): DiscoverySource[] {
 }
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+// DEC-013 §1: Discovery worker caps daily queue insertions at 20 candidates.
+// Items beyond the cap are dropped; they receive priority lift on the next day
+// via the scheduler's backoff / priority logic.
+// v0: count insertions within this run (no inter-run state needed for first
+// publication milestone).  Adjust when score-rank triage (DEC-013 §2) lands.
+const DAILY_CANDIDATE_CAP = 20;
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -120,7 +131,12 @@ async function main(): Promise<void> {
   let totalErrors = 0;
 
   // Phase 2: parse RSS bodies and enqueue (serial, INV-0030-2)
+  // DEC-013: stop inserting once DAILY_CANDIDATE_CAP insertions are reached.
   for (const result of pollResults) {
+    if (totalInserted >= DAILY_CANDIDATE_CAP) {
+      console.log(`[discovery] Daily candidate cap (${DAILY_CANDIDATE_CAP}) reached — stopping enqueue`);
+      break;
+    }
     const { source_id, outcome, body, contentType } = result;
 
     if (outcome.status === "not_modified") {
@@ -141,10 +157,14 @@ async function main(): Promise<void> {
       continue;
     }
 
-    // Only parse text-based content (xml/rss/atom/html — not binaries)
+    // Only parse text-based content (xml/rss/atom/html — not binaries).
+    // Non-text content-type is treated as a fetch failure: record error so the
+    // source enters backoff (same path as parse failure and empty body).
     const ct = contentType ?? "";
     if (ct.includes("application/octet-stream") || ct.includes("image/")) {
-      console.log(`  [skip] ${source_id}: non-text content-type ${ct}`);
+      console.log(`  [fail] ${source_id}: non-text content-type ${ct}`);
+      recordFetchOutcome(source_id, { status: "error" });
+      totalErrors++;
       continue;
     }
 
@@ -180,11 +200,15 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const { inserted, skipped } = enqueueDiscoveredItems(source_id, items);
+      // Respect the daily cap: pass only as many items as remain in the budget.
+      const remaining = DAILY_CANDIDATE_CAP - totalInserted;
+      const itemsToEnqueue = remaining < items.length ? items.slice(0, remaining) : items;
+      const { inserted, skipped } = enqueueDiscoveredItems(source_id, itemsToEnqueue);
+      const dropped = items.length - itemsToEnqueue.length;
       totalInserted += inserted;
       totalSkipped += skipped;
       console.log(
-        `  [ok] ${source_id}: ${items.length} items → +${inserted} queued, ${skipped} dupes`
+        `  [ok] ${source_id}: ${items.length} items → +${inserted} queued, ${skipped} dupes${dropped > 0 ? `, ${dropped} cap-dropped` : ""}`
       );
     } catch (err) {
       console.error(`  [parse-error] ${source_id}:`, err instanceof Error ? err.message : err);

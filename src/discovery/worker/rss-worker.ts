@@ -8,6 +8,7 @@
 
 import { RSS_PARSER } from "../parse/xml-safe";
 import { sha256Hex } from "../../utils/hash";
+import { ulid } from "ulid";
 import { getDb } from "../../storage/sqlite/connection";
 
 export interface FeedItem {
@@ -166,9 +167,11 @@ export function enqueueDiscoveredItems(
   // Batch inside a transaction for atomicity and performance (INV-0030-2).
   const insertAll = db.transaction(() => {
     for (const item of items) {
-      // queue_id: deterministic from source_id+url so INSERT OR IGNORE is idempotent.
+      // queue_id: ULID per row — deduplication is handled by the partial unique
+      // index (source_id, url) WHERE status IN ('pending','processing'), so
+      // re-queueing a done/error URL gets a fresh row without PK conflict.
       const contentHash = sha256Hex(item.url);
-      const queueId = `dq_${sha256Hex(sourceId + "|" + item.url).slice(0, 26)}`;
+      const queueId = `dq_${ulid()}`;
       const changes = stmt.run(
         queueId,
         sourceId,
