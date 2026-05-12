@@ -171,3 +171,21 @@
 - 리뷰/반영: Step 6 review pass 1/20: 0 actionable findings (sha256Hex 이름 충돌 + env var 대소문자 fix 적용 후). PR #14 CI pass, squash merged.
 - 리스크: 없음
 
+사이클 9 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일: INFRA-1B.1 Source Registry Bootstrap 구현: data/sources_seed.yaml 파싱 → 72개 소스 enum 검증 → SQLite source_material_policy upsert. seed.ts, seed-sources.ts CLI, 12개 unit test 작성.
+- 결론: INFRA-1B.1 Source Registry Bootstrap 완료. 72개 Tier A 소스를 source_material_policy 테이블에 idempotent하게 적재하는 시드 모듈과 CLI, 단위 테스트를 작성했다. 163개 전체 테스트 통과, typecheck clean. PR #15 생성 후 codex-loop 진행 중. 구현
+- 변경 범위: code_or_runtime (8 files), contract surface
+- 검증 계획: full, full CI 필요
+- 다음 검토 후보:
+  - INFRA-1B.2: Discovery worker (RSS/sitemap 1종 + API 1종, Tier A 한정) → 큐 적재 (planned) 시작 조건: INFRA-1B.1 merge 후
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증:
+  - bun test 163/163 통과
+  - tsc --noEmit clean
+  - Review Pass 1/20 — 0 actionable findings (dead code cleanup 후 완료)
+- 리뷰/반영: PR #15 생성 완료 (claude/infra-1b1-source-registry → main). codex-loop 대기 중.
+- 리스크: 없음
+
