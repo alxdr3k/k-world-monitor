@@ -32,6 +32,7 @@ export interface StartRunInput {
   specSha256?: string;
   datasetVintageId?: string;
   libraryVersionLockSha256?: string;
+  /** Required when vendor !== 'openai' — ADR-0023 audit invariant. */
   domainOverrideReason?: string;
   sessionId?: string;
 }
@@ -40,6 +41,7 @@ export interface CompleteRunInput {
   inputTokens?: number;
   outputTokens?: number;
   cachedTokens?: number;
+  /** Required — null cost silently disappears from SUM aggregation (AC-019). */
   totalCostUsd?: number;
 }
 
@@ -50,7 +52,17 @@ export interface DailyCostRow {
   runCount: number;
 }
 
+const VALID_TIERS = new Set([0, 1, 2, 3]);
+
 export function startRun(input: StartRunInput): string {
+  if (!VALID_TIERS.has(input.tier))
+    throw new Error(`startRun: tier must be 0–3, got ${input.tier}`);
+  // ADR-0023: non-default vendor routing must record the override reason.
+  if (input.vendor !== "openai" && !input.domainOverrideReason)
+    throw new Error(
+      `startRun: domainOverrideReason is required for non-openai vendor '${input.vendor}'`
+    );
+
   const runId = `run_${ulid()}`;
   const now = new Date().toISOString();
   getDb()
@@ -86,14 +98,34 @@ export function startRun(input: StartRunInput): string {
 }
 
 export function completeRun(runId: string, output: CompleteRunInput = {}): void {
-  if (output.inputTokens !== undefined && output.inputTokens < 0)
-    throw new Error(`completeRun: inputTokens must be non-negative, got ${output.inputTokens}`);
-  if (output.outputTokens !== undefined && output.outputTokens < 0)
-    throw new Error(`completeRun: outputTokens must be non-negative, got ${output.outputTokens}`);
-  if (output.cachedTokens !== undefined && output.cachedTokens < 0)
-    throw new Error(`completeRun: cachedTokens must be non-negative, got ${output.cachedTokens}`);
-  if (output.totalCostUsd !== undefined && output.totalCostUsd < 0)
-    throw new Error(`completeRun: totalCostUsd must be non-negative, got ${output.totalCostUsd}`);
+  // totalCostUsd is required — omitting it silently excludes the run from SUM aggregation.
+  if (output.totalCostUsd === undefined)
+    throw new Error("completeRun: totalCostUsd is required");
+  if (!Number.isFinite(output.totalCostUsd) || output.totalCostUsd < 0)
+    throw new Error(
+      `completeRun: totalCostUsd must be a finite non-negative number, got ${output.totalCostUsd}`
+    );
+
+  // Token fields must be non-negative integers.
+  if (output.inputTokens !== undefined) {
+    if (!Number.isInteger(output.inputTokens) || output.inputTokens < 0)
+      throw new Error(
+        `completeRun: inputTokens must be a non-negative integer, got ${output.inputTokens}`
+      );
+  }
+  if (output.outputTokens !== undefined) {
+    if (!Number.isInteger(output.outputTokens) || output.outputTokens < 0)
+      throw new Error(
+        `completeRun: outputTokens must be a non-negative integer, got ${output.outputTokens}`
+      );
+  }
+  if (output.cachedTokens !== undefined) {
+    if (!Number.isInteger(output.cachedTokens) || output.cachedTokens < 0)
+      throw new Error(
+        `completeRun: cachedTokens must be a non-negative integer, got ${output.cachedTokens}`
+      );
+  }
+
   const now = new Date().toISOString();
   const result = getDb()
     .prepare(
@@ -108,7 +140,7 @@ export function completeRun(runId: string, output: CompleteRunInput = {}): void 
       output.inputTokens ?? null,
       output.outputTokens ?? null,
       output.cachedTokens ?? null,
-      output.totalCostUsd ?? null,
+      output.totalCostUsd,
       runId
     );
   if (result.changes === 0) {
@@ -130,10 +162,16 @@ export function failRun(runId: string): void {
   }
 }
 
+function validateDate(date: string, caller: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+    throw new Error(`${caller}: date must be YYYY-MM-DD, got '${date}'`);
+}
+
 // Returns total cost in USD for all completed runs on a UTC calendar date (YYYY-MM-DD).
 // Filters by completed_at so cross-midnight runs are attributed to the day they billed.
 // Optional vendor filter.
 export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
+  validateDate(date, "getDailyCostUsd");
   const like = `${date}%`;
   const row = vendor
     ? (getDb()
@@ -155,6 +193,7 @@ export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
 
 // Returns per-vendor daily cost breakdown for a UTC calendar date.
 export function getDailyCostBreakdown(date: string): DailyCostRow[] {
+  validateDate(date, "getDailyCostBreakdown");
   const like = `${date}%`;
   return getDb()
     .prepare(

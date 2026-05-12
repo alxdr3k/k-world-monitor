@@ -45,6 +45,8 @@ CREATE INDEX IF NOT EXISTS run_ledger_vendor_idx ON run_ledger(vendor);
 CREATE INDEX IF NOT EXISTS run_ledger_stage_idx ON run_ledger(stage);
 CREATE INDEX IF NOT EXISTS run_ledger_started_at_idx ON run_ledger(started_at);
 CREATE INDEX IF NOT EXISTS run_ledger_batch_id_idx ON run_ledger(batch_id);
+-- OPS-1A.1: daily cost queries filter on completed_at; composite covers vendor filter too.
+CREATE INDEX IF NOT EXISTS run_ledger_completed_at_vendor_idx ON run_ledger(completed_at, vendor);
 
 -- =============================================================================
 -- Cross-vendor review ledger (ADR-0023 INV-0023-4)

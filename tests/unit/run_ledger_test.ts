@@ -65,7 +65,13 @@ describe("startRun", () => {
   });
 
   it("inserts a running row", () => {
-    const id = startRun({ stage: "discover", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6" });
+    const id = startRun({
+      stage: "discover",
+      vendor: "anthropic",
+      tier: 1,
+      modelId: "claude-sonnet-4-6",
+      domainOverrideReason: "korean-long-context",
+    });
     const { getDb } = require("../../src/storage/sqlite/connection");
     const row = getDb().prepare("SELECT * FROM run_ledger WHERE run_id = ?").get(id) as Record<string, unknown>;
     expect(row["status"]).toBe("running");
@@ -89,6 +95,30 @@ describe("startRun", () => {
     expect(row["domain_override_reason"]).toBe("korean-long-context");
     expect(row["session_id"]).toBe("sess_TEST");
   });
+
+  it("throws when tier is out of range", () => {
+    expect(() =>
+      startRun({ stage: "extract", vendor: "openai", tier: 99 as 0, modelId: "gpt-5-mini" })
+    ).toThrow("tier must be 0–3");
+    expect(() =>
+      startRun({ stage: "extract", vendor: "openai", tier: -1 as 0, modelId: "gpt-5-mini" })
+    ).toThrow("tier must be 0–3");
+  });
+
+  it("throws when non-openai vendor has no domainOverrideReason", () => {
+    expect(() =>
+      startRun({ stage: "extract", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6" })
+    ).toThrow("domainOverrideReason is required");
+    expect(() =>
+      startRun({ stage: "extract", vendor: "google", tier: 0, modelId: "gemini-2.5-pro" })
+    ).toThrow("domainOverrideReason is required");
+  });
+
+  it("allows openai without domainOverrideReason", () => {
+    expect(() =>
+      startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" })
+    ).not.toThrow();
+  });
 });
 
 describe("completeRun", () => {
@@ -105,13 +135,19 @@ describe("completeRun", () => {
     expect(row["completed_at"]).toBeTruthy();
   });
 
-  it("accepts completeRun with no output (cost stays null)", () => {
-    const id = startRun({ stage: "dossier", vendor: "anthropic", tier: 1, modelId: "claude-haiku-4-5-20251001" });
-    completeRun(id);
+  it("throws when totalCostUsd is not provided", () => {
+    const id = startRun({ stage: "dossier", vendor: "openai", tier: 1, modelId: "gpt-5-mini" });
+    expect(() => completeRun(id)).toThrow("totalCostUsd is required");
+    expect(() => completeRun(id, {})).toThrow("totalCostUsd is required");
+  });
+
+  it("accepts zero cost (free runs)", () => {
+    const id = startRun({ stage: "dossier", vendor: "openai", tier: 1, modelId: "gpt-5-mini" });
+    completeRun(id, { totalCostUsd: 0 });
     const { getDb } = require("../../src/storage/sqlite/connection");
     const row = getDb().prepare("SELECT * FROM run_ledger WHERE run_id = ?").get(id) as Record<string, unknown>;
     expect(row["status"]).toBe("completed");
-    expect(row["total_cost_usd"]).toBeNull();
+    expect(row["total_cost_usd"]).toBe(0);
   });
 });
 
@@ -138,17 +174,37 @@ describe("failRun", () => {
 
 describe("completeRun terminal-state guard", () => {
   it("throws when run_id does not exist", () => {
-    expect(() => completeRun("run_NONEXISTENT")).toThrow("no running row");
+    expect(() => completeRun("run_NONEXISTENT", { totalCostUsd: 0.01 })).toThrow("no running row");
   });
 
   it("throws when totalCostUsd is negative", () => {
     const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
-    expect(() => completeRun(id, { totalCostUsd: -0.01 })).toThrow("totalCostUsd must be non-negative");
+    expect(() => completeRun(id, { totalCostUsd: -0.01 })).toThrow("must be a finite non-negative number");
+  });
+
+  it("throws when totalCostUsd is NaN", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    expect(() => completeRun(id, { totalCostUsd: NaN })).toThrow("must be a finite non-negative number");
+  });
+
+  it("throws when totalCostUsd is Infinity", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    expect(() => completeRun(id, { totalCostUsd: Infinity })).toThrow("must be a finite non-negative number");
   });
 
   it("throws when inputTokens is negative", () => {
     const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
-    expect(() => completeRun(id, { inputTokens: -1 })).toThrow("inputTokens must be non-negative");
+    expect(() => completeRun(id, { totalCostUsd: 0.01, inputTokens: -1 })).toThrow("inputTokens must be a non-negative integer");
+  });
+
+  it("throws when inputTokens is fractional", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    expect(() => completeRun(id, { totalCostUsd: 0.01, inputTokens: 1.5 })).toThrow("inputTokens must be a non-negative integer");
+  });
+
+  it("throws when outputTokens is fractional", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    expect(() => completeRun(id, { totalCostUsd: 0.01, outputTokens: 2.7 })).toThrow("outputTokens must be a non-negative integer");
   });
 
   it("throws when run is already failed (no terminal overwrite)", () => {
@@ -163,10 +219,21 @@ describe("getDailyCostUsd", () => {
     expect(getDailyCostUsd("2026-01-01")).toBe(0);
   });
 
+  it("throws for invalid date format", () => {
+    expect(() => getDailyCostUsd("2026-01")).toThrow("date must be YYYY-MM-DD");
+    expect(() => getDailyCostUsd("not-a-date")).toThrow("date must be YYYY-MM-DD");
+  });
+
   it("sums completed runs for the date", () => {
     const today = new Date().toISOString().slice(0, 10);
     const id1 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
-    const id2 = startRun({ stage: "extract", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6" });
+    const id2 = startRun({
+      stage: "extract",
+      vendor: "anthropic",
+      tier: 1,
+      modelId: "claude-sonnet-4-6",
+      domainOverrideReason: "test",
+    });
     completeRun(id1, { totalCostUsd: 0.01 });
     completeRun(id2, { totalCostUsd: 0.02 });
     expect(getDailyCostUsd(today)).toBeCloseTo(0.03, 6);
@@ -184,7 +251,13 @@ describe("getDailyCostUsd", () => {
   it("filters by vendor when specified", () => {
     const today = new Date().toISOString().slice(0, 10);
     const id1 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
-    const id2 = startRun({ stage: "extract", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6" });
+    const id2 = startRun({
+      stage: "extract",
+      vendor: "anthropic",
+      tier: 1,
+      modelId: "claude-sonnet-4-6",
+      domainOverrideReason: "test",
+    });
     completeRun(id1, { totalCostUsd: 0.01 });
     completeRun(id2, { totalCostUsd: 0.02 });
     expect(getDailyCostUsd(today, "openai")).toBeCloseTo(0.01, 6);
@@ -193,7 +266,13 @@ describe("getDailyCostUsd", () => {
 
   it("excludes runs from other dates", () => {
     const today = new Date().toISOString().slice(0, 10);
-    const id = startRun({ stage: "scenario", vendor: "google", tier: 0, modelId: "gemini-2.5-pro" });
+    const id = startRun({
+      stage: "scenario",
+      vendor: "google",
+      tier: 0,
+      modelId: "gemini-2.5-pro",
+      domainOverrideReason: "test",
+    });
     completeRun(id, { totalCostUsd: 0.10 });
     expect(getDailyCostUsd("2020-01-01")).toBe(0);
     expect(getDailyCostUsd(today)).toBeCloseTo(0.10, 6);
@@ -205,7 +284,13 @@ describe("getDailyCostBreakdown", () => {
     const today = new Date().toISOString().slice(0, 10);
     const id1 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
     const id2 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
-    const id3 = startRun({ stage: "extract", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6" });
+    const id3 = startRun({
+      stage: "extract",
+      vendor: "anthropic",
+      tier: 1,
+      modelId: "claude-sonnet-4-6",
+      domainOverrideReason: "test",
+    });
     completeRun(id1, { totalCostUsd: 0.01 });
     completeRun(id2, { totalCostUsd: 0.02 });
     completeRun(id3, { totalCostUsd: 0.03 });
@@ -220,5 +305,9 @@ describe("getDailyCostBreakdown", () => {
 
   it("returns empty array for date with no runs", () => {
     expect(getDailyCostBreakdown("2020-01-01")).toEqual([]);
+  });
+
+  it("throws for invalid date format", () => {
+    expect(() => getDailyCostBreakdown("2026-01")).toThrow("date must be YYYY-MM-DD");
   });
 });
