@@ -15,12 +15,12 @@ try {
   const result = seedSources({ dryRun });
 
   for (const row of result.rows) {
-    const tag = row.action === "inserted" ? "[+]" : "[-]";
+    const tag = row.action === "inserted" ? "[+]" : "[~]";
     console.log(`${tag} ${row.source_id}  ${row.slug}  (${row.archive_policy} / ${row.raw_cloud_policy})`);
   }
 
   console.log(
-    `\nDone${dryRun ? " (dry-run)" : ""}. inserted=${result.inserted} skipped=${result.skipped} total=${result.rows.length}`
+    `\nDone${dryRun ? " (dry-run — assumes fresh DB)" : ""}. inserted=${result.inserted} updated=${result.updated} total=${result.rows.length}`
   );
   process.exit(0);
 } catch (err) {

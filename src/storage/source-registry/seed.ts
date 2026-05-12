@@ -4,6 +4,11 @@
  *   SQLite:  source_material_policy (policy fields)
  * Generates src_<ULID> IDs keyed on slug for stable, idempotent re-runs.
  * Does NOT write to Neo4j — that layer is INFRA-1B.2+.
+ *
+ * Idempotency contract:
+ *   - New slug   → assign src_<ULID>, INSERT slug map + UPSERT policy → action:"inserted"
+ *   - Known slug → reuse existing source_id, UPSERT policy fields    → action:"updated"
+ * Re-running the seed always propagates policy field changes from the YAML.
  */
 
 import { readFileSync } from "fs";
@@ -87,13 +92,14 @@ export interface SeedRow {
   archive_policy: string;
   raw_cloud_policy: string;
   external_llm_policy: string;
-  action: "inserted" | "skipped";
+  /** inserted = new source; updated = existing slug, policy re-applied */
+  action: "inserted" | "updated";
 }
 
 export interface SeedResult {
   rows: SeedRow[];
   inserted: number;
-  skipped: number;
+  updated: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +119,7 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
     validateSource(s);
   }
 
+  // Dry-run: validate + preview without DB access (assumes fresh DB — all rows shown as inserted)
   if (opts.dryRun) {
     const rows: SeedRow[] = sources.map((s) => ({
       source_id: `src_${ulid()}`,
@@ -123,7 +130,7 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
       external_llm_policy: s.external_llm_policy,
       action: "inserted" as const,
     }));
-    return { rows, inserted: rows.length, skipped: 0 };
+    return { rows, inserted: rows.length, updated: 0 };
   }
 
   const db = getDb();
@@ -145,10 +152,16 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
     "INSERT OR IGNORE INTO source_registry_slug_map (slug, source_id) VALUES (?, ?)"
   );
 
-  const insertPolicy = db.prepare(`
-    INSERT OR IGNORE INTO source_material_policy
+  // Upsert policy fields so re-runs propagate YAML changes to existing rows.
+  const upsertPolicy = db.prepare(`
+    INSERT INTO source_material_policy
       (source_id, archive_policy, raw_cloud_policy, external_llm_policy, checked_at)
     VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(source_id) DO UPDATE SET
+      archive_policy      = excluded.archive_policy,
+      raw_cloud_policy    = excluded.raw_cloud_policy,
+      external_llm_policy = excluded.external_llm_policy,
+      checked_at          = excluded.checked_at
   `);
 
   const rows: SeedRow[] = [];
@@ -157,6 +170,14 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
     for (const s of sources) {
       const existing = getIdBySlug.get(s.slug);
       if (existing) {
+        // Slug already mapped — re-apply policy fields in case YAML changed
+        upsertPolicy.run(
+          existing.source_id,
+          s.archive_policy,
+          s.raw_cloud_policy,
+          s.external_llm_policy,
+          now
+        );
         rows.push({
           source_id: existing.source_id,
           slug: s.slug,
@@ -164,14 +185,14 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
           archive_policy: s.archive_policy,
           raw_cloud_policy: s.raw_cloud_policy,
           external_llm_policy: s.external_llm_policy,
-          action: "skipped",
+          action: "updated",
         });
         continue;
       }
 
       const source_id = `src_${ulid()}`;
       insertSlugMap.run(s.slug, source_id);
-      insertPolicy.run(
+      upsertPolicy.run(
         source_id,
         s.archive_policy,
         s.raw_cloud_policy,
@@ -193,6 +214,6 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
   runAll();
 
   const inserted = rows.filter((r) => r.action === "inserted").length;
-  const skipped = rows.filter((r) => r.action === "skipped").length;
-  return { rows, inserted, skipped };
+  const updated = rows.filter((r) => r.action === "updated").length;
+  return { rows, inserted, updated };
 }
