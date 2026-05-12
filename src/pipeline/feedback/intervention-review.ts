@@ -2,7 +2,8 @@
 // Implements ADR-0018 INV-0018-5:
 //   - ignore: marks intervention resolved_ignore, decrements importance_score.
 //   - manual_claim: creates ManualClaimEntry via createManualClaimEntry(), marks resolved_manual_claim.
-//   - temp_text: stores text in raw_cache_items (SQLite), marks resolved_temp_text.
+//   - temp_text: registers the intervention URL in raw_cache_items (SQLite, ADR-0021),
+//     marks resolved_temp_text. Raw text is NOT stored (INV-0018-3).
 //
 // All resolution options update the AccessIntervention status in Neo4j.
 
@@ -66,22 +67,25 @@ async function resolveIntervention(
 
 // ---------------------------------------------------------------------------
 // SQLite: raw_cache_items for temp_text (ADR-0021 integration).
+// Stores the intervention source URL as a cache reference.
+// Raw text is NOT persisted (INV-0018-3, ADR-0012 INV-0012-3).
+// sessionId is required (FK to research_session; no "unknown" fallback).
 // ---------------------------------------------------------------------------
 
-function storeTempText(
-  interventionId: string,
-  text: string,
+function registerTempTextUrl(
+  interventionUrl: string,
   sessionId: string
 ): string {
-  const itemId = `rcache_${ulid()}`;
+  const cacheId = `rcache_${ulid()}`;
   const now = new Date().toISOString();
+  // expires_at: 7 days from now (DEC-007 ceiling).
   const db = getDb();
   db.prepare(
     `INSERT INTO raw_cache_items
-       (item_id, session_id, source_id, content_type, content_text, created_at, expires_at)
-     VALUES (?, ?, ?, 'temp_text', ?, ?, datetime(?, '+7 days'))`
-  ).run(itemId, sessionId, interventionId, text, now, now);
-  return itemId;
+       (cache_id, session_id, url, content_hash, indexed, embedded, expires_at)
+     VALUES (?, ?, ?, NULL, 0, 0, datetime(?, '+7 days'))`
+  ).run(cacheId, sessionId, interventionUrl, now);
+  return cacheId;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,8 +98,12 @@ export async function reviewIntervention(
   opts: {
     /** Required for manual_claim. */
     manualClaimInput?: ManualClaimInput;
-    /** Required for temp_text: the raw text snippet to cache. */
-    tempText?: string;
+    /**
+     * Required for temp_text: the source URL associated with the intervention.
+     * Raw text is not stored (INV-0018-3).
+     */
+    interventionUrl?: string;
+    /** Required for temp_text: FK to research_session(session_id). */
     sessionId?: string;
   } = {}
 ): Promise<ReviewResult> {
@@ -119,12 +127,20 @@ export async function reviewIntervention(
     return { interventionId, action, resolvedAt, manualClaimRecord: record };
   }
 
-  // temp_text
-  if (!opts.tempText) {
-    throw new Error("tempText is required for temp_text action.");
+  if (action === "temp_text") {
+    if (!opts.interventionUrl) {
+      throw new Error("interventionUrl is required for temp_text action.");
+    }
+    if (!opts.sessionId) {
+      throw new Error("sessionId is required for temp_text action (FK to research_session).");
+    }
+    const rawCacheItemId = registerTempTextUrl(opts.interventionUrl, opts.sessionId);
+    await resolveIntervention(interventionId, "resolved_temp_text", resolvedAt);
+    return { interventionId, action, resolvedAt, rawCacheItemId };
   }
-  const sessionId = opts.sessionId ?? opts.manualClaimInput?.sessionId ?? "unknown";
-  const rawCacheItemId = storeTempText(interventionId, opts.tempText, sessionId);
-  await resolveIntervention(interventionId, "resolved_temp_text", resolvedAt);
-  return { interventionId, action, resolvedAt, rawCacheItemId };
+
+  // Guard against unknown action values — do not fall through silently.
+  throw new Error(
+    `reviewIntervention: unknown action '${action as string}'. Must be one of: ignore, manual_claim, temp_text.`
+  );
 }

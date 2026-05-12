@@ -57,22 +57,32 @@ function setupDb() {
   closeDb();
   const { getDb } = require("../../src/storage/sqlite/connection");
   const db = getDb();
+  // Use real v1_schema.sql raw_cache_items columns (codex P1 fix).
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version TEXT NOT NULL PRIMARY KEY,
       applied_at TEXT NOT NULL DEFAULT (datetime('now')),
       description TEXT
     );
+    CREATE TABLE IF NOT EXISTS research_session (
+      session_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     CREATE TABLE IF NOT EXISTS raw_cache_items (
-      item_id      TEXT NOT NULL PRIMARY KEY,
-      session_id   TEXT NOT NULL,
-      source_id    TEXT NOT NULL,
-      content_type TEXT NOT NULL,
-      content_text TEXT,
-      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-      expires_at   TEXT
+      cache_id     TEXT NOT NULL PRIMARY KEY,
+      session_id   TEXT NOT NULL REFERENCES research_session(session_id),
+      url          TEXT NOT NULL,
+      content_hash TEXT,
+      indexed      INTEGER NOT NULL DEFAULT 0,
+      embedded     INTEGER NOT NULL DEFAULT 0,
+      expires_at   TEXT NOT NULL,
+      deleted_at   TEXT
     );
   `);
+  // Seed a research_session so FK constraint is satisfied in temp_text tests.
+  db.prepare(`INSERT OR IGNORE INTO research_session (session_id, status) VALUES (?, 'active')`)
+    .run("sess_TMP");
   return db;
 }
 
@@ -275,9 +285,9 @@ describe("reviewIntervention — manual_claim", () => {
 });
 
 describe("reviewIntervention — temp_text", () => {
-  it("stores in raw_cache_items and marks resolved_temp_text", async () => {
+  it("registers URL in raw_cache_items and marks resolved_temp_text", async () => {
     const result = await reviewIntervention("aci_TEST005", "temp_text", {
-      tempText: "This is a temporary cached text snippet.",
+      interventionUrl: "https://example.com/blocked-article",
       sessionId: "sess_TMP",
     });
     expect(result.action).toBe("temp_text");
@@ -286,19 +296,41 @@ describe("reviewIntervention — temp_text", () => {
     const resolveQ = neo4jRuns.find((r) => r.params["status"] === "resolved_temp_text")!;
     expect(resolveQ).toBeTruthy();
 
-    // Verify SQLite row was written.
+    // Verify SQLite row uses real v1 schema columns (no raw text stored — INV-0018-3).
     const { getDb } = require("../../src/storage/sqlite/connection");
     const row = getDb()
-      .prepare("SELECT * FROM raw_cache_items WHERE item_id = ?")
+      .prepare("SELECT * FROM raw_cache_items WHERE cache_id = ?")
       .get(result.rawCacheItemId) as Record<string, unknown> | null;
-    expect(row?.["content_text"]).toBe("This is a temporary cached text snippet.");
-    expect(row?.["content_type"]).toBe("temp_text");
-    expect(row?.["session_id"]).toBe("sess_TMP");
+    expect(row).toBeTruthy();
+    expect(row!["url"]).toBe("https://example.com/blocked-article");
+    expect(row!["session_id"]).toBe("sess_TMP");
+    expect(row!["indexed"]).toBe(0);
+    expect(row!["embedded"]).toBe(0);
   });
 
-  it("throws when tempText is missing", async () => {
+  it("throws when interventionUrl is missing", async () => {
     await expect(
-      reviewIntervention("aci_TEST006", "temp_text")
-    ).rejects.toThrow("tempText is required");
+      reviewIntervention("aci_TEST006", "temp_text", { sessionId: "sess_TMP" })
+    ).rejects.toThrow("interventionUrl is required");
+  });
+
+  it("throws when sessionId is missing", async () => {
+    await expect(
+      reviewIntervention("aci_TEST007", "temp_text", {
+        interventionUrl: "https://example.com/blocked",
+      })
+    ).rejects.toThrow("sessionId is required");
   });
 });
+
+describe("reviewIntervention — unknown action guard", () => {
+  it("throws for unknown action values instead of falling through", async () => {
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      reviewIntervention("aci_TEST008", "bad_action" as ReviewAction)
+    ).rejects.toThrow("unknown action");
+  });
+});
+
+// Import type for the cast above.
+import type { ReviewAction } from "../../src/pipeline/feedback/intervention-review";
