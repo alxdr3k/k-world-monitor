@@ -36,18 +36,23 @@ function loadRssSources(filterSlug?: string): DiscoverySource[] {
   const raw = readFileSync(join(repoRoot, "data/sources_seed.yaml"), "utf-8");
 
   // Parse YAML manually for the fields we need (avoids adding a yaml dep).
+  // ADR-0026: `active_v0` flag (when present in seed) restricts polling to the
+  // v0 active source subset. If the field is absent from a record, default to
+  // true for backward compatibility (forward-only filter).
   const sources: DiscoverySource[] = [];
   let currentSlug = "";
   let currentRssUrl = "";
   let currentMethod = "";
   let currentTier = 1;
+  let currentActiveV0 = true;
 
   function flush() {
     if (
       currentSlug &&
       currentRssUrl &&
       currentMethod === "rss" &&
-      currentTier === 0
+      currentTier === 0 &&
+      currentActiveV0
     ) {
       if (!filterSlug || filterSlug === currentSlug) {
         sources.push({
@@ -66,18 +71,23 @@ function loadRssSources(filterSlug?: string): DiscoverySource[] {
       currentRssUrl = "";
       currentMethod = "";
       currentTier = 1;
+      currentActiveV0 = true;
     } else if (trimmed.startsWith("slug:")) {
       flush();
       currentSlug = trimmed.replace("slug:", "").trim();
       currentRssUrl = "";
       currentMethod = "";
       currentTier = 1;
+      currentActiveV0 = true;
     } else if (trimmed.startsWith("rss_url:")) {
       currentRssUrl = trimmed.replace("rss_url:", "").trim();
     } else if (trimmed.startsWith("access_method:")) {
       currentMethod = trimmed.replace("access_method:", "").trim();
     } else if (trimmed.startsWith("reliability_tier:")) {
       currentTier = parseInt(trimmed.replace("reliability_tier:", "").trim(), 10);
+    } else if (trimmed.startsWith("active_v0:")) {
+      const v = trimmed.replace("active_v0:", "").trim().toLowerCase();
+      currentActiveV0 = v !== "false" && v !== "no" && v !== "0";
     }
   }
   flush();
@@ -89,8 +99,24 @@ function loadRssSources(filterSlug?: string): DiscoverySource[] {
 // Main
 // ---------------------------------------------------------------------------
 
-const args = new Set(process.argv.slice(2));
-const dryRun = args.has("--dry-run");
+// Known CLI flags; anything else (including single-dash typos like `-source`
+// or stray positional tokens) aborts to avoid an accidental full crawl from a
+// malformed invocation silently falling back to "no filter = all sources".
+const KNOWN_FLAGS = new Set(["--dry-run", "--source"]);
+const rawArgs = process.argv.slice(2);
+for (let i = 0; i < rawArgs.length; i++) {
+  const a = rawArgs[i]!;
+  if (a === "--source") {
+    // --source consumes the next token as its value (validated below).
+    i++;
+    continue;
+  }
+  if (KNOWN_FLAGS.has(a)) continue; // valueless known flag (--dry-run)
+  // Reject any other token: unknown long flag, single-dash form, or stray positional.
+  console.error(`[discovery] Error: unknown argument ${a}`);
+  process.exit(1);
+}
+const dryRun = rawArgs.includes("--dry-run");
 const filterSlug = (() => {
   const idx = process.argv.indexOf("--source");
   if (idx < 0) return undefined;
@@ -106,6 +132,13 @@ const filterSlug = (() => {
 async function main(): Promise<void> {
   const sources = loadRssSources(filterSlug);
   console.log(`[discovery] Loaded ${sources.length} RSS sources (Tier A)`);
+
+  // Fail fast on a typoed/stale --source slug — a silent 0-source run looks
+  // identical to a successful no-op and delays detection of ingestion outages.
+  if (filterSlug && sources.length === 0) {
+    console.error(`[discovery] Error: --source "${filterSlug}" matched no configured source`);
+    process.exit(1);
+  }
 
   if (dryRun) {
     for (const s of sources) {
@@ -127,11 +160,8 @@ async function main(): Promise<void> {
 
   // Phase 2: parse RSS bodies and enqueue (serial, INV-0030-2)
   // DEC-013: stop inserting once DAILY_CANDIDATE_CAP insertions are reached.
+  let capLogged = false;
   for (const result of pollResults) {
-    if (totalInserted >= DAILY_CANDIDATE_CAP) {
-      console.log(`[discovery] Daily candidate cap (${DAILY_CANDIDATE_CAP}) reached — stopping enqueue`);
-      break;
-    }
     const { source_id, outcome, body, contentType } = result;
 
     if (outcome.status === "not_modified") {
@@ -155,32 +185,43 @@ async function main(): Promise<void> {
     // Only parse text-based content (xml/rss/atom/html — not binaries).
     // Non-text content-type is treated as a fetch failure: record error so the
     // source enters backoff (same path as parse failure and empty body).
-    const ct = contentType ?? "";
+    // HTTP media types are case-insensitive per RFC 9110; lowercase before match.
+    const ct = (contentType ?? "").toLowerCase();
     if (ct.includes("application/octet-stream") || ct.includes("image/")) {
-      console.log(`  [fail] ${source_id}: non-text content-type ${ct}`);
+      console.log(`  [fail] ${source_id}: non-text content-type ${contentType}`);
       recordFetchOutcome(source_id, { status: "error" });
       totalErrors++;
       continue;
     }
 
     try {
-      // Detect charset from Content-Type (e.g. "text/xml; charset=euc-kr").
-      // Fall back to UTF-8 if absent or unrecognised.
+      // Detect charset: Content-Type first, then XML prolog (`<?xml ... encoding="..."?>`).
+      // Fall back to UTF-8 if neither is present.
       let charset = "utf-8";
       const charsetMatch = ct.match(/charset=([^\s;]+)/i);
       if (charsetMatch) {
         charset = charsetMatch[1]!.toLowerCase().replace(/^"(.*)"$/, "$1");
+      } else {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const prefix = new TextDecoder("ascii" as any, { fatal: false }).decode(body.slice(0, 200));
+          const prolog = prefix.match(/<\?xml[^?>]*encoding=["']([^"']+)["']/i);
+          if (prolog) charset = prolog[1]!.toLowerCase();
+        } catch {
+          // keep utf-8 default
+        }
       }
       let decoder: TextDecoder;
       try {
-        // charset is a runtime string from Content-Type — Bun's TextDecoder
-        // types restrict the label parameter to a literal union, so we cast
-        // through unknown to satisfy the type checker while keeping runtime safety.
-        // The inner try/catch falls back to UTF-8 for any unrecognised label.
+        // charset is a runtime string from Content-Type / XML prolog — Bun's
+        // TextDecoder types restrict the label parameter to a literal union,
+        // so we cast through unknown. Unsupported labels (e.g. some bundles
+        // lack EUC-KR) throw RangeError — surface as a parse error rather
+        // than silently mojibake'ing into UTF-8, so the source enters backoff.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         decoder = new TextDecoder(charset as any, { fatal: false });
       } catch {
-        decoder = new TextDecoder("utf-8", { fatal: false });
+        throw new Error(`unsupported declared charset: ${charset}`);
       }
       const xmlText = decoder.decode(body);
       const items = parseRssFeed(xmlText);
@@ -195,10 +236,16 @@ async function main(): Promise<void> {
         continue;
       }
 
-      // Respect the daily cap: pass maxInsert budget to enqueue so later non-duplicate
-      // items in the same feed are still attempted even when early items are dupes.
-      // (Pre-slicing would miss valid items if the first N entries all conflict.)
-      const remaining = DAILY_CANDIDATE_CAP - totalInserted;
+      // DEC-013 daily cap: parse every source for health validation but cap the
+      // insert budget. With remaining=0 the enqueue is a no-op while parse still
+      // surfaces empty/malformed feeds via the items.length === 0 / catch paths
+      // so they enter backoff (codex finding: cap-reached sources must still be
+      // validated, not silently marked ok).
+      const remaining = Math.max(0, DAILY_CANDIDATE_CAP - totalInserted);
+      if (remaining === 0 && !capLogged) {
+        console.log(`[discovery] Daily candidate cap (${DAILY_CANDIDATE_CAP}) reached — parsing remaining sources for health validation only`);
+        capLogged = true;
+      }
       const { inserted, skipped } = enqueueDiscoveredItems(source_id, items, remaining);
       totalInserted += inserted;
       totalSkipped += skipped;

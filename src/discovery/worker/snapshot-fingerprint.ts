@@ -406,6 +406,21 @@ export async function createSnapshotFingerprint(
   // Deduplication: if identical content already snapped, skip Neo4j write.
   const existing = await findExistingSnapshot(contentHash);
   if (existing) {
+    // ADR-0012 INV-0012-3 cross-source guard (dedup link path): a Source whose
+    // raw_cloud_policy is `always_prohibited` must never be linked to a
+    // Snapshot that already has an r2_key, because the link would associate
+    // the prohibited source with a cloud-backed raw artifact through dedup
+    // reuse. Mark the row error and throw so this is counted as a real failure.
+    if (existing.r2Key !== null && input.rawCloudPolicy === "always_prohibited") {
+      markQueueItemError(
+        input.queueId,
+        `dedup: prohibited source cannot link to r2-backed snapshot: ${input.sourceId}`
+      );
+      throw new Error(
+        `dedup: prohibited source cannot link to r2-backed snapshot: ${input.sourceId}`
+      );
+    }
+
     // P1-6: Ensure Source→Document→Snapshot edges for current source_id even on dedup.
     // If the Source node is missing, mark the queue row error and throw so the
     // caller's metrics count this as a real failure (not a successful dedup).

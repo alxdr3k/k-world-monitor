@@ -4,7 +4,8 @@
 
 CREATE TABLE IF NOT EXISTS discovery_queue (
   queue_id        TEXT NOT NULL PRIMARY KEY,    -- `dq_<ULID>`
-  source_id       TEXT NOT NULL,                -- FK to source_material_policy.source_id
+  source_id       TEXT NOT NULL                 -- FK to source_material_policy.source_id
+                  REFERENCES source_material_policy(source_id),
   url             TEXT NOT NULL,                -- discovered document URL
   title           TEXT,                         -- feed item title (optional)
   published_at    TEXT,                         -- ISO-8601 UTC from feed, or NULL

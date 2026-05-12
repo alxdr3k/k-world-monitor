@@ -93,15 +93,25 @@ function normalizeItems(raw: unknown[], format: "rss" | "atom"): FeedItem[] {
       publishedAt = parseDate(str(getLocal(entry, "pubDate")));
     } else {
       // Atom: link can be a string, an object with @href, or an array of link
-      // objects (e.g. rel="alternate" + rel="self").  Prefer the rel="alternate"
-      // entry; fall back to the first entry that has an @href.
+      // objects (e.g. rel="alternate" + rel="self"). Prefer the HTML alternate
+      // entry; fall back to any alternate, then the first link with @href.
+      // Skips feed self-links (application/atom+xml etc.) which would route
+      // downstream processing to a feed endpoint instead of the article page.
       const linkVal = getLocal(entry, "link");
       if (typeof linkVal === "string") {
         url = linkVal;
       } else if (Array.isArray(linkVal)) {
         const links = linkVal as Record<string, unknown>[];
-        const alt = links.find((l) => l["@rel"] === "alternate" || !l["@rel"]);
-        const chosen = alt ?? links[0];
+        const isAlternate = (l: Record<string, unknown>): boolean =>
+          l["@rel"] === "alternate" || !l["@rel"];
+        const isHtmlOrUnspecified = (l: Record<string, unknown>): boolean => {
+          const t = typeof l["@type"] === "string" ? (l["@type"] as string).toLowerCase() : "";
+          return t === "" || t.includes("html");
+        };
+        const chosen =
+          links.find((l) => isAlternate(l) && isHtmlOrUnspecified(l)) ??
+          links.find(isAlternate) ??
+          links[0];
         if (chosen) url = str(chosen["@href"]);
       } else if (typeof linkVal === "object" && linkVal !== null) {
         url = str((linkVal as Record<string, unknown>)["@href"]);
