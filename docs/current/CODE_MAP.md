@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: c3b19c4 (2026-05-12) — INFRA-1B.5 AccessIntervention recorder + severity + batch report (PR #21 merged)
+> Last verified against code: 101719c (2026-05-12) — INFRA-1B.2a safe-fetch + xml-safe
 
 ## Runtime stack
 
@@ -43,6 +43,8 @@
 | `src/pipeline/access-intervention/severity.ts` | `computeSeverity()` — deterministic severity: `GateMode × importance_score × relatedAssumptionIds`, no LLM (INFRA-1B.5, AC-024) |
 | `src/pipeline/access-intervention/recorder.ts` | `recordIntervention()` — creates `AccessIntervention` Neo4j node (`aci_<ULID>`) + `(Source)-[:HAS_INTERVENTION]->(AccessIntervention)` (INFRA-1B.5) |
 | `src/pipeline/access-intervention/batch-report.ts` | `generateBatchReport()` — severity-bucketed Markdown + `hasBlockers` cite-check flag (INFRA-1B.5, AC-024) |
+| `src/discovery/fetch/safe-fetch.ts` | `safeFetch()` — SSRF/redirect/size/robots/sniff defenses (ADR-0028 INV-0028-1..6, DEC-017) |
+| `src/discovery/parse/xml-safe.ts` | `RSS_PARSER` singleton — fast-xml-parser with XXE disabled (DEC-018) |
 
 ## Tests
 
@@ -56,6 +58,8 @@
 | `tests/unit/r2_policy_test.ts` | R2 permitted-prefix + sha256 round-trip integrity (AC-003, AC-020, AC-032) | — |
 | `tests/unit/source_registry_test.ts` | Source registry seed dry-run + enum validation + YAML structure (INFRA-1B.1) | — |
 | `tests/unit/access_intervention_test.ts` | severity scoring + recorder integration + batch-report generation (INFRA-1B.5, AC-024) | — |
+| `tests/unit/safe_fetch_test.ts` | safe-fetch defense unit tests (ADR-0028, DEC-017) — 117 tests | — |
+| `tests/unit/xml_safe_test.ts` | xml-safe singleton + XXE block tests (DEC-018) | — |
 | `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
 
 ## Scripts
