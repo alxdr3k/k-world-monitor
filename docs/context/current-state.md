@@ -34,9 +34,9 @@ ADR-0011~0021로 supersede됐다.
   access_interventions)
 - active phase: `INFRA-1A` (ADR scaffold + 9-stage 글로서리 + Round 25
   canonical 확정)
-- active slice: **`INFRA-1A.4` in_progress** — frontmatter 관계 배열 lint
-  (AC-008/TEST-008). `INFRA-1A.2` landed (PR #4 merged 2026-05-12):
-  Neo4j schema v1 + SQLite schema v1 + migration runner + ID prefix table.
+- active slice: **`INFRA-1A.5` in_progress** — text normalization + sha256
+  helper + enum validators + SQLite v2 trigger migration (AC-007).
+  `INFRA-1A.4` landed (PR #5 merged 2026-05-12): frontmatter relation array lint.
 - last accepted gate: none yet
 - next gate: `AC-001` (도메인 객체 9-stage 모델 + 4-tier source layer + Neo4j
   graph store가 ADR로 lock — ADR-0011 + ADR-0012 + ADR-0013); `AC-005`
@@ -62,8 +62,15 @@ ADR-0011~0021로 supersede됐다.
 - `tests/lint/id_prefix_test.ts` — 28 tests (TEST-005/AC-005) ✓
 - `tests/bench/neo4j_fts_search_bench.ts` — SPIKE-001 bench scaffold (runs when NEO4J_PASSWORD set)
 
-### 코드 (INFRA-1A.4 in_progress)
+### 코드 (INFRA-1A.4 landed — PR #5)
 - `tests/lint/no_frontmatter_relation_array_test.ts` — 9 tests (TEST-008/AC-008) ✓
+
+### 코드 (INFRA-1A.5 in_progress)
+- `src/utils/text.ts` — normalizeText(), truncateCodePoints(), isWithinLimit() ✓
+- `src/utils/hash.ts` — sha256Hex(), sha256Prefix() ✓
+- `src/utils/enums.ts` — RunStatus/RunStage/LlmVendor/QuoteReason/ArchivePolicy + 8 validators ✓
+- `migrations/sqlite/v2_enum_constraints.sql` — enum-validating triggers (run_ledger, cross_vendor_review_ledger) ✓
+- `tests/unit/text_hash_test.ts` — 49 tests ✓
 
 ### 문서 기반 architecture 합의
 - ADR 0001~0010 (boilerplate placeholder 1개 + 0002 invariant tracking +
