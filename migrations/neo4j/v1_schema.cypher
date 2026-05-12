@@ -15,6 +15,12 @@ FOR (n:Source) REQUIRE n.source_id IS UNIQUE;
 CREATE CONSTRAINT document_unique IF NOT EXISTS
 FOR (n:Document) REQUIRE n.doc_id IS UNIQUE;
 
+// INFRA-1B.3: composite uniqueness on (url, source_id) prevents duplicate Document nodes
+// from concurrent workers. MERGE (d:Document {url, source_id}) in createDocumentAndSnapshot
+// and ensureSourceLinkage relies on this constraint for idempotency.
+CREATE CONSTRAINT document_url_source_unique IF NOT EXISTS
+FOR (n:Document) REQUIRE (n.url, n.source_id) IS UNIQUE;
+
 CREATE CONSTRAINT snapshot_unique IF NOT EXISTS
 FOR (n:Snapshot) REQUIRE n.snap_id IS UNIQUE;
 

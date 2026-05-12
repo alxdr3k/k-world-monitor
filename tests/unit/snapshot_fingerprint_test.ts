@@ -111,7 +111,8 @@ function setupDb() {
       content_hash  TEXT,
       status        TEXT NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','processing','done','error')),
-      error_detail  TEXT
+      error_detail  TEXT,
+      updated_at    TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z'
     );
     CREATE UNIQUE INDEX IF NOT EXISTS discovery_queue_url_source_active_idx
       ON discovery_queue (source_id, url)

@@ -286,7 +286,8 @@ function markQueueItemDone(queueId: string, snapId: string, contentHash: string)
   getDb()
     .prepare(
       `UPDATE discovery_queue
-       SET status = 'done', content_hash = ?, error_detail = ?
+       SET status = 'done', content_hash = ?, error_detail = ?,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
        WHERE queue_id = ?`
     )
     .run(contentHash, `snap_id:${snapId}`, queueId);
@@ -295,7 +296,10 @@ function markQueueItemDone(queueId: string, snapId: string, contentHash: string)
 function markQueueItemError(queueId: string, detail: string): void {
   getDb()
     .prepare(
-      `UPDATE discovery_queue SET status = 'error', error_detail = ? WHERE queue_id = ?`
+      `UPDATE discovery_queue
+       SET status = 'error', error_detail = ?,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+       WHERE queue_id = ?`
     )
     .run(detail.slice(0, 500), queueId);
 }
@@ -399,47 +403,66 @@ export async function processDiscoveryQueue(
   const db = getDb();
 
   // P2-10: Reset stale processing rows from crashed workers (older than 1 hour).
-  // Uses updated_at column (added in v6 migration). Gracefully skips on pre-v6 schemas.
+  // Uses updated_at column (added in v7 migration). Gracefully skips on pre-v7 schemas.
   try {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     db.prepare(
-      `UPDATE discovery_queue SET status = 'pending'
+      `UPDATE discovery_queue
+       SET status = 'pending', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
        WHERE status = 'processing' AND updated_at < ?`
     ).run(oneHourAgo);
-  } catch {
-    // updated_at column absent (pre-v6 schema) — stale reclaim skipped.
+  } catch (err) {
+    // Only suppress errors caused by the updated_at column being absent (pre-v7 schema).
+    // All other errors (e.g. syntax errors, disk failures) must propagate.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("no such column")) throw err;
+    // updated_at column absent (pre-v7 schema) — stale reclaim skipped.
   }
 
-  // P1-5: Atomic row claiming using a SQLite transaction so two concurrent workers
-  // cannot claim the same rows.
+  // P1-5: Atomic row claiming using an IMMEDIATE SQLite transaction so two concurrent
+  // workers cannot claim the same rows. bun:sqlite defaults to DEFERRED, which allows
+  // another reader to interleave between our SELECT and UPDATE; IMMEDIATE acquires a
+  // write lock at BEGIN so the SELECT+UPDATE block is exclusive.
   const batchSize = 100;
-  const pending = db.transaction(() => {
-    const rows = db
-      .prepare(
-        `SELECT queue_id, source_id, url, title, published_at
-         FROM discovery_queue
-         WHERE status = 'pending'
-         ORDER BY discovered_at ASC
-         LIMIT ?`
-      )
-      .all(batchSize) as Array<{
-        queue_id: string;
-        source_id: string;
-        url: string;
-        title: string | null;
-        published_at: string | null;
-      }>;
+  let pending: Array<{
+    queue_id: string;
+    source_id: string;
+    url: string;
+    title: string | null;
+    published_at: string | null;
+  }> = [];
 
-    if (rows.length > 0) {
-      const ids = rows.map((r) => r.queue_id);
-      db.prepare(
-        `UPDATE discovery_queue SET status = 'processing'
-         WHERE queue_id IN (${ids.map(() => "?").join(",")})`
-      ).run(...ids);
+  {
+    db.prepare("BEGIN IMMEDIATE").run();
+    try {
+      pending = db
+        .prepare(
+          `SELECT queue_id, source_id, url, title, published_at
+           FROM discovery_queue
+           WHERE status = 'pending'
+           ORDER BY discovered_at ASC
+           LIMIT ?`
+        )
+        .all(batchSize) as typeof pending;
+
+      if (pending.length > 0) {
+        const ids = pending.map((r) => r.queue_id);
+        db.prepare(
+          `UPDATE discovery_queue
+           SET status = 'processing', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+           WHERE queue_id IN (${ids.map(() => "?").join(",")})`
+        ).run(...ids);
+      }
+
+      db.prepare("COMMIT").run();
+    } catch (err) {
+      try { db.prepare("ROLLBACK").run(); } catch { /* ignore rollback errors */ }
+      throw err;
     }
+  }
 
-    return rows;
-  })();
+  // RFC 9110: 204 No Content and 205 Reset Content MUST NOT include a message body.
+  const NO_BODY_2XX = new Set([204, 205]);
 
   let processed = 0;
   let deduplicated = 0;
@@ -461,8 +484,8 @@ export async function processDiscoveryQueue(
       // P1-2: Use MAX_BYTES.html for document URLs — larger cap than rss (10MB vs 5MB).
       const res = await safeFetch(row.url, { maxBytes: MAX_BYTES.html });
 
-      // P2-12: Require 2xx with body; treat 204 (no body), 3xx, 4xx, 5xx as errors.
-      if (!(res.status >= 200 && res.status < 300) || res.status === 204) {
+      // P2-12: Require 2xx with body; treat no-body 2xx (204, 205), 3xx, 4xx, 5xx as errors.
+      if (!(res.status >= 200 && res.status < 300) || NO_BODY_2XX.has(res.status)) {
         markQueueItemError(row.queue_id, `HTTP ${res.status}`);
         errors++;
         continue;
