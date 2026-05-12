@@ -205,6 +205,10 @@ async function main(): Promise<void> {
       console.log(
         `  [ok] ${source_id}: ${items.length} items → +${inserted} queued, ${skipped} dupes${dropped > 0 ? `, ${dropped} cap-dropped` : ""}`
       );
+      // Record ok only after successful parse + enqueue so parse/empty-feed
+      // errors can record "error" without the prior HTTP-ok write resetting
+      // consecutive_failures back to 0 (Codex P1 — oscillation fix).
+      recordFetchOutcome(source_id, outcome);
     } catch (err) {
       console.error(`  [parse-error] ${source_id}:`, err instanceof Error ? err.message : err);
       recordFetchOutcome(source_id, { status: "error" });

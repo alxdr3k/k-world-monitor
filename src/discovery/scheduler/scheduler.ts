@@ -170,11 +170,17 @@ export async function pollEligibleSources(
   );
 
   // Phase 2: serial write — no network I/O here (INV-0030-2).
+  // Record non-ok outcomes immediately (error/timeout/not_modified). "ok" is
+  // intentionally deferred: the caller (run-discovery.ts) must record ok only
+  // after content is successfully parsed and enqueued, so parse/empty-feed
+  // failures can record "error" without first resetting consecutive_failures to 0.
   const results: PollResult[] = [];
   for (const settled of fetchResults) {
     if (settled.status === "fulfilled") {
       const r = settled.value;
-      recordFetchOutcome(r.source_id, r.outcome);
+      if (r.outcome.status !== "ok") {
+        recordFetchOutcome(r.source_id, r.outcome);
+      }
       results.push(r);
     }
     // rejected means runWithPool itself threw (unexpected) — skip silently
