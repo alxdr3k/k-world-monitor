@@ -34,11 +34,13 @@ ADR-0011~0021로 supersede됐다.
   access_interventions)
 - active phase: `INFRA-1A` (ADR scaffold + 9-stage 글로서리 + Round 25
   canonical 확정)
-- active slice: **`INFRA-1A.1` 재작성 완료** — ADR-0011~0021 신규 + ADR-0003/
-  0004/0007/0008 supersede + 9-stage 글로서리 + PRD/HLD/current-state 갱신
+- active slice: **`INFRA-1A.2` in_progress** — Neo4j Cypher schema v1 +
+  SQLite relational schema v1 + 마이그레이션 commit. Q-004/Q-020/Q-024 resolved.
+  `INFRA-1A.1` 완료 선행됨.
 - last accepted gate: none yet
 - next gate: `AC-001` (도메인 객체 9-stage 모델 + 4-tier source layer + Neo4j
-  graph store가 ADR로 lock — ADR-0011 + ADR-0012 + ADR-0013)
+  graph store가 ADR로 lock — ADR-0011 + ADR-0012 + ADR-0013); `AC-005`
+  (ID prefix lint, TEST-005 통과)
 - canonical ledger: `docs/04_IMPLEMENTATION_PLAN.md`
 
 ## External services / credentials
@@ -131,8 +133,9 @@ ADR-0011~0021로 supersede됐다.
    glossary entry 추가
 2. Q-020 (Neo4j GPL v3 boundary) + Q-021 (Tier A seed — size cap 폐기,
    v0 entry 72 source 분포 균형) 결정
-3. INFRA-1A.2: Neo4j Cypher schema v1 + SQLite relational schema v1 +
-   마이그레이션 commit
+3. **INFRA-1A.2 in_progress**: Neo4j Cypher schema v1 (`migrations/neo4j/v1_schema.cypher`) +
+   SQLite relational schema v1 (`migrations/sqlite/v1_schema.sql`) + migration runner +
+   bun runtime + validate_invariants.ts + TEST-005 (id_prefix_test). Q-004/Q-020/Q-024 resolved.
 4. SPIKE-001 재정의: Neo4j Community + native FTS 1만 graph object < 1초 p95
    (NFR-001)
 5. post-merge cleanup: commit `99b0993` 이후 stale codex review 재확인 + main latest commit 신규 review 도착 시 cleanup branch에서 thread resolve/outdated 정리
@@ -142,10 +145,10 @@ ADR-0011~0021로 supersede됐다.
 - Q-001 scenario horizon enum 정의
 - Q-002 Dossier `stale_after` 기본값
 - Q-003 Publication 정정 ledger 트리거
-- Q-004 SQLite relational metadata와 vault `_System/Indexes/*.jsonl` 책임 분담
+- ~~Q-004~~ **resolved (INFRA-1A.2)** — SQLite는 k-world-monitor repo, vault jsonl은 second-brain vault 책임
 - Q-008 Thesis ID 체계
 - Q-012 Neo4j ↔ SQLite sync (CDC vs batch)
-- Q-020 Neo4j GPL v3 boundary
+- ~~Q-020~~ **resolved (INFRA-1A.2)** — 1인 internal use 범위 lock; (a)(b)(c) 발생 시 별도 ADR
 - Q-021 Tier A source seed (size cap 폐기 — DEC-009 reflow, 누적 자유) +
   perspective 분포 균형 (전체 seed 기준 risk ≤50% / opportunity ≥25% /
   neutral ≥15% 충족). v0 entry 72 source proposed (경제 22 + 정책 17 +
@@ -156,7 +159,7 @@ ADR-0011~0021로 supersede됐다.
   INFRA-1A.6 slice 안에서.
 - ~~Q-022~~ **resolved by DEC-004** (v0 4 메타 카테고리: 정책 / 경제 / 사회
   / 대중문화)
-- Q-024 Neo4j-specific 기능 활용 boundary
+- ~~Q-024~~ **resolved (INFRA-1A.2)** — v0: APOC standard + Cypher 5.x core; v1+: GDS Community; Enterprise-only 별도 ADR
 - Q-025 외부 repo 부트스트랩 cadence
 - ~~Q-026~~ **resolved by DEC-006** (vault sync trigger = git push 단일,
   Cloudflare Pages git integration)
