@@ -45,6 +45,16 @@ mock.module("../../src/storage/neo4j/connection", () => ({
     const session = {
       run: async (query: string, params: Record<string, unknown>) => {
         neo4jRuns.push({ query, params });
+        // allLinkedSourcesAllowRawCloud query: return the same source_id used in
+        // baseInput so the policy lookup in SQLite finds a row.
+        if (query.includes("collect(DISTINCT src.source_id)")) {
+          return {
+            records: [{
+              get: (field: string) =>
+                field === "source_ids" ? ["src-1"] : null,
+            }],
+          };
+        }
         // Deduplication MATCH query returns existing snap_id + r2_key if configured.
         if (query.includes("MATCH (s:Snapshot") && findExistingResult) {
           const cfg = findExistingResult;
@@ -119,6 +129,17 @@ function setupDb() {
       WHERE status IN ('pending', 'processing');
     CREATE INDEX IF NOT EXISTS discovery_queue_status_idx
       ON discovery_queue (status, discovered_at);
+    CREATE TABLE IF NOT EXISTS source_material_policy (
+      source_id            TEXT NOT NULL PRIMARY KEY,
+      archive_policy       TEXT NOT NULL,
+      raw_cloud_policy     TEXT NOT NULL,
+      external_llm_policy  TEXT NOT NULL,
+      checked_at           TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z',
+      updated_at           TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z'
+    );
+    INSERT OR REPLACE INTO source_material_policy
+      (source_id, archive_policy, raw_cloud_policy, external_llm_policy)
+      VALUES ('src-1', 'full_snapshot_allowed', 'allowed_public_data_only', 'allowed');
   `);
   return db;
 }

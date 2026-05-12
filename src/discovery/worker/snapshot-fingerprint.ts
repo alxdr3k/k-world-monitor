@@ -99,6 +99,34 @@ interface ExistingSnapshot {
   r2Key: string | null;
 }
 
+// Returns true only when every Source linked to this Snapshot has
+// raw_cloud_policy='allowed_public_data_only' in source_material_policy.
+// Used by the dedup R2 back-fill path so cross-source dedup cannot retroactively
+// give a Source with always_prohibited policy access to an R2 artifact path
+// (ADR-0012 INV-0012-3). Treats unknown / unregistered sources as prohibited.
+async function allLinkedSourcesAllowRawCloud(snapId: string): Promise<boolean> {
+  const sourceIds = await withSession(async (session) => {
+    const result = await session.run(
+      `MATCH (s:Snapshot {snap_id: $snapId})<-[:HAS_SNAPSHOT]-(:Document)<-[:HAS_DOCUMENT]-(src:Source)
+       RETURN collect(DISTINCT src.source_id) AS source_ids`,
+      { snapId }
+    );
+    const record = result.records[0];
+    return record ? ((record.get("source_ids") as string[]) ?? []) : [];
+  });
+  if (sourceIds.length === 0) return false;
+  const placeholders = sourceIds.map(() => "?").join(",");
+  const rows = getDb()
+    .prepare(
+      `SELECT source_id, raw_cloud_policy FROM source_material_policy
+       WHERE source_id IN (${placeholders})`
+    )
+    .all(...sourceIds) as Array<{ source_id: string; raw_cloud_policy: string }>;
+  // Any unmapped source or non-allowed policy disqualifies back-fill.
+  if (rows.length !== sourceIds.length) return false;
+  return rows.every((r) => r.raw_cloud_policy === "allowed_public_data_only");
+}
+
 // Returns null when no Snapshot with this content_hash exists.
 // Also returns r2_key so dedup path can back-fill a failed R2 upload.
 async function findExistingSnapshot(contentHash: string): Promise<ExistingSnapshot | null> {
@@ -367,31 +395,32 @@ export async function createSnapshotFingerprint(
   const existing = await findExistingSnapshot(contentHash);
   if (existing) {
     // P1-6: Ensure Source→Document→Snapshot edges for current source_id even on dedup.
-    // If the Source node is missing, mark the queue row error instead of done so a
-    // later source backfill can re-process this row.
+    // If the Source node is missing, mark the queue row error and throw so the
+    // caller's metrics count this as a real failure (not a successful dedup).
     const linked = await ensureSourceLinkage(input, contentHash);
     if (!linked) {
       markQueueItemError(
         input.queueId,
         `dedup: source not found in graph: ${input.sourceId}`
       );
-      return {
-        snapId: existing.snapId,
-        docId: "",
-        contentHash,
-        r2Key: existing.r2Key,
-        deduplicated: true,
-      };
+      throw new Error(`dedup: source not found in graph: ${input.sourceId}`);
     }
 
     // Back-fill R2 upload if a previous attempt left r2_key=null for a permitted artifact.
     // This handles the case where a prior worker created the Snapshot node but then failed
     // before completing the R2 upload (leaving r2_key=null permanently without this retry).
+    //
+    // ADR-0012 INV-0012-3 cross-source guard: snapshots are deduplicated across sources,
+    // so the existing Snapshot may already be linked to a source whose raw_cloud_policy
+    // is `always_prohibited`. Uploading to R2 under any policy from the *current* source
+    // would retroactively give the prohibited source path an r2_key, violating the
+    // raw-cloud prohibition. Only back-fill when every linked source's policy permits it.
     let dedupR2Key: string | null = existing.r2Key;
     if (
       existing.r2Key === null &&
       input.archivePolicy === "full_snapshot_allowed" &&
-      input.rawCloudPolicy === "allowed_public_data_only"
+      input.rawCloudPolicy === "allowed_public_data_only" &&
+      (await allLinkedSourcesAllowRawCloud(existing.snapId))
     ) {
       const key = `permitted_artifact/derived/snapshot/${existing.snapId}`;
       const bodyBuf = input.body.buffer.slice(
@@ -476,10 +505,11 @@ export async function processDiscoveryQueue(
        WHERE status = 'processing' AND updated_at < ?`
     ).run(oneHourAgo);
   } catch (err) {
-    // Only suppress errors caused by the updated_at column being absent (pre-v7 schema).
-    // All other errors (e.g. syntax errors, disk failures) must propagate.
+    // Only suppress the specific "no such column: updated_at" case (pre-v7 schema).
+    // Any other missing column or unrelated error must propagate so operational
+    // regressions (e.g. queue-recovery bugs) fail fast instead of silently disabling.
     const msg = err instanceof Error ? err.message : String(err);
-    if (!msg.includes("no such column")) throw err;
+    if (!/no such column:\s*updated_at/i.test(msg)) throw err;
     // updated_at column absent (pre-v7 schema) — stale reclaim skipped.
   }
 
@@ -536,8 +566,23 @@ export async function processDiscoveryQueue(
   let errors = 0;
 
   for (const row of pending) {
+    // Heartbeat: touch updated_at before processing so the 1h stale-reclaim
+    // does not requeue a still-active row mid-batch (long fetch/Neo4j writes
+    // can exceed the threshold for batches of large items).
+    if (hasUpdatedAtColumn()) {
+      db.prepare(
+        `UPDATE discovery_queue SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE queue_id = ?`
+      ).run(row.queue_id);
+    }
+
+    // Normalize slug→canonical src_<ULID> up front so both the policy lookup
+    // and the downstream graph MATCH operate on the same id namespace. The v0
+    // discovery producer enqueues slug-form ids while source_material_policy
+    // and Source nodes are keyed by canonical ids.
+    const canonicalSourceId = normalizeSourceId(row.source_id);
+
     try {
-      const { archivePolicy, rawCloudPolicy } = await archivePolicyFn(row.source_id);
+      const { archivePolicy, rawCloudPolicy } = await archivePolicyFn(canonicalSourceId);
 
       // P1-7: Enforce do_not_collect before any outbound fetch.
       if (archivePolicy === "do_not_collect") {
@@ -551,9 +596,20 @@ export async function processDiscoveryQueue(
       // P1-2: Use MAX_BYTES.html for document URLs — larger cap than rss (10MB vs 5MB).
       const res = await safeFetch(row.url, { maxBytes: MAX_BYTES.html });
 
-      // P2-12: Require 2xx with body; treat no-body 2xx (204, 205), 3xx, 4xx, 5xx as errors.
-      if (!(res.status >= 200 && res.status < 300) || NO_BODY_2XX.has(res.status)) {
-        markQueueItemError(row.queue_id, `HTTP ${res.status}`);
+      // P2-12: Require 2xx with non-empty body; treat no-body 2xx (204, 205),
+      // empty 200, 3xx, 4xx, 5xx as errors. Empty payloads must not be
+      // fingerprinted (they would all share one hash and pollute dedup state).
+      const empty2xx =
+        res.status >= 200 && res.status < 300 && res.body.byteLength === 0;
+      if (
+        !(res.status >= 200 && res.status < 300) ||
+        NO_BODY_2XX.has(res.status) ||
+        empty2xx
+      ) {
+        markQueueItemError(
+          row.queue_id,
+          empty2xx ? `HTTP ${res.status} empty body` : `HTTP ${res.status}`
+        );
         errors++;
         continue;
       }
@@ -562,9 +618,6 @@ export async function processDiscoveryQueue(
         res.headers.get("Content-Type")?.split(";")[0]?.trim() ?? "application/octet-stream";
 
       // P2-11: Use finalUrl (after redirects) as the canonical URL for snapshot identity.
-      // Normalize slug→canonical src_<ULID> so the graph MATCH against Source succeeds
-      // for rows enqueued by the v0 discovery producer (which writes slug-form ids).
-      const canonicalSourceId = normalizeSourceId(row.source_id);
       const result = await createSnapshotFingerprint({
         sourceId: canonicalSourceId,
         queueId: row.queue_id,

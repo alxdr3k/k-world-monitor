@@ -61,12 +61,21 @@ async function migrateSqlite(): Promise<void> {
       getDb().exec(sql);
       console.log(`[SQLite] ✓ Applied ${migration.file}`);
     } catch (err: unknown) {
-      // Idempotency for ALTER TABLE ADD COLUMN migrations on drifted schemas:
-      // if the column already exists, record the version and continue rather
-      // than stranding the DB in a non-upgradable state. SQLite does not
-      // support `ADD COLUMN IF NOT EXISTS`, so this guard belongs in the runner.
+      // Idempotency guard, scoped to single-statement ALTER TABLE ADD COLUMN
+      // migrations on drifted schemas. SQLite stops executing after an error
+      // mid-file, so a generic `duplicate column name` swallow could mask a
+      // multi-statement migration where only the first statement applied. We
+      // limit the skip to migrations that are explicitly a single ALTER ...
+      // ADD COLUMN plus the schema_migrations INSERT (v7 is the only one).
       const msg = err instanceof Error ? err.message : String(err);
-      if (/duplicate column name/i.test(msg)) {
+      const isAddColumnOnlyMigration =
+        /^\s*ALTER\s+TABLE\s+\S+\s+ADD\s+COLUMN\b/im.test(sql) &&
+        // exactly one ALTER and at most the trailing schema_migrations INSERT
+        (sql.match(/\bALTER\s+TABLE\b/gi) ?? []).length === 1;
+      if (
+        /duplicate column name/i.test(msg) &&
+        isAddColumnOnlyMigration
+      ) {
         getDb()
           .prepare(
             "INSERT OR IGNORE INTO schema_migrations (version, description) VALUES (?, ?)"
