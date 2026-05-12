@@ -6,7 +6,7 @@
 // ADR-0012 INV-0012-4: only full_snapshot_allowed + allowed_public_data_only → R2 upload.
 
 import { ulid } from "ulid";
-import { sha256Hex } from "../../utils/hash";
+import { createHash } from "crypto";
 import { withSession } from "../../storage/neo4j/connection";
 import { r2Put } from "../../storage/r2/client";
 import { getDb } from "../../storage/sqlite/connection";
@@ -43,6 +43,14 @@ export interface SnapshotResult {
 }
 
 // ---------------------------------------------------------------------------
+// P2-13: Hash raw bytes directly to avoid memory overhead of hex-encoding body.
+// ---------------------------------------------------------------------------
+
+function sha256HexBytes(body: Uint8Array, url: string): string {
+  return createHash("sha256").update(body).update(url, "utf8").digest("hex");
+}
+
+// ---------------------------------------------------------------------------
 // Deduplication: check Neo4j for existing Snapshot with same content_hash.
 // ---------------------------------------------------------------------------
 
@@ -59,21 +67,153 @@ async function findExistingSnapshot(contentHash: string): Promise<string | null>
 
 // ---------------------------------------------------------------------------
 // Neo4j writes: Document + Snapshot nodes with Source→Document→Snapshot chain.
+//
+// P1-1: MERGE Document and RETURN d.doc_id so the actual stored doc_id is used
+//        for Snapshot.doc_id, not a freshly generated UUID.
+// P1-3: Guard that Source exists before committing; throw if missing.
+// P1-4: MERGE on content_hash instead of CREATE for idempotent concurrent writes.
+//
+// Returns the actual doc_id stored in Neo4j.
 // ---------------------------------------------------------------------------
 
 async function createDocumentAndSnapshot(
   input: SnapshotInput,
   snapId: string,
   docId: string,
-  contentHash: string,
-  r2Key: string | null
-): Promise<void> {
+  contentHash: string
+): Promise<string> {
   const now = new Date().toISOString();
 
+  return withSession(async (session) => {
+    const tx = session.beginTransaction();
+    try {
+      // Upsert Document (idempotent on url+source_id).
+      // RETURN d.doc_id so ON MATCH case returns the existing stored value.
+      const docResult = await tx.run(
+        `MERGE (d:Document {url: $url, source_id: $sourceId})
+         ON CREATE SET
+           d.doc_id       = $docId,
+           d.source_id    = $sourceId,
+           d.url          = $url,
+           d.canonical_url = $url,
+           d.title        = $title,
+           d.published_at = $publishedAt,
+           d.created_at   = $createdAt
+         ON MATCH SET
+           d.title        = COALESCE($title, d.title),
+           d.published_at = COALESCE($publishedAt, d.published_at)
+         RETURN d.doc_id AS doc_id`,
+        {
+          docId,
+          sourceId: input.sourceId,
+          url: input.url,
+          title: input.title ?? null,
+          publishedAt: input.publishedAt ?? null,
+          createdAt: now,
+        }
+      );
+
+      // Use the doc_id returned from the MERGE (not the pre-generated local var).
+      const actualDocId: string =
+        docResult.records.length > 0
+          ? (docResult.records[0]!.get("doc_id") as string)
+          : docId;
+
+      // P1-3: Guard — Source must exist before linking.
+      // If missing, roll back so Document+Snapshot are never committed without a Source.
+      const sourceCheck = await tx.run(
+        `MATCH (src:Source {source_id: $sourceId}) RETURN count(src) AS matched`,
+        { sourceId: input.sourceId }
+      );
+      const matched =
+        sourceCheck.records.length > 0
+          ? Number(sourceCheck.records[0]!.get("matched"))
+          : 0;
+      if (matched === 0) {
+        throw new Error(`Source not found in graph: ${input.sourceId}`);
+      }
+
+      // P1-4: MERGE on content_hash makes Snapshot creation idempotent.
+      // The uniqueness constraint on Snapshot.content_hash (v1_schema.cypher) ensures
+      // at most one node per content_hash under concurrent workers.
+      await tx.run(
+        `MERGE (s:Snapshot {content_hash: $contentHash})
+         ON CREATE SET
+           s.snap_id     = $snapId,
+           s.doc_id      = $actualDocId,
+           s.url         = $url,
+           s.accessed_at = $accessedAt,
+           s.locator     = '',
+           s.mime        = $mime,
+           s.byte_size   = $byteSize,
+           s.r2_key      = null,
+           s.created_at  = $createdAt`,
+        {
+          snapId,
+          actualDocId,
+          url: input.url,
+          accessedAt: input.accessedAt,
+          contentHash,
+          mime: input.mimeType,
+          byteSize: input.body.byteLength,
+          createdAt: now,
+        }
+      );
+
+      // Link Source→Document (MERGE to avoid duplicate edges).
+      await tx.run(
+        `MATCH (src:Source {source_id: $sourceId}), (d:Document {url: $url, source_id: $sourceId})
+         MERGE (src)-[:HAS_DOCUMENT]->(d)`,
+        { sourceId: input.sourceId, url: input.url }
+      );
+
+      // Link Document→Snapshot (MERGE to avoid duplicate edges).
+      await tx.run(
+        `MATCH (d:Document {url: $url, source_id: $sourceId}), (s:Snapshot {content_hash: $contentHash})
+         MERGE (d)-[:HAS_SNAPSHOT]->(s)`,
+        { url: input.url, sourceId: input.sourceId, contentHash }
+      );
+
+      await tx.commit();
+      return actualDocId;
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// P1-6: Source linkage on dedup path.
+// When a snapshot is deduplicated, still ensure Source→Document→Snapshot edges
+// exist for the current source_id (content may have been first seen from a
+// different source).
+// ---------------------------------------------------------------------------
+
+async function ensureSourceLinkage(
+  input: SnapshotInput,
+  contentHash: string
+): Promise<void> {
   await withSession(async (session) => {
     const tx = session.beginTransaction();
     try {
-      // Upsert Document node (idempotent on url+source_id).
+      // On the dedup path tolerate a missing Source (do not throw).
+      const sourceCheck = await tx.run(
+        `MATCH (src:Source {source_id: $sourceId}) RETURN count(src) AS matched`,
+        { sourceId: input.sourceId }
+      );
+      const matched =
+        sourceCheck.records.length > 0
+          ? Number(sourceCheck.records[0]!.get("matched"))
+          : 0;
+      if (matched === 0) {
+        await tx.rollback();
+        return;
+      }
+
+      const now = new Date().toISOString();
+
+      // Upsert Document for this source (may not exist if this is a new source).
       await tx.run(
         `MERGE (d:Document {url: $url, source_id: $sourceId})
          ON CREATE SET
@@ -88,7 +228,7 @@ async function createDocumentAndSnapshot(
            d.title        = COALESCE($title, d.title),
            d.published_at = COALESCE($publishedAt, d.published_at)`,
         {
-          docId,
+          docId: `doc_${ulid()}`,
           sourceId: input.sourceId,
           url: input.url,
           title: input.title ?? null,
@@ -97,34 +237,6 @@ async function createDocumentAndSnapshot(
         }
       );
 
-      // Create Snapshot node.
-      await tx.run(
-        `CREATE (s:Snapshot {
-           snap_id:      $snapId,
-           doc_id:       $docId,
-           url:          $url,
-           accessed_at:  $accessedAt,
-           content_hash: $contentHash,
-           locator:      '',
-           mime:         $mime,
-           byte_size:    $byteSize,
-           r2_key:       $r2Key,
-           created_at:   $createdAt
-         })`,
-        {
-          snapId,
-          docId,
-          url: input.url,
-          accessedAt: input.accessedAt,
-          contentHash,
-          mime: input.mimeType,
-          byteSize: input.body.byteLength,
-          r2Key,
-          createdAt: now,
-        }
-      );
-
-      // Link Source→Document and Document→Snapshot.
       await tx.run(
         `MATCH (src:Source {source_id: $sourceId}), (d:Document {url: $url, source_id: $sourceId})
          MERGE (src)-[:HAS_DOCUMENT]->(d)`,
@@ -132,9 +244,9 @@ async function createDocumentAndSnapshot(
       );
 
       await tx.run(
-        `MATCH (d:Document {url: $url, source_id: $sourceId}), (s:Snapshot {snap_id: $snapId})
-         CREATE (d)-[:HAS_SNAPSHOT]->(s)`,
-        { url: input.url, sourceId: input.sourceId, snapId }
+        `MATCH (d:Document {url: $url, source_id: $sourceId}), (s:Snapshot {content_hash: $contentHash})
+         MERGE (d)-[:HAS_SNAPSHOT]->(s)`,
+        { url: input.url, sourceId: input.sourceId, contentHash }
       );
 
       await tx.commit();
@@ -149,16 +261,16 @@ async function createDocumentAndSnapshot(
 // discovery_queue status update (serial SQLite, INV-0030-2).
 // ---------------------------------------------------------------------------
 
-function markQueueItemDone(queueId: string, snapId: string): void {
+// P2-8: Pass computed contentHash directly — the old code was a self-copy no-op
+//        (SELECT content_hash FROM discovery_queue WHERE queue_id = ?).
+function markQueueItemDone(queueId: string, snapId: string, contentHash: string): void {
   getDb()
     .prepare(
       `UPDATE discovery_queue
-       SET status = 'done', content_hash = (
-         SELECT content_hash FROM discovery_queue WHERE queue_id = ?
-       )
+       SET status = 'done', content_hash = ?
        WHERE queue_id = ?`
     )
-    .run(queueId, queueId);
+    .run(contentHash, queueId);
   // Store snap_id reference in error_detail column repurposed as result metadata.
   // (A dedicated snap_id column will be added in a later migration if needed.)
   getDb()
@@ -183,12 +295,15 @@ function markQueueItemError(queueId: string, detail: string): void {
 export async function createSnapshotFingerprint(
   input: SnapshotInput
 ): Promise<SnapshotResult> {
-  const contentHash = sha256Hex(Buffer.from(input.body).toString("hex") + input.url);
+  // P2-13: Hash raw Uint8Array bytes — no hex-stringify to avoid doubling memory.
+  const contentHash = sha256HexBytes(input.body, input.url);
 
   // Deduplication: if identical content already snapped, skip Neo4j write.
   const existing = await findExistingSnapshot(contentHash);
   if (existing) {
-    markQueueItemDone(input.queueId, existing);
+    // P1-6: Ensure Source→Document→Snapshot edges for current source_id even on dedup.
+    await ensureSourceLinkage(input, contentHash);
+    markQueueItemDone(input.queueId, existing, contentHash);
     return {
       snapId: existing,
       docId: "",
@@ -200,6 +315,9 @@ export async function createSnapshotFingerprint(
 
   const snapId = `snap_${ulid()}`;
   const docId = `doc_${ulid()}`;
+
+  // P2-9: Neo4j write FIRST, R2 upload after — prevents orphaned R2 objects on Neo4j failure.
+  const actualDocId = await createDocumentAndSnapshot(input, snapId, docId, contentHash);
 
   // R2 upload: only for explicitly permitted artifacts (ADR-0012 INV-0012-3/4).
   let r2Key: string | null = null;
@@ -216,10 +334,9 @@ export async function createSnapshotFingerprint(
     r2Key = key;
   }
 
-  await createDocumentAndSnapshot(input, snapId, docId, contentHash, r2Key);
-  markQueueItemDone(input.queueId, snapId);
+  markQueueItemDone(input.queueId, snapId, contentHash);
 
-  return { snapId, docId, contentHash, r2Key, deduplicated: false };
+  return { snapId, docId: actualDocId, contentHash, r2Key, deduplicated: false };
 }
 
 export async function processDiscoveryQueue(
@@ -229,30 +346,49 @@ export async function processDiscoveryQueue(
   }>
 ): Promise<{ processed: number; deduplicated: number; errors: number }> {
   const db = getDb();
-  const pending = db
-    .prepare(
-      `SELECT queue_id, source_id, url, title, published_at
-       FROM discovery_queue
-       WHERE status = 'pending'
-       ORDER BY discovered_at ASC
-       LIMIT 100`
-    )
-    .all() as Array<{
-      queue_id: string;
-      source_id: string;
-      url: string;
-      title: string | null;
-      published_at: string | null;
-    }>;
 
-  // Mark as processing (serial write before async fetch, INV-0030-2).
-  const ids = pending.map((r) => r.queue_id);
-  if (ids.length > 0) {
+  // P2-10: Reset stale processing rows from crashed workers (older than 1 hour).
+  // Uses updated_at column (added in v6 migration). Gracefully skips on pre-v6 schemas.
+  try {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     db.prepare(
-      `UPDATE discovery_queue SET status = 'processing'
-       WHERE queue_id IN (${ids.map(() => "?").join(",")})`
-    ).run(...ids);
+      `UPDATE discovery_queue SET status = 'pending'
+       WHERE status = 'processing' AND updated_at < ?`
+    ).run(oneHourAgo);
+  } catch {
+    // updated_at column absent (pre-v6 schema) — stale reclaim skipped.
   }
+
+  // P1-5: Atomic row claiming using a SQLite transaction so two concurrent workers
+  // cannot claim the same rows.
+  const batchSize = 100;
+  const pending = db.transaction(() => {
+    const rows = db
+      .prepare(
+        `SELECT queue_id, source_id, url, title, published_at
+         FROM discovery_queue
+         WHERE status = 'pending'
+         ORDER BY discovered_at ASC
+         LIMIT ?`
+      )
+      .all(batchSize) as Array<{
+        queue_id: string;
+        source_id: string;
+        url: string;
+        title: string | null;
+        published_at: string | null;
+      }>;
+
+    if (rows.length > 0) {
+      const ids = rows.map((r) => r.queue_id);
+      db.prepare(
+        `UPDATE discovery_queue SET status = 'processing'
+         WHERE queue_id IN (${ids.map(() => "?").join(",")})`
+      ).run(...ids);
+    }
+
+    return rows;
+  })();
 
   let processed = 0;
   let deduplicated = 0;
@@ -261,10 +397,21 @@ export async function processDiscoveryQueue(
   for (const row of pending) {
     try {
       const { archivePolicy, rawCloudPolicy } = await archivePolicyFn(row.source_id);
-      const { safeFetch, MAX_BYTES } = await import("../fetch/safe-fetch");
-      const res = await safeFetch(row.url, { maxBytes: MAX_BYTES.rss });
 
-      if (res.status >= 400) {
+      // P1-7: Enforce do_not_collect before any outbound fetch.
+      if (archivePolicy === "do_not_collect") {
+        markQueueItemError(row.queue_id, "skipped: do_not_collect policy");
+        errors++;
+        continue;
+      }
+
+      const { safeFetch, MAX_BYTES } = await import("../fetch/safe-fetch");
+
+      // P1-2: Use MAX_BYTES.html for document URLs — larger cap than rss (10MB vs 5MB).
+      const res = await safeFetch(row.url, { maxBytes: MAX_BYTES.html });
+
+      // P2-12: Require 2xx; treat 204, 3xx, 4xx, 5xx as errors.
+      if (!(res.status >= 200 && res.status < 300)) {
         markQueueItemError(row.queue_id, `HTTP ${res.status}`);
         errors++;
         continue;
@@ -272,10 +419,12 @@ export async function processDiscoveryQueue(
 
       const mimeType =
         res.headers.get("Content-Type")?.split(";")[0]?.trim() ?? "application/octet-stream";
+
+      // P2-11: Use finalUrl (after redirects) as the canonical URL for snapshot identity.
       const result = await createSnapshotFingerprint({
         sourceId: row.source_id,
         queueId: row.queue_id,
-        url: row.url,
+        url: res.finalUrl,
         title: row.title ?? undefined,
         publishedAt: row.published_at ?? undefined,
         accessedAt: new Date().toISOString(),

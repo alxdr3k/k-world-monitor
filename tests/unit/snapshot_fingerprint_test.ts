@@ -24,6 +24,14 @@ mock.module("../../src/storage/neo4j/connection", () => ({
     const tx = {
       run: async (query: string, params: Record<string, unknown>) => {
         neo4jRuns.push({ query, params });
+        // P1-3 source guard: return count=1 so the guard does not throw in tests.
+        if (query.includes("MATCH (src:Source") && query.includes("count(src)")) {
+          return { records: [{ get: (_: string) => 1 }] };
+        }
+        // P1-1 MERGE Document RETURN: echo back the pre-generated docId parameter.
+        if (query.includes("MERGE (d:Document") && query.includes("RETURN d.doc_id")) {
+          return { records: [{ get: (_: string) => params["docId"] }] };
+        }
         return { records: [] };
       },
       commit: async () => {},
@@ -197,9 +205,9 @@ describe("createSnapshotFingerprint — new snapshot", () => {
     await createSnapshotFingerprint(baseInput(queueId));
 
     const queries = neo4jRuns.map((r) => r.query);
-    // Should have MERGE Document, CREATE Snapshot, MERGE Source→Doc, CREATE Doc→Snap
+    // Should have MERGE Document, MERGE Snapshot (idempotent), MERGE Source→Doc, MERGE Doc→Snap
     expect(queries.some((q) => q.includes("MERGE (d:Document"))).toBe(true);
-    expect(queries.some((q) => q.includes("CREATE (s:Snapshot"))).toBe(true);
+    expect(queries.some((q) => q.includes("MERGE (s:Snapshot"))).toBe(true);
     expect(queries.some((q) => q.includes("HAS_DOCUMENT"))).toBe(true);
     expect(queries.some((q) => q.includes("HAS_SNAPSHOT"))).toBe(true);
   });
@@ -239,7 +247,7 @@ describe("createSnapshotFingerprint — deduplication", () => {
     expect(result.docId).toBe(""); // dedup path returns empty docId
   });
 
-  it("skips Neo4j writes and R2 upload when deduplicated", async () => {
+  it("skips Snapshot node creation and R2 upload when deduplicated", async () => {
     findExistingResult = "snap_EXISTING";
 
     const db = setupDb();
@@ -248,11 +256,12 @@ describe("createSnapshotFingerprint — deduplication", () => {
 
     await createSnapshotFingerprint(baseInput(queueId));
 
-    // Only the MATCH dedup query should have run (no MERGE/CREATE writes)
-    const writingQueries = neo4jRuns.filter(
-      (r) => r.query.includes("MERGE") || r.query.includes("CREATE")
+    // No new Snapshot node should be created on the dedup path.
+    // Source linkage writes (MERGE Document + edges) may still run (P1-6 requirement).
+    const snapshotWrites = neo4jRuns.filter(
+      (r) => r.query.includes("MERGE (s:Snapshot") || r.query.includes("CREATE (s:Snapshot")
     );
-    expect(writingQueries).toHaveLength(0);
+    expect(snapshotWrites).toHaveLength(0);
     expect(r2Puts).toHaveLength(0);
   });
 

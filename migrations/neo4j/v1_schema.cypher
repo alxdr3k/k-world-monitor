@@ -18,6 +18,12 @@ FOR (n:Document) REQUIRE n.doc_id IS UNIQUE;
 CREATE CONSTRAINT snapshot_unique IF NOT EXISTS
 FOR (n:Snapshot) REQUIRE n.snap_id IS UNIQUE;
 
+// INFRA-1B.3: content_hash uniqueness prevents duplicate Snapshot nodes from
+// concurrent workers. MERGE on content_hash in createDocumentAndSnapshot relies
+// on this constraint for idempotency.
+CREATE CONSTRAINT snapshot_content_hash_unique IF NOT EXISTS
+FOR (n:Snapshot) REQUIRE n.content_hash IS UNIQUE;
+
 CREATE CONSTRAINT claim_unique IF NOT EXISTS
 FOR (n:Claim) REQUIRE n.claim_id IS UNIQUE;
 
