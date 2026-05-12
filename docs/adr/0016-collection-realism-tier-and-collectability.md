@@ -181,7 +181,7 @@ enforcement 유지):
   - 봇 우회 회피는 미디어 빠르게 변하는 dynamic page를 일부 놓침 — 의도된 수용
 
 - 후속 작업:
-  - INFRA-1A.6 (신설): Source registry seed Q21 — Tier A seed (size cap 폐기 후 누적 자유) + 분포 균형 작성. v0 entry 50 source proposed (`docs/research/source-seed-list-2026-05.md`)
+  - INFRA-1A.6 (신설): Source registry seed Q21 — Tier A seed (size cap 폐기 후 누적 자유) + 분포 균형 작성. v0 entry 72 source proposed (`docs/research/source-seed-list-2026-05.md`)
   - INFRA-1B.1 슬라이스: Source registry + Collection Queue (Tier 분류 강제)
   - ADR-0017: source policy gate (archive_policy / raw_cloud_policy /
     external_llm_policy 3 필드)
