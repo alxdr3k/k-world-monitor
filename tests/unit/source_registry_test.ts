@@ -32,12 +32,19 @@ const POLICY_TABLE_DDL = `
   )
 `;
 
+const SLUG_MAP_TABLE_DDL = `
+  CREATE TABLE source_registry_slug_map (
+    slug      TEXT NOT NULL PRIMARY KEY,
+    source_id TEXT NOT NULL
+  )
+`;
+
 function setupInMemoryDb(): void {
   closeDb();
   process.env["SQLITE_PATH"] = ":memory:";
   const db = getDb();
   db.run(POLICY_TABLE_DDL);
-  // slug map is created by seedSources itself via CREATE TABLE IF NOT EXISTS
+  db.run(SLUG_MAP_TABLE_DDL);
 }
 
 function teardownDb(): void {

@@ -79,6 +79,19 @@ function validateSource(s: SeedSource): void {
     throw new SeedValidationError(s.slug, "raw_cloud_policy", s.raw_cloud_policy);
   if (!isExternalLlmPolicy(s.external_llm_policy))
     throw new SeedValidationError(s.slug, "external_llm_policy", s.external_llm_policy);
+  try { new URL(s.url); } catch {
+    throw new SeedValidationError(s.slug, "url", s.url);
+  }
+  if (s.rss_url !== undefined) {
+    try { new URL(s.rss_url); } catch {
+      throw new SeedValidationError(s.slug, "rss_url", s.rss_url);
+    }
+  }
+  if (s.api_base !== undefined) {
+    try { new URL(s.api_base); } catch {
+      throw new SeedValidationError(s.slug, "api_base", s.api_base);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,12 +138,20 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
 
   // Validate all sources and check slug uniqueness before any DB writes
   const slugsSeen = new Set<string>();
-  for (const s of sources) {
-    if (slugsSeen.has(s.slug)) {
-      throw new SeedValidationError(s.slug, "slug", `duplicate slug in sources_seed.yaml`);
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
+    if (s === null || typeof s !== "object" || typeof (s as unknown as Record<string, unknown>)["slug"] !== "string") {
+      throw new SeedValidationError(`index[${i}]`, "shape", `expected object with slug string, got ${JSON.stringify(s)}`);
     }
-    slugsSeen.add(s.slug);
-    validateSource(s);
+    const slug = (s as SeedSource).slug;
+    if (slug.length === 0) {
+      throw new SeedValidationError(`index[${i}]`, "slug", "empty slug is not allowed");
+    }
+    if (slugsSeen.has(slug)) {
+      throw new SeedValidationError(slug, "slug", `duplicate slug in sources_seed.yaml`);
+    }
+    slugsSeen.add(slug);
+    validateSource(s as SeedSource);
   }
 
   // Dry-run: validate + preview without DB access (assumes fresh DB — all rows shown as inserted)
@@ -160,13 +181,15 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
     );
   }
 
-  // Ensure slug→source_id mapping table exists for idempotency
-  db.run(`
-    CREATE TABLE IF NOT EXISTS source_registry_slug_map (
-      slug      TEXT PRIMARY KEY,
-      source_id TEXT NOT NULL
-    )
-  `);
+  // Fail fast if slug-map migration has not been applied (DEC-015: DDL lives in v3 migration)
+  const slugMapTableExists = db.query<{ name: string }, []>(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='source_registry_slug_map'"
+  ).get();
+  if (!slugMapTableExists) {
+    throw new Error(
+      "source_registry_slug_map table not found. Run migrations first: bun run migrate:sqlite"
+    );
+  }
 
   const getIdBySlug = db.query<{ source_id: string }, [string]>(
     "SELECT source_id FROM source_registry_slug_map WHERE slug = ?"

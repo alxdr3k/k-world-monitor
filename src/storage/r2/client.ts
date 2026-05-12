@@ -26,7 +26,7 @@ export interface R2GetResult {
 
 function buildEndpoint(): string {
   const accountId = process.env["S3_ACCOUNT_ID"];
-  if (!accountId) throw new Error("s3_account_id env var not set");
+  if (!accountId) throw new Error("S3_ACCOUNT_ID env var not set");
   return `https://${accountId}.r2.cloudflarestorage.com`;
 }
 
@@ -35,9 +35,9 @@ function buildClient(): InstanceType<typeof Bun.S3Client> {
   const secretAccessKey = process.env["S3_SECRET_KEY"];
   const bucket = process.env["S3_BUCKET"];
 
-  if (!accessKeyId) throw new Error("s3_access_key env var not set");
-  if (!secretAccessKey) throw new Error("s3_secret_key env var not set");
-  if (!bucket) throw new Error("s3_bucket env var not set");
+  if (!accessKeyId) throw new Error("S3_ACCESS_KEY env var not set");
+  if (!secretAccessKey) throw new Error("S3_SECRET_KEY env var not set");
+  if (!bucket) throw new Error("S3_BUCKET env var not set");
 
   return new Bun.S3Client({
     endpoint: buildEndpoint(),
