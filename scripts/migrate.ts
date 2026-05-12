@@ -21,13 +21,14 @@ const doSqlite = args.has("--sqlite") || (!args.has("--sqlite") && !args.has("--
 const REPO_ROOT = join(import.meta.dir, "..");
 
 // ---------------------------------------------------------------------------
-// SQLite migration — versioned chain v1 → v4
+// SQLite migration — versioned chain v1 → v5
 // ---------------------------------------------------------------------------
 const SQLITE_MIGRATIONS: Array<{ version: string; file: string }> = [
   { version: "v1", file: "migrations/sqlite/v1_schema.sql" },
   { version: "v2", file: "migrations/sqlite/v2_enum_constraints.sql" },
   { version: "v3", file: "migrations/sqlite/v3_source_registry_slug_map.sql" },
   { version: "v4", file: "migrations/sqlite/v4_run_ledger_completed_at_idx.sql" },
+  { version: "v5", file: "migrations/sqlite/v5_crawl_state.sql" },
 ];
 
 async function migrateSqlite(): Promise<void> {

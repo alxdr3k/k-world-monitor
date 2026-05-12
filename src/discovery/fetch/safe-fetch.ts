@@ -779,14 +779,12 @@ export async function safeFetch(
   const finalUrl = currentUrl.toString();
 
   // Step 6: Content-Length preflight (INV-0028-4)
-  // 304 Not Modified carries no body — skip the size check to avoid a false
-  // BodyTooLargeError on a stale Content-Length from a prior 200 response.
+  // 304 Not Modified carries no body; skip the size check to avoid a false
+  // BodyTooLargeError from a stale Content-Length header on the cached response.
   const contentLengthHeader = response.headers.get("Content-Length");
   const declaredBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : null;
-  if (response.status !== 304) {
-    if (declaredBytes !== null && !isNaN(declaredBytes) && declaredBytes > opts.maxBytes) {
-      throw new BodyTooLargeError(finalUrl, opts.maxBytes);
-    }
+  if (response.status !== 304 && declaredBytes !== null && !isNaN(declaredBytes) && declaredBytes > opts.maxBytes) {
+    throw new BodyTooLargeError(finalUrl, opts.maxBytes);
   }
 
   // Step 7: Streaming body read + byte cap + zip bomb ratio (INV-0028-4)
