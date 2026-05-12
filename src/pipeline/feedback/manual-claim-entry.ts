@@ -117,6 +117,12 @@ function validateInput(input: ManualClaimInput): ClaimKind {
         "attribution.url is required when referencedQuote is set (INV-0018-2)."
       );
     }
+    // ADR-0018: referenced_quote ≤200 chars (ADR-0015 INV-0015-1 short-quote limit).
+    if (input.referencedQuote!.length > 200) {
+      throw new ManualClaimValidationError(
+        `referenced_quote must be ≤200 characters (got ${input.referencedQuote!.length}).`
+      );
+    }
     return "referenced_quote";
   }
 
@@ -174,9 +180,12 @@ export async function createManualClaimEntry(
           publishedAt: input.publishedAt ?? null,
           sourceAccessedAt: input.sourceAccessedAt,
           sourceAccessedVia: input.sourceAccessedVia,
-          userWrittenClaim: input.userWrittenClaim ?? null,
-          userOpinion: input.userOpinion ?? null,
-          referencedQuote: input.referencedQuote ?? null,
+          // Normalize empty strings to null — isSet() treats "" as absent,
+          // but `?? null` would still persist "". Use `|| null` to keep only
+          // non-empty values, maintaining the 3-way separation invariant (INV-0018-1).
+          userWrittenClaim: input.userWrittenClaim || null,
+          userOpinion: input.userOpinion || null,
+          referencedQuote: input.referencedQuote || null,
           quoteReason: input.quoteReason ?? null,
           attributionJson: input.attribution ? JSON.stringify(input.attribution) : null,
           selfAssessedConfidence: input.selfAssessedConfidence,
@@ -185,14 +194,39 @@ export async function createManualClaimEntry(
         }
       );
 
+      // Create :DERIVED_FROM_MANUAL_REVIEW_OF edge to Source (ADR-0018 projection edge).
+      // sourceId is a required field; fail if the Source node doesn't exist so we don't
+      // create orphan ManualClaimEntry nodes disconnected from the graph.
+      const srcResult = await tx.run(
+        `MATCH (m:ManualClaimEntry {manual_claim_id: $manualClaimId})
+         MATCH (s:Source {source_id: $sourceId})
+         CREATE (m)-[:DERIVED_FROM_MANUAL_REVIEW_OF]->(s)
+         RETURN count(s) AS matched`,
+        { manualClaimId, sourceId: input.sourceId }
+      );
+      const srcMatched = Number(srcResult.records[0]?.get("matched") ?? 0);
+      if (srcMatched === 0) {
+        throw new Error(
+          `createManualClaimEntry: Source node not found for source_id='${input.sourceId}'.`
+        );
+      }
+
       // Create :RESOLVES edge when this entry resolves an AccessIntervention (ADR-0018).
+      // Guard: throw if AccessIntervention node is missing to prevent dangling FK-like data.
       if (input.interventionId) {
-        await tx.run(
+        const intResult = await tx.run(
           `MATCH (m:ManualClaimEntry {manual_claim_id: $manualClaimId})
            MATCH (i:AccessIntervention {intervention_id: $interventionId})
-           CREATE (m)-[:RESOLVES]->(i)`,
+           CREATE (m)-[:RESOLVES]->(i)
+           RETURN count(i) AS matched`,
           { manualClaimId, interventionId: input.interventionId }
         );
+        const intMatched = Number(intResult.records[0]?.get("matched") ?? 0);
+        if (intMatched === 0) {
+          throw new Error(
+            `createManualClaimEntry: AccessIntervention not found for id='${input.interventionId}'.`
+          );
+        }
       }
 
       commitAttempted = true;

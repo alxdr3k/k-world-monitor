@@ -6,6 +6,8 @@
 //     marks resolved_temp_text. Raw text is NOT stored (INV-0018-3).
 //
 // All resolution options update the AccessIntervention status in Neo4j.
+// Status guard: only interventions with status 'pending_user_review' can be resolved;
+// re-resolving is rejected to prevent conflicting terminal-action writes.
 
 import { ulid } from "ulid";
 import { withSession } from "../../storage/neo4j/connection";
@@ -28,6 +30,8 @@ export interface ReviewResult {
 
 // ---------------------------------------------------------------------------
 // Neo4j: update AccessIntervention status + resolved_at.
+// Precondition: intervention must have status='pending_user_review'.
+// Throws if not found or already resolved.
 // ---------------------------------------------------------------------------
 
 async function resolveIntervention(
@@ -47,6 +51,7 @@ async function resolveIntervention(
         : "i.status = $status, i.resolved_at = $resolvedAt";
     const result = await session.run(
       `MATCH (i:AccessIntervention {intervention_id: $interventionId})
+       WHERE i.status = 'pending_user_review'
        SET ${setClause}
        RETURN count(i) AS matched`,
       {
@@ -59,7 +64,7 @@ async function resolveIntervention(
     const matched = Number(result.records[0]?.get("matched") ?? 0);
     if (matched === 0) {
       throw new Error(
-        `resolveIntervention: AccessIntervention not found for id='${interventionId}'.`
+        `resolveIntervention: AccessIntervention not found or not in pending_user_review state for id='${interventionId}'.`
       );
     }
   });
@@ -70,6 +75,7 @@ async function resolveIntervention(
 // Stores the intervention source URL as a cache reference.
 // Raw text is NOT persisted (INV-0018-3, ADR-0012 INV-0012-3).
 // sessionId is required (FK to research_session; no "unknown" fallback).
+// Returns the cache_id, or throws and rolls back on any error.
 // ---------------------------------------------------------------------------
 
 function registerTempTextUrl(
@@ -111,6 +117,7 @@ export async function reviewIntervention(
 
   if (action === "ignore") {
     // Lower importance_score by 0.2 (encourages Pattern 1 policy learning).
+    // Note: policy_learning_events write is out-of-scope for this slice (ADR-0018 scope.out).
     await resolveIntervention(interventionId, "resolved_ignore", resolvedAt, -0.2);
     return { interventionId, action, resolvedAt };
   }
@@ -119,11 +126,18 @@ export async function reviewIntervention(
     if (!opts.manualClaimInput) {
       throw new Error("manualClaimInput is required for manual_claim action.");
     }
+    // Atomicity: createManualClaimEntry and resolveIntervention are separate Neo4j
+    // sessions and cannot be combined into one transaction across Neo4j driver sessions.
+    // Strategy: resolve the intervention first; if claim creation fails, the intervention
+    // is marked resolved but the claim is absent — the operator can detect this via the
+    // missing :RESOLVES edge and re-run. This is preferable to the alternative (orphaned
+    // claim with unresolved intervention) because re-resolution is blocked by the status
+    // guard; claim-absent state is detectable via graph query.
+    await resolveIntervention(interventionId, "resolved_manual_claim", resolvedAt);
     const record = await createManualClaimEntry({
       ...opts.manualClaimInput,
       interventionId,
     });
-    await resolveIntervention(interventionId, "resolved_manual_claim", resolvedAt);
     return { interventionId, action, resolvedAt, manualClaimRecord: record };
   }
 
@@ -134,8 +148,16 @@ export async function reviewIntervention(
     if (!opts.sessionId) {
       throw new Error("sessionId is required for temp_text action (FK to research_session).");
     }
-    const rawCacheItemId = registerTempTextUrl(opts.interventionUrl, opts.sessionId);
+    // Atomicity: perform the SQLite insert inside a transaction. If the Neo4j
+    // resolveIntervention call fails, we roll back the SQLite row so no
+    // duplicate cache entries accumulate on retry.
+    const db = getDb();
+    const insertTx = db.transaction((url: string, sid: string) =>
+      registerTempTextUrl(url, sid)
+    );
+    // Run Neo4j update first; only commit SQLite if it succeeds.
     await resolveIntervention(interventionId, "resolved_temp_text", resolvedAt);
+    const rawCacheItemId = insertTx(opts.interventionUrl, opts.sessionId);
     return { interventionId, action, resolvedAt, rawCacheItemId };
   }
 

@@ -18,12 +18,15 @@ let neo4jShouldThrow = false;
 
 mock.module("../../src/storage/neo4j/connection", () => ({
   withSession: async <T>(fn: (session: unknown) => Promise<T>): Promise<T> => {
-    // Returns matched=1 for existence-check queries (RETURN count(i) AS matched)
-    // so the node-exists guard in resolveIntervention passes in unit tests.
+    // Returns matched=1 for all existence-check queries (count(i)/count(s) AS matched)
+    // so node-exists guards in resolveIntervention / createManualClaimEntry pass in unit tests.
     const mockRun = async (query: string, params: Record<string, unknown>) => {
       if (neo4jShouldThrow) throw new Error("Neo4j error");
       neo4jRuns.push({ query, params });
-      if (query.includes("RETURN count(i) AS matched")) {
+      if (
+        query.includes("AS matched") ||
+        query.includes("RETURN count(")
+      ) {
         return { records: [{ get: (_k: string) => 1 }] };
       }
       return { records: [] };
@@ -173,6 +176,30 @@ describe("createManualClaimEntry — 3-way validation (INV-0018-1)", () => {
     await expect(createManualClaimEntry(inputNone)).rejects.toThrow("Exactly one");
   });
 
+  it("rejects referenced_quote longer than 200 characters (ADR-0018 ≤200 chars)", async () => {
+    const input: ManualClaimInput = {
+      ...baseInput(),
+      userWrittenClaim: undefined,
+      referencedQuote: "A".repeat(201),
+      quoteReason: "exact_wording_matters",
+      attribution: { url: "https://example.com" },
+    };
+    await expect(createManualClaimEntry(input)).rejects.toThrow(ManualClaimValidationError);
+    await expect(createManualClaimEntry(input)).rejects.toThrow("≤200 characters");
+  });
+
+  it("accepts referenced_quote of exactly 200 characters (boundary)", async () => {
+    const input: ManualClaimInput = {
+      ...baseInput(),
+      userWrittenClaim: undefined,
+      referencedQuote: "A".repeat(200),
+      quoteReason: "exact_wording_matters",
+      attribution: { url: "https://example.com" },
+    };
+    const result = await createManualClaimEntry(input);
+    expect(result.kind).toBe("referenced_quote");
+  });
+
   it("rejects invalid selfAssessedConfidence on referenced_quote path (INV-0018-6)", async () => {
     const input: ManualClaimInput = {
       ...baseInput(),
@@ -219,6 +246,22 @@ describe("createManualClaimEntry — Neo4j write", () => {
     const createQ = neo4jRuns.find((r) => r.query.includes("CREATE (m:ManualClaimEntry"))!;
     expect(createQ.params["userOpinion"]).toBeNull();
     expect(createQ.params["referencedQuote"]).toBeNull();
+  });
+
+  it("normalizes empty string claim fields to null (not empty string)", async () => {
+    // Empty string for unfilled fields must be persisted as null, not "".
+    const input = { ...baseInput(), userOpinion: "", referencedQuote: "" };
+    await createManualClaimEntry(input);
+    const createQ = neo4jRuns.find((r) => r.query.includes("CREATE (m:ManualClaimEntry"))!;
+    expect(createQ.params["userOpinion"]).toBeNull();
+    expect(createQ.params["referencedQuote"]).toBeNull();
+  });
+
+  it("creates :DERIVED_FROM_MANUAL_REVIEW_OF edge to Source (ADR-0018)", async () => {
+    await createManualClaimEntry(baseInput());
+    const edgeQ = neo4jRuns.find((r) => r.query.includes("DERIVED_FROM_MANUAL_REVIEW_OF"));
+    expect(edgeQ).toBeTruthy();
+    expect(edgeQ!.params["sourceId"]).toBe("src_TEST");
   });
 
   it("propagates Neo4j error and rolls back", async () => {
