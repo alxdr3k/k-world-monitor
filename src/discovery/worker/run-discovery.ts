@@ -10,16 +10,19 @@ import { pollEligibleSources, type DiscoverySource } from "../scheduler/schedule
 import { recordFetchOutcome } from "../scheduler/crawl-state";
 import { parseRssFeed, enqueueDiscoveredItems } from "./rss-worker";
 
-interface SeedSource {
-  slug: string;
-  rss_url?: string;
-  access_method: string;
-  reliability_tier: number;
-}
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
-interface SeedFile {
-  sources: SeedSource[];
-}
+// DEC-013 §1: Discovery worker caps daily queue insertions at 20 candidates.
+// Items beyond the cap are dropped; they receive priority lift on the next day
+// via the scheduler's backoff / priority logic.
+// Limitation (v0): this cap counts insertions within a single run, not across
+// all runs in a calendar day. If the worker is invoked more than once per day,
+// each run may insert up to 20 additional items. For the first-publication
+// milestone (single daily cron invocation) this is acceptable. Adjust to an
+// inter-run DB query when a scheduler with multiple daily invocations lands.
+const DAILY_CANDIDATE_CAP = 20;
 
 // ---------------------------------------------------------------------------
 // Load sources from seed YAML (v0: reads YAML directly; INFRA-1B.1+ reads SQLite)
@@ -83,17 +86,6 @@ function loadRssSources(filterSlug?: string): DiscoverySource[] {
 }
 
 // ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-// DEC-013 §1: Discovery worker caps daily queue insertions at 20 candidates.
-// Items beyond the cap are dropped; they receive priority lift on the next day
-// via the scheduler's backoff / priority logic.
-// v0: count insertions within this run (no inter-run state needed for first
-// publication milestone).  Adjust when score-rank triage (DEC-013 §2) lands.
-const DAILY_CANDIDATE_CAP = 20;
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -122,7 +114,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Phase 1: bounded parallel fetch via pollEligibleSources (INV-0030-1, INV-0030-2)
+  // Phase 1: bounded parallel fetch via pollEligibleSources (INV-0030-1, INV-0030-2).
+  // All eligible sources are fetched upfront; the daily cap is applied during enqueue
+  // (Phase 2). Fetches beyond the cap are discarded. Acceptable for v0 (small source
+  // pool); revisit if source count grows significantly.
   const pollResults = await pollEligibleSources(sources);
   console.log(`[discovery] Polled ${pollResults.length} sources`);
 

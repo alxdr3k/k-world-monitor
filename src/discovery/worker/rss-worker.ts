@@ -170,6 +170,8 @@ export function enqueueDiscoveredItems(
       // queue_id: ULID per row — deduplication is handled by the partial unique
       // index (source_id, url) WHERE status IN ('pending','processing'), so
       // re-queueing a done/error URL gets a fresh row without PK conflict.
+      // content_hash: sha256 of url — stored for future change-detection use;
+      // not used for deduplication (dedup is handled by the partial unique index).
       const contentHash = sha256Hex(item.url);
       const queueId = `dq_${ulid()}`;
       const changes = stmt.run(
