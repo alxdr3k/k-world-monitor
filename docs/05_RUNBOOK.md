@@ -162,14 +162,99 @@ P0-M1 INFRA-1A.2 slice에 SQLite 백업 commit, INFRA-1A.3 slice에 R2 버킷
 
 ## Data Operations
 
-- 백업: TBD (P0-M1 INFRA-1A.2 / INFRA-1A.3 slice에 SQLite + R2 백업 정책 commit)
-  - SQLite: 일일 `research.db` 파일 dump → R2 backup bucket
-  - R2 객체: versioning enable, lifecycle 30일 retention 검토
-- 복구: TBD
-- 마이그레이션 체크리스트: TBD (P0-M1 INFRA-1A.2 slice)
-  - 마이그레이션 파일은 `migrations/<timestamp>_<title>.sql`
-  - 적용 전 dry-run + 백업
-  - down 스크립트 의무
+> 이 섹션의 backup schedule, R2 lifecycle rule, retention 정책은
+> **DEC-007** (2026-05-11 accepted) + `docs/research/retention-policy-2026-05.md` 로 lock됨.
+> 실제 backup/GC job 구현은 OPS-1A.1 (daily/weekly/monthly retention batch) + OPS-1A.4 (raw_cache TTL worker) slice.
+
+### Backup Schedule
+
+| 항목 | 주기 | 대상 | R2 prefix | 보존 |
+|---|---|---|---|---|
+| Neo4j full dump | 일간 | graph store 전체 (`neo4j-admin dump`) | `backups/neo4j/YYYY-MM-DD.dump` | **30일** (R2 expire rule) |
+| SQLite snapshot | 일간 | `research.db` 파일 copy | `backups/sqlite/YYYY-MM-DD.db` | **90일** (R2 expire rule) |
+| JSONL audit export | 월간 (월말) | `jsonl_audit_export_r2` — 당월 전체 | `audit/jsonl/YYYY-MM.jsonl.gz` | IA transition 365일 후 → **무기한** (expire 절대 없음) |
+
+### R2 Lifecycle Rules
+
+**Expire rule (3개만, 나이 기반 자동 삭제):**
+
+| prefix | rule | 기간 |
+|---|---|---|
+| `backups/neo4j/` | expire | 30일 |
+| `backups/sqlite/` | expire | 90일 |
+| `tmp/multipart/` | abort incomplete multipart | 7일 |
+
+**Transition rule (6개, expire 절대 없음 — cold-ish storage only):**
+
+| prefix | rule | 기간 |
+|---|---|---|
+| `audit/jsonl/` | → IA | 365일 |
+| `permitted_artifact/dataset/` | → IA | 30일 (EOL 시 batch가 archive prefix로 copy 후 delete) |
+| `permitted_artifact/derived/snapshot/` | → IA | 365일 |
+| `permitted_artifact/derived/dossier/` | → IA | 365일 |
+| `permitted_artifact/derived/publication/` | → IA | 730일 (**expire 없음 — 항상 보존**) |
+| `permitted_artifact/evidence-pack/` | → IA | 365일 |
+
+### Retention Batch Jobs (application-layer semantic GC)
+
+R2 native lifecycle은 나이 기반 expire/transition 9개만 처리. 의미적 GC(retraction/supersede/dedupe/EOL/cited-lock)는 모두 application batch:
+
+| cadence | job | 주요 대상 |
+|---|---|---|
+| 일간 `retention_daily` | raw_cache_items TTL evict, research_session GC (30일 after closed_at), tmp computation purge | raw_cache_items, research_session |
+| 주간 `retention_weekly` | Snapshot supersede collapse (1년 grace + cited 보호), content_hash dedupe canonical, Scenario/Thesis revision collapse (head + recent 5 보존) | Snapshot, revision ledger |
+| 월간 `retention_monthly` | dataset_vintage EOL (12개월 grace), metrics rollup, **JSONL audit export**, publication 정정 cascade integrity check, tombstone GC report | dataset_vintage, derived metrics, JSONL audit |
+
+### RETENTION_PROTECTED_KINDS 상수
+
+GC batch job이 절대 삭제해서는 안 되는 항목 (DEC-007 term_effects lock):
+
+```
+publication_node               — Publication 노드
+derived_publication_r2         — permitted_artifact/derived/publication/{id}/ R2 객체
+access_intervention_ledger     — AccessIntervention ledger 전체
+policy_decisions_sqlite        — policy_decisions SQLite rows 전체
+jsonl_audit_export_r2          — audit/jsonl/ R2 객체 전체
+claim_retracted_tombstone      — retracted Claim의 Tombstone 노드
+cited_snapshot_locked          — Publication에 cited된 Snapshot (cited flag)
+dataset_vintage_metadata       — dataset_vintage row metadata
+tombstone_node                 — Tombstone 노드 전체 (14일 grace 대기 중)
+```
+
+### Soft-Delete → Tombstone → Hard-Delete 2단계 패턴
+
+모든 delete 연산은 2단계로 처리:
+
+1. **soft-delete**: 대상 노드/row에 `deleted_at`, `delete_reason` 마킹
+2. **tombstone (14일 grace)**: `:Tombstone` 노드 생성 (Neo4j) 또는 tombstone row insert (SQLite). `policy_decisions` row 1개 발행 (reason + evidence-pointer)
+3. **hard-delete**: 14일 경과 후 다음 `retention_daily` 실행 시 실제 삭제. `policy_decisions` row에 `completed_at` 기록
+
+RETENTION_PROTECTED_KINDS 항목은 tombstone 생성 단계에서 batch job이 reject하고 경고를 남긴다.
+
+### 마이그레이션 체크리스트
+
+- 마이그레이션 파일: `migrations/sqlite/v{N}_<title>.sql` (SQLite), `migrations/neo4j/v{N}_<title>.cypher` (Neo4j)
+- 적용 전: `bun run migrate:sqlite --dry-run` / `bun run migrate:neo4j --dry-run` 으로 pending 확인
+- 적용 중: `bun run migrate` (양쪽 동시), 오류 시 SQLite → WAL checkpoint 후 파일 복구, Neo4j → dump 복구
+- 적용 후: `bun test` 통과 확인
+
+### 복구 절차
+
+**Neo4j 복구:**
+1. `neo4j stop`
+2. R2에서 `backups/neo4j/YYYY-MM-DD.dump` 다운로드
+3. `neo4j-admin load --from=<dump> --database=neo4j --force`
+4. `neo4j start`
+5. `bun run migrate:neo4j` (최신 schema 재적용, idempotent)
+
+**SQLite 복구:**
+1. `cp research.db research.db.bak` (현재 파일 보존)
+2. R2에서 `backups/sqlite/YYYY-MM-DD.db` 다운로드
+3. `bun run migrate:sqlite` (최신 schema 재적용, idempotent)
+
+### 연간 Retention Drill (AC-032)
+
+연 1회, 임의 Publication 1건 선택 후 5+1 trace (Claim × N → Snapshot → Source; Dossier; Scenario × revision; Thesis; EditorialIntent) 전부 reachable 검증. fail → retention batch 정책 재검토 + DEC-007 supersede 검토.
 
 ## Rotations / On-call
 
@@ -182,4 +267,5 @@ P0-M1 INFRA-1A.2 slice에 SQLite 백업 commit, INFRA-1A.3 slice에 R2 버킷
 | 날짜 | 변경 | By |
 |---|---|---|
 | 2026-05-11 | Initial runbook scaffold (대부분 TBD, P0-M1 진입 직전) | user / Claude |
+| 2026-05-12 | Data Operations 섹션 전면 업데이트 — backup schedule (Neo4j 30d / SQLite 90d / JSONL audit monthly), R2 lifecycle rules (expire 3 + transition 6), retention batch jobs (daily/weekly/monthly), RETENTION_PROTECTED_KINDS 상수, soft-delete 2단계 패턴, 복구 절차, 연간 retention drill (INFRA-1A.8 / DEC-007 / AC-032) | Claude |
 | 2026-05-11 | Publishing Site Deployment 섹션 추가 (ADR-0022 + DEC-006 Build watch paths precondition) + Roll Back 섹션 publishing 우선 명시 (자체 사이트 + data backup) | user / Claude |
