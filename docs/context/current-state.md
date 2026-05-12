@@ -34,7 +34,7 @@ ADR-0011~0021로 supersede됐다.
   access_interventions)
 - active phase: `INFRA-1A` (ADR scaffold + 9-stage 글로서리 + Round 25
   canonical 확정)
-- active slice: **`INFRA-1A.8` in_progress** — Backup runbook docs-only (AC-032).
+- active slice: **`INFRA-1A.8` landed** (PR #10 merged 2026-05-12) — Backup runbook docs-only (AC-032). Next: INFRA-1B.1 (Q-021 open — 사용자 결정 필요).
   `INFRA-1A.7` landed (PR #9 merged 2026-05-12): Scenario/Thesis/Source bidirectional
   schema fields + enum validators + indexes (AC-026, AC-027).
   `INFRA-1A.5` landed (PR #8 merged 2026-05-12): text normalization + sha256 + enum validators.
