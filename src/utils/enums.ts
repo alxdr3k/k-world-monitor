@@ -127,3 +127,41 @@ export type InterventionSeverity = (typeof INTERVENTION_SEVERITY)[number];
 export function isInterventionSeverity(v: unknown): v is InterventionSeverity {
   return typeof v === "string" && (INTERVENTION_SEVERITY as readonly string[]).includes(v);
 }
+
+// ---------------------------------------------------------------------------
+// Thesis bidirectional stance enums (ADR-0019, AC-026)
+// ---------------------------------------------------------------------------
+export const THESIS_STANCE = [
+  "constructive",
+  "cautionary",
+  "neutral",
+  "mixed",
+  "asymmetric",
+  "exploratory",
+] as const;
+export type ThesisStance = (typeof THESIS_STANCE)[number];
+export function isThesisStance(v: unknown): v is ThesisStance {
+  return typeof v === "string" && (THESIS_STANCE as readonly string[]).includes(v);
+}
+
+export const THESIS_MARKET_STANCE = [
+  "bullish",
+  "bearish",
+  "range_bound",
+  "volatility_up",
+  "volatility_down",
+  "neutral",
+] as const;
+export type ThesisMarketStance = (typeof THESIS_MARKET_STANCE)[number];
+export function isThesisMarketStance(v: unknown): v is ThesisMarketStance {
+  return typeof v === "string" && (THESIS_MARKET_STANCE as readonly string[]).includes(v);
+}
+
+// ---------------------------------------------------------------------------
+// Source bidirectional perspective enum (ADR-0019, AC-027)
+// ---------------------------------------------------------------------------
+export const SOURCE_PERSPECTIVE = ["risk", "opportunity", "neutral", "mixed"] as const;
+export type SourcePerspective = (typeof SOURCE_PERSPECTIVE)[number];
+export function isSourcePerspective(v: unknown): v is SourcePerspective {
+  return typeof v === "string" && (SOURCE_PERSPECTIVE as readonly string[]).includes(v);
+}

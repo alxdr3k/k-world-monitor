@@ -34,8 +34,10 @@ ADR-0011~0021로 supersede됐다.
   access_interventions)
 - active phase: `INFRA-1A` (ADR scaffold + 9-stage 글로서리 + Round 25
   canonical 확정)
-- active slice: **`INFRA-1A.5` in_progress** — text normalization + sha256
-  helper + enum validators + SQLite v2 trigger migration (AC-007).
+- active slice: **`INFRA-1A.7` in_progress** — Scenario/Thesis/Source bidirectional
+  schema fields (impact_targets, impact_direction_by_target, transmission_channels,
+  stance, market_stance, source_perspective) + enum validators + indexes (AC-026, AC-027).
+  `INFRA-1A.5` landed (PR #8 merged 2026-05-12): text normalization + sha256 + enum validators.
   `INFRA-1A.4` landed (PR #5 merged 2026-05-12): frontmatter relation array lint.
 - last accepted gate: none yet
 - next gate: `AC-001` (도메인 객체 9-stage 모델 + 4-tier source layer + Neo4j
@@ -65,12 +67,18 @@ ADR-0011~0021로 supersede됐다.
 ### 코드 (INFRA-1A.4 landed — PR #5)
 - `tests/lint/no_frontmatter_relation_array_test.ts` — 9 tests (TEST-008/AC-008) ✓
 
-### 코드 (INFRA-1A.5 in_progress)
+### 코드 (INFRA-1A.5 landed — PR #8)
 - `src/utils/text.ts` — normalizeText(), truncateCodePoints(), isWithinLimit() ✓
 - `src/utils/hash.ts` — sha256Hex(), sha256Prefix() ✓
 - `src/utils/enums.ts` — RunStatus/RunStage/LlmVendor/QuoteReason/ArchivePolicy + 8 validators ✓
 - `migrations/sqlite/v2_enum_constraints.sql` — enum-validating triggers (run_ledger, cross_vendor_review_ledger) ✓
 - `tests/unit/text_hash_test.ts` — 49 tests ✓
+
+### 코드 (INFRA-1A.7 in_progress)
+- `migrations/neo4j/v1_schema.cypher` — Scenario property schema extended (impact_targets, impact_direction_by_target, transmission_channels); thesis_stance_idx + source_perspective_idx added ✓
+- `src/utils/enums.ts` — THESIS_STANCE (6), THESIS_MARKET_STANCE (6), SOURCE_PERSPECTIVE (4) + validators ✓
+- `src/domain/nodes.ts` — SourceNode, ScenarioNode, ThesisNode TypeScript interfaces ✓
+- `tests/unit/bidirectional_schema_test.ts` — 27 tests (AC-026, AC-027) ✓
 
 ### 문서 기반 architecture 합의
 - ADR 0001~0010 (boilerplate placeholder 1개 + 0002 invariant tracking +

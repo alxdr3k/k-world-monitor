@@ -106,6 +106,8 @@ CREATE INDEX claim_created_at_idx IF NOT EXISTS FOR (n:Claim) ON (n.created_at);
 
 CREATE INDEX scenario_created_at_idx IF NOT EXISTS FOR (n:Scenario) ON (n.created_at);
 CREATE INDEX thesis_created_at_idx IF NOT EXISTS FOR (n:Thesis) ON (n.created_at);
+CREATE INDEX thesis_stance_idx IF NOT EXISTS FOR (n:Thesis) ON (n.stance);
+CREATE INDEX source_perspective_idx IF NOT EXISTS FOR (n:Source) ON (n.source_perspective);
 
 CREATE INDEX access_intervention_status_idx IF NOT EXISTS FOR (n:AccessIntervention) ON (n.status);
 CREATE INDEX access_intervention_severity_idx IF NOT EXISTS FOR (n:AccessIntervention) ON (n.severity);
@@ -232,16 +234,19 @@ OPTIONS {
 // }
 
 // Scenario {
-//   scenario_id: string,          // `scn_<ULID>`
+//   scenario_id: string,                      // `scn_<ULID>`
 //   title: string,
 //   summary: string,
-//   assumptions_json: string,     // JSON array (ADR-0009)
-//   branches_json: string,        // JSON array
+//   assumptions_json: string,                 // JSON array (ADR-0009)
+//   branches_json: string,                    // JSON array
 //   falsifiers_json: string,
 //   counterclaims_json: string,
 //   monitoring_signals_json: string,
-//   horizon: string,              // Q-001 (open: enum TBD)
+//   horizon: string,                          // Q-001 (open: enum TBD)
 //   meta_category: string,
+//   impact_targets: string,                   // JSON array of target labels (ADR-0019 AC-026)
+//   impact_direction_by_target: string,       // JSON dict target→direction (AC-026)
+//   transmission_channels: string,            // JSON array of channel labels (AC-026)
 //   created_at: datetime
 // }
 
