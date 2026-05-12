@@ -31,6 +31,10 @@
 | Path | Purpose |
 |---|---|
 | `src/domain/ids.ts` | ID prefix constants + `validateIdPrefix()` (AC-005) |
+| `src/domain/nodes.ts` | TypeScript interfaces: SourceNode, ScenarioNode, ThesisNode (INFRA-1A.7) |
+| `src/utils/text.ts` | `normalizeText()` / `truncateCodePoints()` / `isWithinLimit()` (AC-007) |
+| `src/utils/hash.ts` | `sha256Hex()` / `sha256Prefix()` (ADR-0025, AC-007) |
+| `src/utils/enums.ts` | All domain enum const arrays + `is*()` validators (INFRA-1A.5/1A.7) |
 | `src/storage/neo4j/connection.ts` | Neo4j driver singleton + `withSession()` |
 | `src/storage/sqlite/connection.ts` | SQLite DB singleton + migration helper |
 
@@ -39,6 +43,9 @@
 | Path | Purpose | TEST id |
 |---|---|---|
 | `tests/lint/id_prefix_test.ts` | ID prefix validation for all domain types | TEST-005 |
+| `tests/lint/no_frontmatter_relation_array_test.ts` | Frontmatter relation array lint (TEST-008/AC-008) | TEST-008 |
+| `tests/unit/text_hash_test.ts` | normalizeText / sha256 / enum validator tests (AC-007) | — |
+| `tests/unit/bidirectional_schema_test.ts` | Thesis stance / source perspective enum + AC-027 distribution (AC-026, AC-027) | — |
 | `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
 
 ## Scripts
