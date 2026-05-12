@@ -373,7 +373,7 @@ function markQueueItemDone(queueId: string, snapId: string, contentHash: string)
     .prepare(
       `UPDATE discovery_queue
        SET status = 'done', content_hash = ?, error_detail = ?${u}
-       WHERE queue_id = ?`
+       WHERE queue_id = ? AND status = 'processing'`
     )
     .run(contentHash, `snap_id:${snapId}`, queueId);
 }
@@ -386,7 +386,7 @@ function markQueueItemError(queueId: string, detail: string): void {
     .prepare(
       `UPDATE discovery_queue
        SET status = 'error', error_detail = ?${u}
-       WHERE queue_id = ?`
+       WHERE queue_id = ? AND status = 'processing'`
     )
     .run(detail.slice(0, 500), queueId);
 }
@@ -523,7 +523,9 @@ export async function processDiscoveryQueue(
   // P2-10: Reset stale processing rows from crashed workers (older than 1 hour).
   // Uses updated_at column (added in v7 migration). Gracefully skips on pre-v7 schemas.
   try {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, "Z");
     db.prepare(
       `UPDATE discovery_queue
        SET status = 'pending', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
