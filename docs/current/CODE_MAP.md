@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: 23eed29 (2026-05-12) — INFRA-1A.3 R2 policy + client
+> Last verified against code: TBD — INFRA-1B.1 source registry bootstrap
 
 ## Runtime stack
 
@@ -39,6 +39,7 @@
 | `src/storage/sqlite/connection.ts` | SQLite DB singleton + migration helper |
 | `src/storage/r2/policy.ts` | PERMITTED_PREFIXES + `checkPermittedPrefix()` + sha256 helpers (ADR-0012 INV-0012-4, INFRA-1A.3) |
 | `src/storage/r2/client.ts` | Bun.S3Client wrapper — `r2Put/r2Get/r2Delete` with policy enforcement (INFRA-1A.3) |
+| `src/storage/source-registry/seed.ts` | Parse `data/sources_seed.yaml`, validate enums, upsert `source_material_policy` rows (INFRA-1B.1) |
 
 ## Tests
 
@@ -50,6 +51,7 @@
 | `tests/unit/bidirectional_schema_test.ts` | Thesis stance / source perspective enum + AC-027 distribution (AC-026, AC-027) | — |
 | `tests/unit/perspective_distribution_test.ts` | AC-027 Tier A seed distribution lint — reads data/sources_seed.yaml (AC-027, REQ-022) | TEST-027 |
 | `tests/unit/r2_policy_test.ts` | R2 permitted-prefix + sha256 round-trip integrity (AC-003, AC-020, AC-032) | — |
+| `tests/unit/source_registry_test.ts` | Source registry seed dry-run + enum validation + YAML structure (INFRA-1B.1) | — |
 | `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
 
 ## Scripts
@@ -59,6 +61,7 @@
 | `scripts/validate_invariants.ts` | ADR-0002 invariant checker (warning-level, exit 0) |
 | `scripts/migrate.ts` | Applies Neo4j + SQLite migrations |
 | `scripts/check-doc-governance.rb` | Doc governance lint (Ruby) |
+| `scripts/seed-sources.ts` | Seed `source_material_policy` from `data/sources_seed.yaml` (`--dry-run` flag, INFRA-1B.1) |
 
 ## Config / Data
 
@@ -68,7 +71,7 @@
 | `package.json` | bun scripts + dependencies |
 | `tsconfig.json` | TypeScript compiler options |
 
-## Planned (INFRA-1B.1+)
+## Planned (INFRA-1B.2+)
 
 | Path | Purpose |
 |---|---|

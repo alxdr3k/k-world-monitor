@@ -34,7 +34,8 @@ ADR-0011~0021로 supersede됐다.
   access_interventions)
 - active phase: `INFRA-1A` (ADR scaffold + 9-stage 글로서리 + Round 25
   canonical 확정)
-- active slice: **`INFRA-1A.3` in_progress** — R2 permitted-artifact prefix policy + raw_cloud_policy=always_prohibited enforcement + sha256 round-trip tests. PR pending.
+- active slice: **`INFRA-1B.1` in_progress** — Source Registry Bootstrap: seed 72 sources from data/sources_seed.yaml into SQLite source_material_policy. PR pending.
+  `INFRA-1A.3` landed (PR #14 merged 2026-05-12): R2 permitted-artifact prefix policy + sha256 round-trip tests.
   `INFRA-1A.6` landed (PR #12 merged 2026-05-12): Tier A source seed 72 sources + TEST-027.
   `INFRA-1A.8` landed (PR #10 merged 2026-05-12): Backup runbook docs-only (AC-032).
   `INFRA-1A.7` landed (PR #9 merged 2026-05-12): Scenario/Thesis/Source bidirectional
