@@ -5,7 +5,7 @@
 //   Phase 2 — write: serial SQLite upserts, no network I/O inside transactions.
 
 import { runWithPool } from "./pool";
-import { recordFetchOutcome, getEligibleSources, type FetchOutcome } from "./crawl-state";
+import { recordFetchOutcome, type FetchOutcome } from "./crawl-state";
 import { safeFetch, MAX_BYTES, type SafeFetchOptions } from "../fetch/safe-fetch";
 
 // AbortSignal.timeout() accepts values up to 2^31-1 ms (i32 max) on most
