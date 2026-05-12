@@ -195,15 +195,15 @@ async function main(): Promise<void> {
         continue;
       }
 
-      // Respect the daily cap: pass only as many items as remain in the budget.
+      // Respect the daily cap: pass maxInsert budget to enqueue so later non-duplicate
+      // items in the same feed are still attempted even when early items are dupes.
+      // (Pre-slicing would miss valid items if the first N entries all conflict.)
       const remaining = DAILY_CANDIDATE_CAP - totalInserted;
-      const itemsToEnqueue = remaining < items.length ? items.slice(0, remaining) : items;
-      const { inserted, skipped } = enqueueDiscoveredItems(source_id, itemsToEnqueue);
-      const dropped = items.length - itemsToEnqueue.length;
+      const { inserted, skipped } = enqueueDiscoveredItems(source_id, items, remaining);
       totalInserted += inserted;
       totalSkipped += skipped;
       console.log(
-        `  [ok] ${source_id}: ${items.length} items → +${inserted} queued, ${skipped} dupes${dropped > 0 ? `, ${dropped} cap-dropped` : ""}`
+        `  [ok] ${source_id}: ${items.length} items → +${inserted} queued, ${skipped} dupes`
       );
       // Record ok only after successful parse + enqueue so parse/empty-feed
       // errors can record "error" without the prior HTTP-ok write resetting

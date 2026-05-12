@@ -78,6 +78,17 @@ function normalizeItems(raw: unknown[], format: "rss" | "atom"): FeedItem[] {
 
     if (format === "rss") {
       url = str(getLocal(entry, "link"));
+      // Fallback: use <guid isPermaLink="true"> when <link> is absent.
+      // isValidHttpUrl() will reject non-URL guids (urn:uuid:...) downstream.
+      if (!url) {
+        const guidVal = getLocal(entry, "guid");
+        if (typeof guidVal === "string") {
+          url = guidVal;
+        } else if (typeof guidVal === "object" && guidVal !== null) {
+          const g = guidVal as Record<string, unknown>;
+          if (g["@isPermaLink"] !== "false") url = str(g["#text"]);
+        }
+      }
       title = str(getLocal(entry, "title"));
       publishedAt = parseDate(str(getLocal(entry, "pubDate")));
     } else {
@@ -145,10 +156,14 @@ export function parseRssFeed(xmlBody: string): FeedItem[] {
 
 // Enqueue discovered items into discovery_queue (INV-0030-2: serial write, no network I/O).
 // Skips duplicates via the unique index (source_id, url) WHERE status IN pending/processing.
+// maxInsert: if provided, stop after this many successful insertions (DEC-013 daily cap).
+// Passing all items with a budget limit (rather than pre-slicing) ensures non-duplicate
+// items later in the feed are still attempted even when early items are duplicates.
 // Returns counts of inserted and skipped rows.
 export function enqueueDiscoveredItems(
   sourceId: string,
-  items: FeedItem[]
+  items: FeedItem[],
+  maxInsert?: number
 ): EnqueueResult {
   if (items.length === 0) return { sourceId, inserted: 0, skipped: 0 };
 
@@ -167,6 +182,7 @@ export function enqueueDiscoveredItems(
   // Batch inside a transaction for atomicity and performance (INV-0030-2).
   const insertAll = db.transaction(() => {
     for (const item of items) {
+      if (maxInsert !== undefined && inserted >= maxInsert) break;
       // queue_id: ULID per row — deduplication is handled by the partial unique
       // index (source_id, url) WHERE status IN ('pending','processing'), so
       // re-queueing a done/error URL gets a fresh row without PK conflict.
