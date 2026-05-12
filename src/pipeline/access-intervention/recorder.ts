@@ -48,7 +48,7 @@ export async function recordIntervention(
     : 0;
   const severity = computeSeverity({
     gateMode: input.gateMode,
-    importanceScore: input.importanceScore,
+    importanceScore,
     relatedAssumptionIds: input.relatedAssumptionIds,
   });
   const now = new Date().toISOString();
