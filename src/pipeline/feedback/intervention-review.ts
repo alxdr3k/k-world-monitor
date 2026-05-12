@@ -44,9 +44,10 @@ async function resolveIntervention(
              ELSE i.importance_score + $adjust
            END`
         : "i.status = $status, i.resolved_at = $resolvedAt";
-    await session.run(
+    const result = await session.run(
       `MATCH (i:AccessIntervention {intervention_id: $interventionId})
-       SET ${setClause}`,
+       SET ${setClause}
+       RETURN count(i) AS matched`,
       {
         interventionId,
         status,
@@ -54,6 +55,12 @@ async function resolveIntervention(
         ...(importanceAdjust !== undefined ? { adjust: importanceAdjust } : {}),
       }
     );
+    const matched = Number(result.records[0]?.get("matched") ?? 0);
+    if (matched === 0) {
+      throw new Error(
+        `resolveIntervention: AccessIntervention not found for id='${interventionId}'.`
+      );
+    }
   });
 }
 

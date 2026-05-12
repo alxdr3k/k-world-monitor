@@ -3,7 +3,8 @@
 //   - 3-way field separation: exactly one of user_written_claim / user_opinion / referenced_quote.
 //   - referenced_quote requires quote_reason + attribution_json.
 //   - raw_text_stored=false always (INV-0018-3, ADR-0012 INV-0012-3).
-//   - Stored in Neo4j (ADR-0012 INV-0012-1).
+//   - Stored in Neo4j (ADR-0012 INV-0012-1); :RESOLVES edge created when interventionId is set.
+//   - selfAssessedConfidence validated [0,1] and sourceAccessedVia validated for all paths.
 //
 // ID: mcl_<ULID> (ID_PREFIXES.ManualClaimEntry).
 
@@ -66,25 +67,46 @@ export class ManualClaimValidationError extends Error {
   }
 }
 
+// A field is "set" only when it is a non-empty string. Empty strings ("") are
+// treated as absent so callers cannot circumvent the exactly-one invariant by
+// passing an empty value alongside a populated one.
+function isSet(v: string | undefined): boolean {
+  return typeof v === "string" && v.length > 0;
+}
+
 function validateInput(input: ManualClaimInput): ClaimKind {
-  const filled = [
+  const setCount = [
     input.userWrittenClaim,
     input.userOpinion,
     input.referencedQuote,
-  ].filter(Boolean);
+  ].filter(isSet).length;
 
-  if (filled.length === 0) {
+  if (setCount === 0) {
     throw new ManualClaimValidationError(
       "Exactly one of userWrittenClaim / userOpinion / referencedQuote must be provided (got none)."
     );
   }
-  if (filled.length > 1) {
+  if (setCount > 1) {
     throw new ManualClaimValidationError(
-      `Exactly one of userWrittenClaim / userOpinion / referencedQuote must be provided (got ${filled.length}).`
+      `Exactly one of userWrittenClaim / userOpinion / referencedQuote must be provided (got ${setCount}).`
     );
   }
 
-  if (input.referencedQuote) {
+  // Validate sourceAccessedVia and selfAssessedConfidence for ALL paths (INV-0018-6).
+  if (!isSourceAccessedVia(input.sourceAccessedVia)) {
+    throw new ManualClaimValidationError(
+      `Invalid sourceAccessedVia: '${input.sourceAccessedVia}'.`
+    );
+  }
+
+  const confidence = input.selfAssessedConfidence;
+  if (typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    throw new ManualClaimValidationError(
+      "selfAssessedConfidence must be a finite number in [0, 1]."
+    );
+  }
+
+  if (isSet(input.referencedQuote)) {
     if (!input.quoteReason || !isQuoteReason(input.quoteReason)) {
       throw new ManualClaimValidationError(
         "quoteReason is required when referencedQuote is set (INV-0018-2)."
@@ -98,20 +120,7 @@ function validateInput(input: ManualClaimInput): ClaimKind {
     return "referenced_quote";
   }
 
-  if (!isSourceAccessedVia(input.sourceAccessedVia)) {
-    throw new ManualClaimValidationError(
-      `Invalid sourceAccessedVia: '${input.sourceAccessedVia}'.`
-    );
-  }
-
-  const confidence = input.selfAssessedConfidence;
-  if (typeof confidence !== "number" || confidence < 0 || confidence > 1) {
-    throw new ManualClaimValidationError(
-      "selfAssessedConfidence must be a number in [0, 1]."
-    );
-  }
-
-  return input.userWrittenClaim ? "user_written_claim" : "user_opinion";
+  return isSet(input.userWrittenClaim) ? "user_written_claim" : "user_opinion";
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +136,7 @@ export async function createManualClaimEntry(
 
   await withSession(async (session) => {
     const tx = session.beginTransaction();
+    let commitAttempted = false;
     try {
       await tx.run(
         `CREATE (m:ManualClaimEntry {
@@ -175,9 +185,24 @@ export async function createManualClaimEntry(
         }
       );
 
+      // Create :RESOLVES edge when this entry resolves an AccessIntervention (ADR-0018).
+      if (input.interventionId) {
+        await tx.run(
+          `MATCH (m:ManualClaimEntry {manual_claim_id: $manualClaimId})
+           MATCH (i:AccessIntervention {intervention_id: $interventionId})
+           CREATE (m)-[:RESOLVES]->(i)`,
+          { manualClaimId, interventionId: input.interventionId }
+        );
+      }
+
+      commitAttempted = true;
       await tx.commit();
     } catch (err) {
-      await tx.rollback();
+      // Do not attempt rollback after commit() has been called; Neo4j disallows it
+      // and a secondary error would mask the original.
+      if (!commitAttempted) {
+        await tx.rollback();
+      }
       throw err;
     }
   });

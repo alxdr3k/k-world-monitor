@@ -18,22 +18,24 @@ let neo4jShouldThrow = false;
 
 mock.module("../../src/storage/neo4j/connection", () => ({
   withSession: async <T>(fn: (session: unknown) => Promise<T>): Promise<T> => {
+    // Returns matched=1 for existence-check queries (RETURN count(i) AS matched)
+    // so the node-exists guard in resolveIntervention passes in unit tests.
+    const mockRun = async (query: string, params: Record<string, unknown>) => {
+      if (neo4jShouldThrow) throw new Error("Neo4j error");
+      neo4jRuns.push({ query, params });
+      if (query.includes("RETURN count(i) AS matched")) {
+        return { records: [{ get: (_k: string) => 1 }] };
+      }
+      return { records: [] };
+    };
     const tx = {
-      run: async (query: string, params: Record<string, unknown>) => {
-        if (neo4jShouldThrow) throw new Error("Neo4j error");
-        neo4jRuns.push({ query, params });
-        return { records: [] };
-      },
+      run: mockRun,
       commit: async () => {},
       rollback: async () => {},
     };
     const session = {
       beginTransaction: () => tx,
-      run: async (query: string, params: Record<string, unknown>) => {
-        if (neo4jShouldThrow) throw new Error("Neo4j error");
-        neo4jRuns.push({ query, params });
-        return { records: [] };
-      },
+      run: mockRun,
     };
     return fn(session);
   },
@@ -151,6 +153,33 @@ describe("createManualClaimEntry — 3-way validation (INV-0018-1)", () => {
     };
     await expect(createManualClaimEntry(input)).rejects.toThrow("attribution.url is required");
   });
+
+  it("rejects empty string as a set field (INV-0018-1 — empty string bypass)", async () => {
+    // Empty string must not count as "set"; this would previously pass filter(Boolean)
+    // and leave the non-empty field as the only one, but empty string paired with another
+    // set field must still be caught as multiple or rejected as none.
+    const inputNone = { ...baseInput(), userWrittenClaim: "" };
+    await expect(createManualClaimEntry(inputNone)).rejects.toThrow(ManualClaimValidationError);
+    await expect(createManualClaimEntry(inputNone)).rejects.toThrow("Exactly one");
+  });
+
+  it("rejects invalid selfAssessedConfidence on referenced_quote path (INV-0018-6)", async () => {
+    const input: ManualClaimInput = {
+      ...baseInput(),
+      userWrittenClaim: undefined,
+      referencedQuote: "Some quote",
+      quoteReason: "exact_wording_matters",
+      attribution: { url: "https://example.com" },
+      selfAssessedConfidence: -0.5,  // invalid
+    };
+    await expect(createManualClaimEntry(input)).rejects.toThrow(ManualClaimValidationError);
+    await expect(createManualClaimEntry(input)).rejects.toThrow("selfAssessedConfidence");
+  });
+
+  it("rejects NaN selfAssessedConfidence (INV-0018-6)", async () => {
+    const input = { ...baseInput(), selfAssessedConfidence: NaN };
+    await expect(createManualClaimEntry(input)).rejects.toThrow("selfAssessedConfidence");
+  });
 });
 
 describe("createManualClaimEntry — Neo4j write", () => {
@@ -185,6 +214,20 @@ describe("createManualClaimEntry — Neo4j write", () => {
   it("propagates Neo4j error and rolls back", async () => {
     neo4jShouldThrow = true;
     await expect(createManualClaimEntry(baseInput())).rejects.toThrow("Neo4j error");
+  });
+
+  it("creates :RESOLVES edge when interventionId is provided (ADR-0018)", async () => {
+    const input = { ...baseInput(), interventionId: "aci_LINK001" };
+    await createManualClaimEntry(input);
+    const resolveQ = neo4jRuns.find((r) => r.query.includes("[:RESOLVES]->"));
+    expect(resolveQ).toBeTruthy();
+    expect(resolveQ!.params["interventionId"]).toBe("aci_LINK001");
+  });
+
+  it("does NOT create :RESOLVES edge when interventionId is absent", async () => {
+    await createManualClaimEntry(baseInput()); // no interventionId
+    const resolveQ = neo4jRuns.find((r) => r.query.includes("[:RESOLVES]->"));
+    expect(resolveQ).toBeUndefined();
   });
 });
 
