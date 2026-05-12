@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: 80a19ef (2026-05-12) — INFRA-1B.1 source registry bootstrap
+> Last verified against code: eee35ce (2026-05-12) — INFRA-1B.1 source registry bootstrap
 
 ## Runtime stack
 
