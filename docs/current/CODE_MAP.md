@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: f598aa6 (2026-05-12) — INFRA-1B.1 source registry bootstrap + INFRA-1B.1.x hotfix
+> Last verified against code: f436e7a (2026-05-12) — INFRA-1B.1.x review-8 P2 fixes (scheme allowlist, field guard, NaN guard)
 
 ## Runtime stack
 
