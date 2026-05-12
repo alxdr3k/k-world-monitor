@@ -165,7 +165,7 @@ function baseInput(): InterventionInput {
     url: "https://example.com/blocked",
     sourceName: "Example Source",
     attemptedAction: "fetch_full_text",
-    accessResult: "403_forbidden",
+    accessResult: "blocked",
     gateMode: "inline_block",
     policyResult: "manual_only",
     importanceScore: 0.8,
@@ -219,6 +219,32 @@ describe("recordIntervention", () => {
     expect(createQ.params["scenarioId"]).toBeNull();
     expect(createQ.params["thesisId"]).toBeNull();
     expect(createQ.params["relatedQuery"]).toBeNull();
+  });
+
+  it("clamps out-of-range importanceScore to [0,1] before persistence (P2)", async () => {
+    // The stored value must match the severity computation domain.
+    // Out-of-range raw inputs must not reach the DB.
+    neo4jRuns.length = 0;
+    await recordIntervention({ ...baseInput(), importanceScore: 2.5 });
+    const createQ = neo4jRuns.find((r) => r.query.includes("CREATE (i:AccessIntervention"))!;
+    expect(createQ.params["importanceScore"]).toBe(1);
+
+    neo4jRuns.length = 0;
+    await recordIntervention({ ...baseInput(), importanceScore: -0.5 });
+    const createQ2 = neo4jRuns.find((r) => r.query.includes("CREATE (i:AccessIntervention"))!;
+    expect(createQ2.params["importanceScore"]).toBe(0);
+  });
+
+  it("stores 0 for non-finite importanceScore (NaN/Infinity) before persistence (P2)", async () => {
+    neo4jRuns.length = 0;
+    await recordIntervention({ ...baseInput(), importanceScore: NaN });
+    const createQ = neo4jRuns.find((r) => r.query.includes("CREATE (i:AccessIntervention"))!;
+    expect(createQ.params["importanceScore"]).toBe(0);
+
+    neo4jRuns.length = 0;
+    await recordIntervention({ ...baseInput(), importanceScore: Infinity });
+    const createQ2 = neo4jRuns.find((r) => r.query.includes("CREATE (i:AccessIntervention"))!;
+    expect(createQ2.params["importanceScore"]).toBe(0);
   });
 });
 

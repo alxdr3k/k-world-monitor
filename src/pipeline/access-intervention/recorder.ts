@@ -8,6 +8,7 @@
 import { ulid } from "ulid";
 import { withSession } from "../../storage/neo4j/connection";
 import { computeSeverity, type GateMode, type PolicyResult, type Severity } from "./severity";
+import { type AccessResult } from "../../utils/enums";
 
 export interface InterventionInput {
   sessionId: string;
@@ -15,7 +16,7 @@ export interface InterventionInput {
   url: string;
   sourceName: string;
   attemptedAction: string;
-  accessResult: string;
+  accessResult: AccessResult;
   /** Gate mode: determines severity and inline vs batch disposition. */
   gateMode: GateMode;
   /** Canonical policy outcome for this source (manual_only | metadata_only | excluded). */
@@ -39,6 +40,12 @@ export async function recordIntervention(
   input: InterventionInput
 ): Promise<InterventionRecord> {
   const interventionId = `aci_${ulid()}`;
+  // Clamp importanceScore to [0, 1] before persistence so the stored value
+  // is consistent with the severity computation (computeSeverity also clamps).
+  // Non-finite values (NaN, ±Infinity) are stored as 0 to avoid invalid DB data.
+  const importanceScore = Number.isFinite(input.importanceScore)
+    ? Math.max(0, Math.min(1, input.importanceScore))
+    : 0;
   const severity = computeSeverity({
     gateMode: input.gateMode,
     importanceScore: input.importanceScore,
@@ -86,7 +93,7 @@ export async function recordIntervention(
           policyResult: input.policyResult,
           relatedQuery: input.relatedQuery ?? null,
           whyItMatters: input.whyItMatters ?? null,
-          importanceScore: input.importanceScore,
+          importanceScore,
           severity,
           fallbackUsedJson: input.fallbackUsed ? JSON.stringify(input.fallbackUsed) : null,
           requestedUserAction: input.requestedUserAction ?? null,
