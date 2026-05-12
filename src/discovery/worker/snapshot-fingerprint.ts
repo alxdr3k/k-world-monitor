@@ -320,6 +320,8 @@ export async function createSnapshotFingerprint(
   const actualDocId = await createDocumentAndSnapshot(input, snapId, docId, contentHash);
 
   // R2 upload: only for explicitly permitted artifacts (ADR-0012 INV-0012-3/4).
+  // P2-9 addendum: After Neo4j write, upload to R2 and then back-patch the
+  // Snapshot node's r2_key so the stored graph reflects the actual R2 locator.
   let r2Key: string | null = null;
   if (
     input.archivePolicy === "full_snapshot_allowed" &&
@@ -332,6 +334,13 @@ export async function createSnapshotFingerprint(
     ) as ArrayBuffer;
     await r2Put(key, bodyBuf);
     r2Key = key;
+    // Back-patch r2_key on the Snapshot node now that upload succeeded.
+    await withSession(async (session) => {
+      await session.run(
+        `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
+        { snapId, r2Key: key }
+      );
+    });
   }
 
   markQueueItemDone(input.queueId, snapId, contentHash);
@@ -410,8 +419,8 @@ export async function processDiscoveryQueue(
       // P1-2: Use MAX_BYTES.html for document URLs — larger cap than rss (10MB vs 5MB).
       const res = await safeFetch(row.url, { maxBytes: MAX_BYTES.html });
 
-      // P2-12: Require 2xx; treat 204, 3xx, 4xx, 5xx as errors.
-      if (!(res.status >= 200 && res.status < 300)) {
+      // P2-12: Require 2xx with body; treat 204 (no body), 3xx, 4xx, 5xx as errors.
+      if (!(res.status >= 200 && res.status < 300) || res.status === 204) {
         markQueueItemError(row.queue_id, `HTTP ${res.status}`);
         errors++;
         continue;

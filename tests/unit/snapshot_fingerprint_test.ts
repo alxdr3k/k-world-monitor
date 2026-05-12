@@ -173,6 +173,21 @@ describe("createSnapshotFingerprint — new snapshot", () => {
     expect(r2Puts[0]!.key).toMatch(/^permitted_artifact\/derived\/snapshot\/snap_/);
   });
 
+  it("back-patches Snapshot r2_key in Neo4j after successful R2 upload", async () => {
+    const db = setupDb();
+    const queueId = "dq_test002b";
+    seedQueue(db, queueId);
+
+    const result = await createSnapshotFingerprint(baseInput(queueId));
+
+    // A SET r2_key query must have been issued after the R2 upload.
+    const r2KeyUpdate = neo4jRuns.find(
+      (r) => r.query.includes("SET s.r2_key") && r.params["r2Key"] === result.r2Key
+    );
+    expect(r2KeyUpdate).toBeDefined();
+    expect(r2KeyUpdate?.params["snapId"]).toBe(result.snapId);
+  });
+
   it("does NOT write to R2 when archivePolicy=metadata_only", async () => {
     const db = setupDb();
     const queueId = "dq_test003";
