@@ -90,6 +90,11 @@ FOR (n:ManualClaimEntry) REQUIRE n.manual_claim_id IS UNIQUE;
 CREATE CONSTRAINT chunk_unique IF NOT EXISTS
 FOR (n:Chunk) REQUIRE n.chunk_id IS UNIQUE;
 
+// Composite uniqueness: one Chunk per (snap_id, chunk_index) — enables idempotent
+// MERGE-based upserts so re-runs don't produce duplicate Chunk nodes (INFRA-1B.4).
+CREATE CONSTRAINT chunk_snap_index_unique IF NOT EXISTS
+FOR (n:Chunk) REQUIRE (n.snap_id, n.chunk_index) IS UNIQUE;
+
 // --- Node property existence constraints ------------------------------------
 // Enforce required fields at DB level for core entities.
 

@@ -11,6 +11,8 @@ import { describe, it, expect, mock } from "bun:test";
 
 const neo4jRuns: Array<{ query: string; params: Record<string, unknown> }> = [];
 let neo4jShouldThrow = false;
+// When true, the Snapshot guard query returns 0 rows (simulates missing Snapshot).
+let neo4jSnapshotMissing = false;
 
 mock.module("../../src/storage/neo4j/connection", () => ({
   withSession: async <T>(fn: (session: unknown) => Promise<T>): Promise<T> => {
@@ -18,6 +20,17 @@ mock.module("../../src/storage/neo4j/connection", () => ({
       run: async (query: string, params: Record<string, unknown>) => {
         if (neo4jShouldThrow) throw new Error("Neo4j write failed");
         neo4jRuns.push({ query, params });
+        // Guard query: MATCH (s:Snapshot ...) RETURN count(s) AS matched
+        if (query.includes("RETURN count(s) AS matched")) {
+          const matchedValue = neo4jSnapshotMissing ? 0 : 1;
+          return {
+            records: [
+              {
+                get: (key: string) => (key === "matched" ? matchedValue : null),
+              },
+            ],
+          };
+        }
         return { records: [] };
       },
       commit: async () => {},
@@ -92,6 +105,21 @@ describe("splitIntoChunks — basic splitting", () => {
     // Words should be present
     expect(chunks[0]!.text).toContain("word1");
     expect(chunks[0]!.text).toContain("word4");
+    // charStart/charEnd must round-trip against the ORIGINAL text (not trimmed).
+    const c = chunks[0]!;
+    expect(text.slice(c.charStart, c.charEnd)).toBe(c.text);
+  });
+
+  it("charStart is correct when text has leading whitespace", () => {
+    // This specifically guards against the trim()-offset bug:
+    // if the implementation trims first and returns offsets into the trimmed
+    // string, text.slice(charStart, charEnd) would be wrong.
+    const text = "   hello world";
+    const chunks = splitIntoChunks(text);
+    expect(chunks).toHaveLength(1);
+    const c = chunks[0]!;
+    expect(c.charStart).toBe(3); // "hello" starts at index 3 in original
+    expect(text.slice(c.charStart, c.charEnd)).toBe(c.text);
   });
 
   it("produces exactly 1 chunk for text of exactly CHUNK_WORDS words", () => {
@@ -143,9 +171,9 @@ describe("chunkSnapshot", () => {
     expect(result.chunkIds).toHaveLength(1);
     expect(result.chunkIds[0]).toMatch(/^chk_/);
 
-    const createQueries = neo4jRuns.filter((r) => r.query.includes("CREATE (c:Chunk"));
+    const mergeQueries = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
     const linkQueries = neo4jRuns.filter((r) => r.query.includes("HAS_CHUNK"));
-    expect(createQueries).toHaveLength(1);
+    expect(mergeQueries).toHaveLength(1);
     expect(linkQueries).toHaveLength(1);
   });
 
@@ -159,7 +187,7 @@ describe("chunkSnapshot", () => {
     expect(result.chunkCount).toBeGreaterThanOrEqual(2);
 
     const createParams = neo4jRuns
-      .filter((r) => r.query.includes("CREATE (c:Chunk"))
+      .filter((r) => r.query.includes("MERGE (c:Chunk"))
       .map((r) => r.params);
 
     expect(createParams[0]!["snapId"]).toBe("snap_TEST003");
@@ -184,6 +212,50 @@ describe("chunkSnapshot", () => {
       ).rejects.toThrow("Neo4j write failed");
     } finally {
       neo4jShouldThrow = false;
+    }
+  });
+
+  it("throws when Snapshot node does not exist (orphan guard)", async () => {
+    neo4jRuns.length = 0;
+    neo4jSnapshotMissing = true;
+    try {
+      await expect(
+        chunkSnapshot({ snapId: "snap_NOTEXIST", text: "some text to chunk" })
+      ).rejects.toThrow("Snapshot not found: snap_NOTEXIST");
+      // Only the guard query should have been run — no Chunk CREATE.
+      const chunkCreates = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
+      expect(chunkCreates).toHaveLength(0);
+    } finally {
+      neo4jSnapshotMissing = false;
+    }
+  });
+
+  it("uses MERGE (not CREATE) for Chunk nodes to support idempotent re-runs", async () => {
+    neo4jRuns.length = 0;
+    await chunkSnapshot({
+      snapId: "snap_IDEM001",
+      text: "idempotent text check",
+    });
+    const mergeQueries = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
+    expect(mergeQueries.length).toBeGreaterThanOrEqual(1);
+    // Ensure no raw CREATE (c:Chunk …) without MERGE prefix.
+    const rawCreates = neo4jRuns.filter(
+      (r) => r.query.includes("CREATE (c:Chunk") && !r.query.includes("MERGE")
+    );
+    expect(rawCreates).toHaveLength(0);
+  });
+
+  it("uses MERGE for HAS_CHUNK relationship to avoid duplicates on re-run", async () => {
+    neo4jRuns.length = 0;
+    await chunkSnapshot({
+      snapId: "snap_IDEM002",
+      text: "some text for relationship test",
+    });
+    const relQueries = neo4jRuns.filter((r) => r.query.includes("HAS_CHUNK"));
+    expect(relQueries.length).toBeGreaterThanOrEqual(1);
+    // All HAS_CHUNK writes should use MERGE, not CREATE.
+    for (const r of relQueries) {
+      expect(r.query).toContain("MERGE (s)-[:HAS_CHUNK]->(c)");
     }
   });
 });

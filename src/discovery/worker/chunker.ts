@@ -37,11 +37,11 @@ export interface TextChunk {
 }
 
 export function splitIntoChunks(text: string): TextChunk[] {
-  const trimmed = text.trim();
-  if (!trimmed) return [];
+  if (!text.trim()) return [];
 
-  // Split on whitespace boundaries, preserving positions.
-  const wordMatches = [...trimmed.matchAll(/\S+/g)];
+  // Split on whitespace boundaries, preserving positions relative to original text.
+  // Do NOT trim — offsets must be valid indices into the original `text` string.
+  const wordMatches = [...text.matchAll(/\S+/g)];
   if (wordMatches.length === 0) return [];
 
   const chunks: TextChunk[] = [];
@@ -55,7 +55,8 @@ export function splitIntoChunks(text: string): TextChunk[] {
 
     const charStart = firstMatch.index!;
     const charEnd = lastMatch.index! + lastMatch[0].length;
-    const chunkText = trimmed.slice(charStart, charEnd);
+    // Slice from original text so charStart/charEnd round-trip correctly.
+    const chunkText = text.slice(charStart, charEnd);
 
     chunks.push({ text: chunkText, charStart, charEnd, chunkIndex });
     chunkIndex++;
@@ -78,25 +79,43 @@ async function writeChunks(
   if (chunks.length === 0) return [];
 
   const now = new Date().toISOString();
-  const chunkIds: string[] = chunks.map(() => `chk_${ulid()}`);
 
-  await withSession(async (session) => {
+  const chunkIds: string[] = await withSession(async (session) => {
     const tx = session.beginTransaction();
     try {
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i]!;
-        const chunkId = chunkIds[i]!;
+      // Guard: verify the Snapshot node exists before writing any Chunk nodes.
+      // If the snap_id is invalid, abort the transaction before creating orphans.
+      const guardResult = await tx.run(
+        `MATCH (s:Snapshot {snap_id: $snapId}) RETURN count(s) AS matched`,
+        { snapId }
+      );
+      const matched = (guardResult.records[0]?.get("matched") as number) ?? 0;
+      if (matched === 0) {
+        await tx.rollback();
+        throw new Error(`Snapshot not found: ${snapId}`);
+      }
+
+      // Idempotent upsert via MERGE on (snap_id, chunk_index) — the composite
+      // uniqueness key.  ON CREATE assigns a fresh ULID; ON MATCH updates
+      // mutable fields so a re-run refreshes text/offsets without duplicating.
+      const ids: string[] = [];
+      for (const chunk of chunks) {
+        const chunkId = `chk_${ulid()}`;
+        ids.push(chunkId);
 
         await tx.run(
-          `CREATE (c:Chunk {
-             chunk_id:    $chunkId,
-             snap_id:     $snapId,
-             chunk_index: $chunkIndex,
-             text:        $text,
-             char_start:  $charStart,
-             char_end:    $charEnd,
-             created_at:  $createdAt
-           })`,
+          `MERGE (c:Chunk {snap_id: $snapId, chunk_index: $chunkIndex})
+           ON CREATE SET
+             c.chunk_id   = $chunkId,
+             c.text       = $text,
+             c.char_start = $charStart,
+             c.char_end   = $charEnd,
+             c.created_at = $createdAt
+           ON MATCH SET
+             c.text       = $text,
+             c.char_start = $charStart,
+             c.char_end   = $charEnd
+           RETURN c.chunk_id AS resolvedId`,
           {
             chunkId,
             snapId,
@@ -108,13 +127,16 @@ async function writeChunks(
           }
         );
 
+        // Link Snapshot → Chunk (MERGE avoids duplicate relationships on re-run).
         await tx.run(
-          `MATCH (s:Snapshot {snap_id: $snapId}), (c:Chunk {chunk_id: $chunkId})
-           CREATE (s)-[:HAS_CHUNK]->(c)`,
-          { snapId, chunkId }
+          `MATCH (s:Snapshot {snap_id: $snapId}), (c:Chunk {snap_id: $snapId, chunk_index: $chunkIndex})
+           MERGE (s)-[:HAS_CHUNK]->(c)`,
+          { snapId, chunkIndex: chunk.chunkIndex }
         );
       }
+
       await tx.commit();
+      return ids;
     } catch (err) {
       await tx.rollback();
       throw err;
