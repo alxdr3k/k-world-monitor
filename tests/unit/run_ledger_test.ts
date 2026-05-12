@@ -1,0 +1,192 @@
+/**
+ * Unit tests for OPS-1A.1 run-ledger (AC-019).
+ * SQLite in-memory; no Neo4j dependency.
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+
+process.env["SQLITE_PATH"] = ":memory:";
+
+import { closeDb } from "../../src/storage/sqlite/connection";
+import {
+  startRun,
+  completeRun,
+  failRun,
+  getDailyCostUsd,
+  getDailyCostBreakdown,
+} from "../../src/ops/run-ledger";
+
+function setupDb() {
+  closeDb();
+  const { getDb } = require("../../src/storage/sqlite/connection");
+  const db = getDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version TEXT NOT NULL PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+      description TEXT
+    );
+    CREATE TABLE IF NOT EXISTS run_ledger (
+      run_id          TEXT PRIMARY KEY,
+      started_at      TEXT NOT NULL,
+      completed_at    TEXT,
+      status          TEXT NOT NULL DEFAULT 'running',
+      stage           TEXT NOT NULL,
+      vendor          TEXT NOT NULL,
+      tier            INTEGER NOT NULL,
+      model_id        TEXT NOT NULL,
+      prompt_version  TEXT,
+      system_prompt_sha256 TEXT,
+      input_tokens    INTEGER,
+      output_tokens   INTEGER,
+      cached_tokens   INTEGER,
+      total_cost_usd  REAL,
+      batch_id        TEXT,
+      cross_vendor_review_of TEXT,
+      spec_sha256     TEXT,
+      dataset_vintage_id TEXT,
+      library_version_lock_sha256 TEXT,
+      domain_override_reason TEXT,
+      session_id      TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  return db;
+}
+
+beforeEach(() => {
+  setupDb();
+});
+
+describe("startRun", () => {
+  it("returns a run_ prefixed ID", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    expect(id).toMatch(/^run_/);
+  });
+
+  it("inserts a running row", () => {
+    const id = startRun({ stage: "discover", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6" });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb().prepare("SELECT * FROM run_ledger WHERE run_id = ?").get(id) as Record<string, unknown>;
+    expect(row["status"]).toBe("running");
+    expect(row["stage"]).toBe("discover");
+    expect(row["vendor"]).toBe("anthropic");
+    expect(row["tier"]).toBe(1);
+    expect(row["model_id"]).toBe("claude-sonnet-4-6");
+  });
+
+  it("stores optional fields", () => {
+    const id = startRun({
+      stage: "thesis",
+      vendor: "google",
+      tier: 0,
+      modelId: "gemini-2.5-pro",
+      domainOverrideReason: "korean-long-context",
+      sessionId: "sess_TEST",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb().prepare("SELECT * FROM run_ledger WHERE run_id = ?").get(id) as Record<string, unknown>;
+    expect(row["domain_override_reason"]).toBe("korean-long-context");
+    expect(row["session_id"]).toBe("sess_TEST");
+  });
+});
+
+describe("completeRun", () => {
+  it("marks status completed with token/cost data", () => {
+    const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    completeRun(id, { inputTokens: 1000, outputTokens: 200, cachedTokens: 100, totalCostUsd: 0.005 });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb().prepare("SELECT * FROM run_ledger WHERE run_id = ?").get(id) as Record<string, unknown>;
+    expect(row["status"]).toBe("completed");
+    expect(row["input_tokens"]).toBe(1000);
+    expect(row["output_tokens"]).toBe(200);
+    expect(row["cached_tokens"]).toBe(100);
+    expect(row["total_cost_usd"]).toBeCloseTo(0.005, 6);
+    expect(row["completed_at"]).toBeTruthy();
+  });
+
+  it("accepts completeRun with no output (cost stays null)", () => {
+    const id = startRun({ stage: "dossier", vendor: "anthropic", tier: 1, modelId: "claude-haiku-4-5-20251001" });
+    completeRun(id);
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb().prepare("SELECT * FROM run_ledger WHERE run_id = ?").get(id) as Record<string, unknown>;
+    expect(row["status"]).toBe("completed");
+    expect(row["total_cost_usd"]).toBeNull();
+  });
+});
+
+describe("failRun", () => {
+  it("marks status failed", () => {
+    const id = startRun({ stage: "cite_check", vendor: "openai", tier: 3, modelId: "gpt-5-5-pro" });
+    failRun(id);
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb().prepare("SELECT * FROM run_ledger WHERE run_id = ?").get(id) as Record<string, unknown>;
+    expect(row["status"]).toBe("failed");
+    expect(row["completed_at"]).toBeTruthy();
+  });
+});
+
+describe("getDailyCostUsd", () => {
+  it("returns 0 for a date with no runs", () => {
+    expect(getDailyCostUsd("2026-01-01")).toBe(0);
+  });
+
+  it("sums completed runs for the date", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const id1 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    const id2 = startRun({ stage: "extract", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6" });
+    completeRun(id1, { totalCostUsd: 0.01 });
+    completeRun(id2, { totalCostUsd: 0.02 });
+    expect(getDailyCostUsd(today)).toBeCloseTo(0.03, 6);
+  });
+
+  it("excludes running and failed runs", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const id1 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    const id2 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    completeRun(id1, { totalCostUsd: 0.05 });
+    failRun(id2);
+    expect(getDailyCostUsd(today)).toBeCloseTo(0.05, 6);
+  });
+
+  it("filters by vendor when specified", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const id1 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    const id2 = startRun({ stage: "extract", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6" });
+    completeRun(id1, { totalCostUsd: 0.01 });
+    completeRun(id2, { totalCostUsd: 0.02 });
+    expect(getDailyCostUsd(today, "openai")).toBeCloseTo(0.01, 6);
+    expect(getDailyCostUsd(today, "anthropic")).toBeCloseTo(0.02, 6);
+  });
+
+  it("excludes runs from other dates", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const id = startRun({ stage: "scenario", vendor: "google", tier: 0, modelId: "gemini-2.5-pro" });
+    completeRun(id, { totalCostUsd: 0.10 });
+    expect(getDailyCostUsd("2020-01-01")).toBe(0);
+    expect(getDailyCostUsd(today)).toBeCloseTo(0.10, 6);
+  });
+});
+
+describe("getDailyCostBreakdown", () => {
+  it("returns per-vendor breakdown", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const id1 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    const id2 = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
+    const id3 = startRun({ stage: "extract", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6" });
+    completeRun(id1, { totalCostUsd: 0.01 });
+    completeRun(id2, { totalCostUsd: 0.02 });
+    completeRun(id3, { totalCostUsd: 0.03 });
+    const breakdown = getDailyCostBreakdown(today);
+    const openai = breakdown.find((r) => r.vendor === "openai");
+    const anthropic = breakdown.find((r) => r.vendor === "anthropic");
+    expect(openai?.totalCostUsd).toBeCloseTo(0.03, 6);
+    expect(openai?.runCount).toBe(2);
+    expect(anthropic?.totalCostUsd).toBeCloseTo(0.03, 6);
+    expect(anthropic?.runCount).toBe(1);
+  });
+
+  it("returns empty array for date with no runs", () => {
+    expect(getDailyCostBreakdown("2020-01-01")).toEqual([]);
+  });
+});
