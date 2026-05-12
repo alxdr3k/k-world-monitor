@@ -174,6 +174,7 @@ async function createDocumentAndSnapshot(
 
   return withSession(async (session) => {
     const tx = session.beginTransaction();
+    let committed = false;
     try {
       // Upsert Document (idempotent on url+source_id).
       // RETURN d.doc_id so ON MATCH case returns the existing stored value.
@@ -268,9 +269,10 @@ async function createDocumentAndSnapshot(
       );
 
       await tx.commit();
+      committed = true;
       return { docId: actualDocId, snapId: actualSnapId };
     } catch (err) {
-      await tx.rollback();
+      if (!committed) await tx.rollback();
       throw err;
     }
   });
@@ -289,6 +291,7 @@ async function ensureSourceLinkage(
 ): Promise<string | null> {
   return withSession(async (session) => {
     const tx = session.beginTransaction();
+    let committed = false;
     try {
       // On the dedup path tolerate a missing Source (do not throw) — but report
       // back to the caller so the queue row is marked error rather than done.
@@ -352,9 +355,9 @@ async function ensureSourceLinkage(
       );
 
       await tx.commit();
-      return linkedDocId;
+      committed = true;
     } catch (err) {
-      await tx.rollback();
+      if (!committed) await tx.rollback();
       throw err;
     }
   });
