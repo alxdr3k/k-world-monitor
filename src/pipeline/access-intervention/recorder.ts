@@ -2,7 +2,7 @@
 // Creates AccessIntervention Neo4j nodes (INV-0017-6) and links them to Source.
 // Severity is computed deterministically by severity.ts (INV-0017-7).
 //
-// Node ID: `int_<ULID>` (ADR-0011 ID prefix policy).
+// Node ID: `aci_<ULID>` (ADR-0011 ID prefix policy; ids.ts AccessIntervention → "aci_").
 // Relationship: (Source)-[:HAS_INTERVENTION]->(AccessIntervention)
 
 import { ulid } from "ulid";
@@ -35,7 +35,7 @@ export interface InterventionRecord {
 export async function recordIntervention(
   input: InterventionInput
 ): Promise<InterventionRecord> {
-  const interventionId = `int_${ulid()}`;
+  const interventionId = `aci_${ulid()}`;
   const severity = computeSeverity({
     policyResult: input.policyResult,
     importanceScore: input.importanceScore,
@@ -64,7 +64,7 @@ export async function recordIntervention(
            severity:               $severity,
            fallback_used_json:     $fallbackUsedJson,
            requested_user_action:  $requestedUserAction,
-           status:                 'unresolved',
+           status:                 'pending_user_review',
            created_at:             $createdAt,
            resolved_at:            null
          })`,
@@ -90,12 +90,23 @@ export async function recordIntervention(
       );
 
       // Link Source → AccessIntervention.
-      await tx.run(
+      // Use a subquery count check to verify Source exists before committing;
+      // if Source is missing the transaction is rolled back to avoid orphan nodes.
+      const linkResult = await tx.run(
         `MATCH (src:Source {source_id: $sourceId})
          MATCH (i:AccessIntervention {intervention_id: $interventionId})
-         CREATE (src)-[:HAS_INTERVENTION]->(i)`,
+         CREATE (src)-[:HAS_INTERVENTION]->(i)
+         RETURN count(src) AS linked`,
         { sourceId: input.sourceId, interventionId }
       );
+      const linked = (linkResult.records[0]?.get("linked") as number | undefined) ?? 0;
+      if (Number(linked) === 0) {
+        await tx.rollback();
+        throw new Error(
+          `recordIntervention: Source node not found for sourceId='${input.sourceId}'. ` +
+          `AccessIntervention '${interventionId}' not committed.`
+        );
+      }
 
       await tx.commit();
     } catch (err) {

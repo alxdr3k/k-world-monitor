@@ -36,7 +36,7 @@ export interface BatchReport {
 export async function generateBatchReport(sessionId: string): Promise<BatchReport> {
   const interventions = await withSession(async (session) => {
     const result = await session.run(
-      `MATCH (i:AccessIntervention {session_id: $sessionId, status: 'unresolved'})
+      `MATCH (i:AccessIntervention {session_id: $sessionId, status: 'pending_user_review'})
        RETURN
          i.intervention_id  AS intervention_id,
          i.source_id        AS source_id,
@@ -78,7 +78,11 @@ export async function generateBatchReport(sessionId: string): Promise<BatchRepor
     LOW: [],
   };
   for (const item of interventions) {
-    bySeverity[item.severity].push(item);
+    if (item.severity in bySeverity) {
+      bySeverity[item.severity].push(item);
+    }
+    // Unknown severity values (e.g. legacy data) are silently skipped to avoid
+    // crashing report generation; they do not contribute to hasBlockers.
   }
 
   const hasBlockers =
@@ -128,7 +132,7 @@ function renderMarkdown(
       lines.push(`- **Action attempted:** ${item.attemptedAction}`);
       lines.push(`- **Result:** ${item.accessResult}`);
       lines.push(`- **Policy:** ${item.policyResult}`);
-      lines.push(`- **Importance:** ${item.importanceScore.toFixed(2)}`);
+      lines.push(`- **Importance:** ${Number(item.importanceScore).toFixed(2)}`);
       if (item.whyItMatters) lines.push(`- **Why it matters:** ${item.whyItMatters}`);
       if (item.scenarioId) lines.push(`- **Scenario:** ${item.scenarioId}`);
       if (item.thesisId) lines.push(`- **Thesis:** ${item.thesisId}`);

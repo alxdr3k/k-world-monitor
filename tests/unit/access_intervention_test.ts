@@ -20,6 +20,11 @@ mock.module("../../src/storage/neo4j/connection", () => ({
     const tx = {
       run: async (query: string, params: Record<string, unknown>) => {
         neo4jRuns.push({ query, params });
+        // Return a mock "linked=1" row for the HAS_INTERVENTION link query so the
+        // Source-missing guard passes in unit tests (Source nodes are not in this mock).
+        if (query.includes("HAS_INTERVENTION") && query.includes("RETURN count")) {
+          return { records: [{ get: (_k: string) => 1 }] };
+        }
         return { records: [] };
       },
       commit: async () => {},
@@ -154,10 +159,10 @@ function baseInput(): InterventionInput {
 }
 
 describe("recordIntervention", () => {
-  it("returns interventionId with int_ prefix and computed severity", async () => {
+  it("returns interventionId with aci_ prefix and computed severity", async () => {
     neo4jRuns.length = 0;
     const result = await recordIntervention(baseInput());
-    expect(result.interventionId).toMatch(/^int_/);
+    expect(result.interventionId).toMatch(/^aci_/);
     expect(result.severity).toBe("CRITICAL"); // inline_block + 0.8 = CRITICAL
   });
 
@@ -178,11 +183,11 @@ describe("recordIntervention", () => {
     expect(createQ.params["sourceId"]).toBe("src_TEST001");
   });
 
-  it("stores status=unresolved by default (in query text)", async () => {
+  it("stores status=pending_user_review by default (in query text)", async () => {
     neo4jRuns.length = 0;
     await recordIntervention(baseInput());
     const createQ = neo4jRuns.find((r) => r.query.includes("CREATE (i:AccessIntervention"))!;
-    expect(createQ.query).toContain("'unresolved'");
+    expect(createQ.query).toContain("'pending_user_review'");
   });
 
   it("serializes fallbackUsed to JSON string", async () => {
