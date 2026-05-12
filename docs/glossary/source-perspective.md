@@ -51,9 +51,9 @@ risk-centric으로 편향됨 — 특히 Q21 Tier A 후보가 대부분 risk obse
 risks / WEF / WHO). 명시적 perspective tag + 분포 균형으로 편향 완화.
 
 v0 manual 분류 (수십개 source 수준에서 사람 가능 — DEC-009 reflow 후
-v0 entry 50 source `docs/research/source-seed-list-2026-05.md`. size cap
-폐기로 추후 누적 자유). v2+에서 LLM 자동 분류 옵션 검토 (사용자 review
-필수).
+v0 entry 72 source `docs/research/source-seed-list-2026-05.md` (경제 22 +
+정책 17 + 사회 18 + 대중문화 15). size cap 폐기로 추후 누적 자유). v2+에서
+LLM 자동 분류 옵션 검토 (사용자 review 필수).
 
 ## Examples
 
