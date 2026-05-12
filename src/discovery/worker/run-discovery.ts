@@ -169,6 +169,17 @@ async function main(): Promise<void> {
       }
       const xmlText = decoder.decode(body);
       const items = parseRssFeed(xmlText);
+
+      if (items.length === 0) {
+        // Zero items after a successful HTTP 200 indicates a persistent non-feed
+        // or empty feed. Record as error so the source enters backoff rather than
+        // being polled again immediately on the next run.
+        console.log(`  [empty-feed] ${source_id}: 0 items parsed — recording error`);
+        recordFetchOutcome(source_id, { status: "error" });
+        totalErrors++;
+        continue;
+      }
+
       const { inserted, skipped } = enqueueDiscoveredItems(source_id, items);
       totalInserted += inserted;
       totalSkipped += skipped;
