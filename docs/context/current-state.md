@@ -34,7 +34,8 @@ ADR-0011~0021로 supersede됐다.
   access_interventions)
 - active phase: `INFRA-1A` (ADR scaffold + 9-stage 글로서리 + Round 25
   canonical 확정)
-- active slice: **`INFRA-1A.8` landed** (PR #10 merged 2026-05-12) — Backup runbook docs-only (AC-032). Next: INFRA-1B.1 (Q-021 open — 사용자 결정 필요).
+- active slice: **`INFRA-1A.6` in_progress** — Tier A source seed (72 sources, data/sources_seed.yaml) + Q-021 resolved (2026-05-12 사용자 수락) + AC-027 distribution lint test. PR pending.
+  `INFRA-1A.8` landed (PR #10 merged 2026-05-12): Backup runbook docs-only (AC-032).
   `INFRA-1A.7` landed (PR #9 merged 2026-05-12): Scenario/Thesis/Source bidirectional
   schema fields + enum validators + indexes (AC-026, AC-027).
   `INFRA-1A.5` landed (PR #8 merged 2026-05-12): text normalization + sha256 + enum validators.
@@ -176,14 +177,7 @@ ADR-0011~0021로 supersede됐다.
 - Q-008 Thesis ID 체계
 - Q-012 Neo4j ↔ SQLite sync (CDC vs batch)
 - ~~Q-020~~ **resolved (INFRA-1A.2)** — 1인 internal use 범위 lock; (a)(b)(c) 발생 시 별도 ADR
-- Q-021 Tier A source seed (size cap 폐기 — DEC-009 reflow, 누적 자유) +
-  perspective 분포 균형 (전체 seed 기준 risk ≤50% / opportunity ≥25% /
-  neutral ≥15% 충족). v0 entry 72 source proposed (경제 22 + 정책 17 +
-  사회 18 + 대중문화 15, 한국 소스 24개 + 글로벌 48개) `docs/research/
-  source-seed-list-2026-05.md`. 전체 분포 risk 19% / opportunity 29% /
-  neutral 42% / mixed 10% (AC-027 안전 마진 4%). 사용자 list review 후
-  이 repo `data/sources_seed.yaml` commit 시 resolved. RSS endpoint 검증은
-  INFRA-1A.6 slice 안에서.
+- ~~Q-021~~ **resolved (INFRA-1A.6, 2026-05-12)** — 72 source data/sources_seed.yaml commit. 분포 risk 19% / opportunity 29% / neutral 42% / mixed 10% (AC-027 통과). RSS endpoint 검증은 INFRA-1B.1에서.
 - ~~Q-022~~ **resolved by DEC-004** (v0 4 메타 카테고리: 정책 / 경제 / 사회
   / 대중문화)
 - ~~Q-024~~ **resolved (INFRA-1A.2)** — v0: APOC standard + Cypher 5.x core; v1+: GDS Community; Enterprise-only 별도 ADR

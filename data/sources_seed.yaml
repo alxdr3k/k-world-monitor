@@ -1,0 +1,1489 @@
+# Tier A source seed — k-world-monitor v0
+# Q-021 resolved (user accepted 2026-05-12)
+# 72 sources × 4 meta-categories (economy/policy/society/pop_culture)
+# AC-027 distribution: risk_observer 19% ≤50% / opportunity_observer 29% ≥25% / neutral 42% ≥15% ✓
+# Canonical location: data/sources_seed.yaml (this repo)
+# Import: INFRA-1B.1 Source Registry bootstrap (creates src_<ULID> IDs)
+# collectability_score initial values — subject to revision after first collection run
+#
+# Fields:
+#   slug:                  human-readable key (used for deduplication at import)
+#   name:                  display name
+#   publisher:             publishing organization
+#   url:                   homepage or primary endpoint (RSS/API URL in rss_url / api_base)
+#   rss_url:               RSS/Atom feed URL (verify during INFRA-1B.1 if marked "verify")
+#   api_base:              API base URL (API key config in INFRA-1B.1)
+#   access_method:         api | rss
+#   reliability_tier:      0=Tier A
+#   source_perspective:    risk_observer | opportunity_observer | neutral | mixed
+#   meta_category:         economy | policy | society | pop_culture
+#   subtopic_tags:         list
+#   collectability:        automation_reliability, legal_policy_clarity, anti_bot_friction, preferred_mode
+#   archive_policy:        full_snapshot_allowed | excerpt_only | metadata_only | do_not_collect
+#   raw_cloud_policy:      always_prohibited (ADR-0012 universal)
+#   external_llm_policy:   allowed | manual_review_required | prohibited
+#   notes:                 operational notes
+
+sources:
+
+  # ===========================================================================
+  # 1. ECONOMY (22 sources)
+  # ===========================================================================
+
+  - slug: fred_stlouisfed
+    name: FRED
+    publisher: Federal Reserve Bank of St. Louis
+    url: https://fred.stlouisfed.org
+    api_base: https://api.stlouisfed.org/fred
+    access_method: api
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.95
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: api
+    archive_policy: full_snapshot_allowed
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "API key required (FRED_API_KEY env). Public domain data."
+
+  - slug: fomc_federalreserve
+    name: FOMC statements + speeches
+    publisher: Federal Reserve Board
+    url: https://www.federalreserve.gov
+    rss_url: https://www.federalreserve.gov/feeds/press_monetary.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance, governance_institutions]
+    collectability:
+      automation_reliability: 0.90
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "US government public domain. Multiple RSS feeds available."
+
+  - slug: imf_weo
+    name: IMF WEO + Article IV
+    publisher: International Monetary Fund
+    url: https://www.imf.org
+    rss_url: https://www.imf.org/en/News/rss?category=Press+Releases
+    api_base: https://dataservices.imf.org/REST/SDMX_JSON.svc
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance, trade_supply_chain]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "IMF Data API also available (no key required for public datasets)."
+
+  - slug: bis_quarterly
+    name: BIS Quarterly Review + Working Papers
+    publisher: Bank for International Settlements
+    url: https://www.bis.org
+    rss_url: https://www.bis.org/doclist/bis_fsi_publs.rss
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Multiple RSS feeds: working papers, research papers, quarterly review."
+
+  - slug: ecb_press
+    name: ECB Press + Economic Bulletin
+    publisher: European Central Bank
+    url: https://www.ecb.europa.eu
+    rss_url: https://www.ecb.europa.eu/rss/press.html
+    api_base: https://data-api.ecb.europa.eu/service
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.88
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "ECB Statistical Data Warehouse (SDW) API also available."
+
+  - slug: bok_monetary
+    name: 한국은행 통화정책 + ECOS API
+    publisher: Bank of Korea
+    url: https://www.bok.or.kr
+    rss_url: https://www.bok.or.kr/portal/singl/rss/rssListPage.do
+    api_base: https://ecos.bok.or.kr/api
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.88
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "ECOS API key required (BOK_ECOS_API_KEY env). Korean."
+
+  - slug: kosis_api
+    name: KOSIS Open API
+    publisher: Statistics Korea (통계청)
+    url: https://kosis.kr
+    api_base: https://kosis.kr/openapi
+    access_method: api
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: economy
+    subtopic_tags: [macro_finance, demographics_migration]
+    collectability:
+      automation_reliability: 0.92
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: api
+    archive_policy: full_snapshot_allowed
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "API key required (KOSIS_API_KEY env). Korean government open data."
+
+  - slug: bls_data
+    name: BLS Data
+    publisher: US Bureau of Labor Statistics
+    url: https://www.bls.gov
+    api_base: https://api.bls.gov/publicAPI/v2
+    access_method: api
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.95
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: api
+    archive_policy: full_snapshot_allowed
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Public API, registration key recommended for higher rate limits."
+
+  - slug: worldbank_opendata
+    name: World Bank Open Data
+    publisher: World Bank
+    url: https://data.worldbank.org
+    api_base: https://api.worldbank.org/v2
+    access_method: api
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance, trade_supply_chain]
+    collectability:
+      automation_reliability: 0.93
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: api
+    archive_policy: full_snapshot_allowed
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "CC BY 4.0 license. No API key required."
+
+  - slug: oecd_cli
+    name: OECD CLI + Outlook
+    publisher: OECD
+    url: https://www.oecd.org
+    api_base: https://sdmx.oecd.org/public/rest
+    access_method: api
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.90
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: api
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "OECD SDMX API public. Also iLibrary RSS for publications."
+
+  - slug: eia_petroleum
+    name: EIA Petroleum + STEO
+    publisher: US Energy Information Administration
+    url: https://www.eia.gov
+    api_base: https://api.eia.gov/v2
+    access_method: api
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: economy
+    subtopic_tags: [energy_commodities]
+    collectability:
+      automation_reliability: 0.94
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: api
+    archive_policy: full_snapshot_allowed
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "API key required (EIA_API_KEY env). US government public domain."
+
+  - slug: iea_oilmarket
+    name: IEA Oil Market Report + WEO
+    publisher: International Energy Agency
+    url: https://www.iea.org
+    rss_url: https://www.iea.org/feed/news
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: economy
+    subtopic_tags: [energy_commodities]
+    collectability:
+      automation_reliability: 0.70
+      legal_policy_clarity: 0.80
+      anti_bot_friction: light
+      preferred_mode: rss
+    archive_policy: metadata_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: manual_review_required
+    notes: "Abstract/news RSS only (Tier A). Full reports paywall — do not collect body text."
+
+  - slug: kdi_research
+    name: KDI 정책분석 / Economic Outlook
+    publisher: Korea Development Institute
+    url: https://www.kdi.re.kr
+    rss_url: https://www.kdi.re.kr/rss/rss.jsp
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. KDI publications are open access."
+
+  - slug: kiep_outlook
+    name: KIEP 세계경제전망
+    publisher: Korea Institute for International Economic Policy
+    url: https://www.kiep.go.kr
+    rss_url: https://www.kiep.go.kr/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: economy
+    subtopic_tags: [trade_supply_chain]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Open access research publications."
+
+  - slug: kiet_industry
+    name: KIET 산업동향
+    publisher: Korea Institute for Industrial Economics and Trade
+    url: https://www.kiet.re.kr
+    rss_url: https://www.kiet.re.kr/kiet_web/rss.jsp
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: fsc_korea
+    name: 금융위원회 보도자료
+    publisher: Financial Services Commission (Korea)
+    url: https://www.fsc.go.kr
+    rss_url: https://www.fsc.go.kr/rss/rss.jsp
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean government press releases. Verify RSS URL during INFRA-1B.1."
+
+  - slug: kita_trade
+    name: KITA 무역통계 + 보고서
+    publisher: Korea International Trade Association
+    url: https://www.kita.net
+    rss_url: https://www.kita.net/rss.do
+    api_base: https://www.kita.net/openapi
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: economy
+    subtopic_tags: [trade_supply_chain]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Trade statistics API may require registration."
+
+  - slug: motie_korea
+    name: 산업통상자원부 보도자료
+    publisher: Ministry of Trade, Industry and Energy (Korea)
+    url: https://www.motie.go.kr
+    rss_url: https://www.motie.go.kr/rss/motie.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: economy
+    subtopic_tags: [trade_supply_chain]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean government. Verify RSS URL during INFRA-1B.1."
+
+  - slug: bea_us
+    name: BEA (US Bureau of Economic Analysis)
+    publisher: US Bureau of Economic Analysis
+    url: https://www.bea.gov
+    api_base: https://apps.bea.gov/api/data
+    access_method: api
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.93
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: api
+    archive_policy: full_snapshot_allowed
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "API key required (BEA_API_KEY env). US government public domain."
+
+  - slug: boj_english
+    name: BOJ (Bank of Japan) 영문
+    publisher: Bank of Japan
+    url: https://www.boj.or.jp/en
+    rss_url: https://www.boj.or.jp/en/rss/release.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.87
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "English-language feed. G3+1 monetary policy."
+
+  - slug: pboc_english
+    name: PBoC (People's Bank of China) 영문
+    publisher: People's Bank of China
+    url: http://www.pbc.gov.cn/en
+    rss_url: http://www.pbc.gov.cn/en/3688229/index.html
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.75
+      legal_policy_clarity: 0.80
+      anti_bot_friction: light
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "RSS availability variable — verify during INFRA-1B.1."
+
+  - slug: kdic_korea
+    name: 한국 KDIC (예금보험공사)
+    publisher: Korea Deposit Insurance Corporation
+    url: https://www.kdic.or.kr
+    rss_url: https://www.kdic.or.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: economy
+    subtopic_tags: [macro_finance]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean financial stability. Verify RSS URL during INFRA-1B.1."
+
+  # ===========================================================================
+  # 2. POLICY (17 sources)
+  # ===========================================================================
+
+  - slug: unsc_press
+    name: UN Security Council Press
+    publisher: United Nations
+    url: https://www.un.org/securitycouncil
+    rss_url: https://www.un.org/press/en/rss.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: policy
+    subtopic_tags: [geopolitics_security]
+    collectability:
+      automation_reliability: 0.88
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "UN press releases RSS."
+
+  - slug: nato_press
+    name: NATO Press Releases
+    publisher: NATO
+    url: https://www.nato.int
+    rss_url: https://www.nato.int/cps/en/natolive/news.htm?selectedLocale=en&type=PRESS_RELEASE&format=RSS
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: policy
+    subtopic_tags: [geopolitics_security]
+    collectability:
+      automation_reliability: 0.87
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Verify RSS URL format during INFRA-1B.1."
+
+  - slug: mofa_korea
+    name: 외교부 보도자료
+    publisher: Ministry of Foreign Affairs (Korea)
+    url: https://www.mofa.go.kr
+    rss_url: https://www.mofa.go.kr/rss/index.jsp
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: policy
+    subtopic_tags: [governance_institutions]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Government press releases."
+
+  - slug: mnd_korea
+    name: 국방부 보도자료
+    publisher: Ministry of National Defense (Korea)
+    url: https://www.mnd.go.kr
+    rss_url: https://www.mnd.go.kr/rss/mnd.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: policy
+    subtopic_tags: [governance_institutions]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: csis_reports
+    name: CSIS Reports
+    publisher: Center for Strategic and International Studies
+    url: https://www.csis.org
+    rss_url: https://www.csis.org/rss.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: policy
+    subtopic_tags: [geopolitics_security]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: brookings_research
+    name: Brookings Research
+    publisher: Brookings Institution
+    url: https://www.brookings.edu
+    rss_url: https://www.brookings.edu/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: policy
+    subtopic_tags: [governance_institutions]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: iiss_strategic
+    name: IISS Strategic Survey / Military Balance
+    publisher: International Institute for Strategic Studies
+    url: https://www.iiss.org
+    rss_url: https://www.iiss.org/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: policy
+    subtopic_tags: [geopolitics_security]
+    collectability:
+      automation_reliability: 0.70
+      legal_policy_clarity: 0.80
+      anti_bot_friction: light
+      preferred_mode: rss
+    archive_policy: metadata_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: manual_review_required
+    notes: "Abstract/RSS only (Tier A). Full publications paywall — do not collect body text."
+
+  - slug: cfr_reports
+    name: CFR Reports
+    publisher: Council on Foreign Relations
+    url: https://www.cfr.org
+    rss_url: https://www.cfr.org/rss/all
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: policy
+    subtopic_tags: [geopolitics_security, governance_institutions]
+    collectability:
+      automation_reliability: 0.86
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: piie_briefs
+    name: PIIE Policy Briefs
+    publisher: Peterson Institute for International Economics
+    url: https://www.piie.com
+    rss_url: https://www.piie.com/rss/publications
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: policy
+    subtopic_tags: [trade_supply_chain, governance_institutions]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: kinu_analysis
+    name: 통일연구원 (KINU) 정세분석
+    publisher: Korea Institute for National Unification
+    url: https://www.kinu.or.kr
+    rss_url: https://www.kinu.or.kr/rss/rss.jsp
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: policy
+    subtopic_tags: [geopolitics_security]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: sejong_institute
+    name: 세종연구소 정책분석
+    publisher: Sejong Institute
+    url: https://www.sejong.org
+    rss_url: https://www.sejong.org/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: mixed
+    meta_category: policy
+    subtopic_tags: [geopolitics_security]
+    collectability:
+      automation_reliability: 0.80
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: nabo_korea
+    name: 국회입법조사처 (NABO)
+    publisher: National Assembly Research Service (Korea)
+    url: https://www.nars.go.kr
+    rss_url: https://www.nars.go.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: policy
+    subtopic_tags: [governance_institutions]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean government legislative research. Verify RSS URL during INFRA-1B.1."
+
+  - slug: carnegie_endowment
+    name: Carnegie Endowment
+    publisher: Carnegie Endowment for International Peace
+    url: https://carnegieendowment.org
+    rss_url: https://carnegieendowment.org/rss/solr?lang=en&rtype=article
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: mixed
+    meta_category: policy
+    subtopic_tags: [geopolitics_security, governance_institutions]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: atlantic_council
+    name: Atlantic Council
+    publisher: Atlantic Council
+    url: https://www.atlanticcouncil.org
+    rss_url: https://www.atlanticcouncil.org/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: policy
+    subtopic_tags: [geopolitics_security]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: asan_institute
+    name: Asan Institute
+    publisher: Asan Institute for Policy Studies (아산정책연구원)
+    url: https://en.asaninst.org
+    rss_url: https://en.asaninst.org/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: mixed
+    meta_category: policy
+    subtopic_tags: [geopolitics_security]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean think tank. English feed."
+
+  - slug: mou_korea
+    name: 통일부 보도자료
+    publisher: Ministry of Unification (Korea)
+    url: https://www.unikorea.go.kr
+    rss_url: https://www.unikorea.go.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: policy
+    subtopic_tags: [governance_institutions]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean government. Verify RSS URL during INFRA-1B.1."
+
+  - slug: eastwest_center
+    name: East-West Center
+    publisher: East-West Center
+    url: https://www.eastwestcenter.org
+    rss_url: https://www.eastwestcenter.org/rss.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: policy
+    subtopic_tags: [geopolitics_security, governance_institutions]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Asia-Pacific cooperation focus."
+
+  # ===========================================================================
+  # 3. SOCIETY (18 sources)
+  # ===========================================================================
+
+  - slug: who_outbreak
+    name: WHO Disease Outbreak News
+    publisher: World Health Organization
+    url: https://www.who.int
+    rss_url: https://www.who.int/feeds/entity/csr/don/en/rss.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [health_biosecurity]
+    collectability:
+      automation_reliability: 0.90
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: cdc_mmwr
+    name: CDC MMWR
+    publisher: US Centers for Disease Control and Prevention
+    url: https://www.cdc.gov/mmwr
+    rss_url: https://tools.cdc.gov/api/v2/resources/media/132608.rss
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [health_biosecurity]
+    collectability:
+      automation_reliability: 0.88
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "US government public domain."
+
+  - slug: fao_food_outlook
+    name: FAO Food Outlook + GIEWS
+    publisher: Food and Agriculture Organization
+    url: https://www.fao.org
+    rss_url: https://www.fao.org/news/rss-feed/en/
+    api_base: https://api.fao.org
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [food_water_security]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: ipcc_assessment
+    name: IPCC Assessment Reports
+    publisher: Intergovernmental Panel on Climate Change
+    url: https://www.ipcc.ch
+    rss_url: https://www.ipcc.ch/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: society
+    subtopic_tags: [climate_environment]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Reports published infrequently (assessment cycle). RSS for news/updates."
+
+  - slug: iom_migration
+    name: IOM World Migration Report
+    publisher: International Organization for Migration
+    url: https://www.iom.int
+    rss_url: https://www.iom.int/feeds/all
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: society
+    subtopic_tags: [demographics_migration]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: kdca_korea
+    name: KDCA 보도자료
+    publisher: Korea Disease Control and Prevention Agency
+    url: https://www.kdca.go.kr
+    rss_url: https://www.kdca.go.kr/board/board.es?mid=a20501000000&bid=0015&rss=true
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [health_biosecurity]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: kihasa_research
+    name: KIHASA 보건사회연구
+    publisher: Korea Institute for Health and Social Affairs
+    url: https://www.kihasa.re.kr
+    rss_url: https://www.kihasa.re.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: mixed
+    meta_category: society
+    subtopic_tags: [health_biosecurity, demographics_migration]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: me_korea
+    name: 환경부 보도자료
+    publisher: Ministry of Environment (Korea)
+    url: https://www.me.go.kr
+    rss_url: https://www.me.go.kr/home/web/rss/menuRss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [climate_environment]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean government. Verify RSS URL during INFRA-1B.1."
+
+  - slug: rda_korea
+    name: 농촌진흥청 (RDA)
+    publisher: Rural Development Administration (Korea)
+    url: https://www.rda.go.kr
+    rss_url: https://www.rda.go.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [food_water_security]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: un_sdg_hub
+    name: UN SDG Knowledge Hub
+    publisher: United Nations
+    url: https://sdg.iisd.org
+    rss_url: https://sdg.iisd.org/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: society
+    subtopic_tags: [demographics_migration, climate_environment]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: gates_foundation
+    name: Gates Foundation Research
+    publisher: Bill & Melinda Gates Foundation
+    url: https://www.gatesfoundation.org
+    rss_url: https://www.gatesfoundation.org/ideas/rss
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: society
+    subtopic_tags: [health_biosecurity]
+    collectability:
+      automation_reliability: 0.70
+      legal_policy_clarity: 0.80
+      anti_bot_friction: light
+      preferred_mode: rss
+    archive_policy: metadata_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: manual_review_required
+    notes: "RSS for news/ideas. Some publications paywall — abstract/news only (Tier A)."
+
+  - slug: unhcr
+    name: UNHCR
+    publisher: UN High Commissioner for Refugees
+    url: https://www.unhcr.org
+    rss_url: https://www.unhcr.org/rss/news.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: society
+    subtopic_tags: [demographics_migration]
+    collectability:
+      automation_reliability: 0.87
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: ecdc_eu
+    name: ECDC
+    publisher: European Centre for Disease Prevention and Control
+    url: https://www.ecdc.europa.eu
+    rss_url: https://www.ecdc.europa.eu/en/rss-feeds
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [health_biosecurity]
+    collectability:
+      automation_reliability: 0.87
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "EU equivalent of CDC."
+
+  - slug: noaa_climate
+    name: NOAA
+    publisher: National Oceanic and Atmospheric Administration
+    url: https://www.noaa.gov
+    api_base: https://api.weather.gov
+    rss_url: https://www.noaa.gov/rss.xml
+    access_method: api
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [climate_environment, food_water_security]
+    collectability:
+      automation_reliability: 0.92
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: api
+    archive_policy: full_snapshot_allowed
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Public domain. Multiple APIs (weather.gov, Climate Data Online)."
+
+  - slug: forest_korea
+    name: 한국 산림청
+    publisher: Korea Forest Service
+    url: https://www.forest.go.kr
+    rss_url: https://www.forest.go.kr/kfsweb/kfi/kfs/cms/cmsview/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [climate_environment]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: mof_ocean_korea
+    name: 한국 해양수산부
+    publisher: Ministry of Oceans and Fisheries (Korea)
+    url: https://www.mof.go.kr
+    rss_url: https://www.mof.go.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: society
+    subtopic_tags: [climate_environment, food_water_security]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: keei_korea
+    name: KEEI (에너지경제연구원)
+    publisher: Korea Energy Economics Institute
+    url: https://www.keei.re.kr
+    rss_url: https://www.keei.re.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: mixed
+    meta_category: society
+    subtopic_tags: [climate_environment, energy_commodities]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: un_habitat
+    name: UN Habitat
+    publisher: United Nations Human Settlements Programme
+    url: https://unhabitat.org
+    rss_url: https://unhabitat.org/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: society
+    subtopic_tags: [demographics_migration]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Urbanization and housing focus."
+
+  # ===========================================================================
+  # 4. POP_CULTURE (15 sources)
+  # ===========================================================================
+
+  - slug: pew_research
+    name: Pew Research Center
+    publisher: Pew Research Center
+    url: https://www.pewresearch.org
+    rss_url: https://www.pewresearch.org/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai]
+    collectability:
+      automation_reliability: 0.87
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: reuters_institute
+    name: Reuters Institute Digital News Report
+    publisher: Reuters Institute for the Study of Journalism
+    url: https://reutersinstitute.politics.ox.ac.uk
+    rss_url: https://reutersinstitute.politics.ox.ac.uk/rss.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai, social_stability_information]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.88
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: ""
+
+  - slug: stanford_hai
+    name: Stanford HAI AI Index Report
+    publisher: Stanford Human-Centered AI Institute
+    url: https://hai.stanford.edu
+    rss_url: https://hai.stanford.edu/feed
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai]
+    collectability:
+      automation_reliability: 0.72
+      legal_policy_clarity: 0.85
+      anti_bot_friction: light
+      preferred_mode: rss
+    archive_policy: metadata_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: manual_review_required
+    notes: "Annual AI Index report + blog. RSS for news; full report manual review."
+
+  - slug: mit_tech_review
+    name: MIT Technology Review
+    publisher: MIT Technology Review
+    url: https://www.technologyreview.com
+    rss_url: https://www.technologyreview.com/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai]
+    collectability:
+      automation_reliability: 0.72
+      legal_policy_clarity: 0.80
+      anti_bot_friction: light
+      preferred_mode: rss
+    archive_policy: metadata_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: manual_review_required
+    notes: "Free articles + abstract Tier A. Full articles paywall — do not collect body text."
+
+  - slug: oecd_ai_policy
+    name: OECD AI Policy Observatory
+    publisher: OECD
+    url: https://oecd.ai
+    rss_url: https://oecd.ai/api/en/posts.rss
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai, governance_institutions]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Verify RSS URL during INFRA-1B.1."
+
+  - slug: kocca_content
+    name: KOCCA 콘텐츠산업 동향
+    publisher: Korea Creative Content Agency
+    url: https://www.kocca.kr
+    rss_url: https://www.kocca.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai, social_stability_information]
+    collectability:
+      automation_reliability: 0.83
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: kofic_film
+    name: KOFIC 영상산업 통계
+    publisher: Korean Film Council
+    url: https://www.kofic.or.kr
+    rss_url: https://www.kofic.or.kr/kofic/business/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: pop_culture
+    subtopic_tags: [social_stability_information]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: kisdi_ict
+    name: KISDI 정보통신정책분석
+    publisher: Korea Information Society Development Institute
+    url: https://www.kisdi.re.kr
+    rss_url: https://www.kisdi.re.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: mixed
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai, governance_institutions]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean. Verify RSS URL during INFRA-1B.1."
+
+  - slug: cisa_advisories
+    name: CISA Cybersecurity Advisories
+    publisher: US Cybersecurity and Infrastructure Security Agency
+    url: https://www.cisa.gov
+    rss_url: https://www.cisa.gov/cybersecurity-advisories/all.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: risk_observer
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai]
+    collectability:
+      automation_reliability: 0.90
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "US government public domain."
+
+  - slug: kaist_ai
+    name: KAIST AI Center
+    publisher: KAIST AI Institute
+    url: https://ai.kaist.ac.kr
+    rss_url: https://ai.kaist.ac.kr/feed/
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai]
+    collectability:
+      automation_reliability: 0.65
+      legal_policy_clarity: 0.85
+      anti_bot_friction: light
+      preferred_mode: rss
+    archive_policy: metadata_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: manual_review_required
+    notes: "Korean. Low publication frequency, high quality. Verify RSS URL during INFRA-1B.1."
+
+  - slug: kpf_media
+    name: 한국언론진흥재단 (KPF)
+    publisher: Korea Press Foundation
+    url: https://www.kpf.or.kr
+    rss_url: https://www.kpf.or.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: pop_culture
+    subtopic_tags: [social_stability_information]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.90
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean media dynamics. Verify RSS URL during INFRA-1B.1."
+
+  - slug: kcc_korea
+    name: 방송통신위원회
+    publisher: Korea Communications Commission
+    url: https://www.kcc.go.kr
+    rss_url: https://www.kcc.go.kr/user.do?page=A02060700&dc=K00000001
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: mixed
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai, governance_institutions]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean government regulator. Verify RSS URL during INFRA-1B.1."
+
+  - slug: kca_consumer
+    name: 한국소비자원
+    publisher: Korea Consumer Agency
+    url: https://www.kca.go.kr
+    rss_url: https://www.kca.go.kr/rss/rss.do
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: neutral
+    meta_category: pop_culture
+    subtopic_tags: [social_stability_information]
+    collectability:
+      automation_reliability: 0.82
+      legal_policy_clarity: 0.95
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Korean consumer trend data. Verify RSS URL during INFRA-1B.1."
+
+  - slug: wipo
+    name: WIPO
+    publisher: World Intellectual Property Organization
+    url: https://www.wipo.int
+    rss_url: https://www.wipo.int/pressroom/en/rss.jsp
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "IP protection = innovation advocacy perspective."
+
+  - slug: oecd_going_digital
+    name: OECD Going Digital Project
+    publisher: OECD
+    url: https://www.oecd.org/going-digital
+    rss_url: https://www.oecd.org/going-digital/rss.xml
+    access_method: rss
+    reliability_tier: 0
+    source_perspective: opportunity_observer
+    meta_category: pop_culture
+    subtopic_tags: [technology_cyber_ai, governance_institutions]
+    collectability:
+      automation_reliability: 0.85
+      legal_policy_clarity: 0.92
+      anti_bot_friction: none
+      preferred_mode: rss
+    archive_policy: excerpt_only
+    raw_cloud_policy: always_prohibited
+    external_llm_policy: allowed
+    notes: "Digital transformation focus. Verify RSS URL during INFRA-1B.1."
