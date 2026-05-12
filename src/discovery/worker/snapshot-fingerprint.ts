@@ -54,14 +54,25 @@ function sha256HexBytes(body: Uint8Array, url: string): string {
 // Deduplication: check Neo4j for existing Snapshot with same content_hash.
 // ---------------------------------------------------------------------------
 
-async function findExistingSnapshot(contentHash: string): Promise<string | null> {
+interface ExistingSnapshot {
+  snapId: string;
+  r2Key: string | null;
+}
+
+// Returns null when no Snapshot with this content_hash exists.
+// Also returns r2_key so dedup path can back-fill a failed R2 upload.
+async function findExistingSnapshot(contentHash: string): Promise<ExistingSnapshot | null> {
   return withSession(async (session) => {
     const result = await session.run(
-      "MATCH (s:Snapshot {content_hash: $hash}) RETURN s.snap_id AS snap_id LIMIT 1",
+      "MATCH (s:Snapshot {content_hash: $hash}) RETURN s.snap_id AS snap_id, s.r2_key AS r2_key LIMIT 1",
       { hash: contentHash }
     );
     const record = result.records[0];
-    return record ? (record.get("snap_id") as string) : null;
+    if (!record) return null;
+    return {
+      snapId: record.get("snap_id") as string,
+      r2Key: (record.get("r2_key") as string | null) ?? null,
+    };
   });
 }
 
@@ -304,12 +315,37 @@ export async function createSnapshotFingerprint(
   if (existing) {
     // P1-6: Ensure Source→Document→Snapshot edges for current source_id even on dedup.
     await ensureSourceLinkage(input, contentHash);
-    markQueueItemDone(input.queueId, existing, contentHash);
+
+    // Back-fill R2 upload if a previous attempt left r2_key=null for a permitted artifact.
+    // This handles the case where a prior worker created the Snapshot node but then failed
+    // before completing the R2 upload (leaving r2_key=null permanently without this retry).
+    let dedupR2Key: string | null = existing.r2Key;
+    if (
+      existing.r2Key === null &&
+      input.archivePolicy === "full_snapshot_allowed" &&
+      input.rawCloudPolicy === "allowed_public_data_only"
+    ) {
+      const key = `permitted_artifact/derived/snapshot/${existing.snapId}`;
+      const bodyBuf = input.body.buffer.slice(
+        input.body.byteOffset,
+        input.body.byteOffset + input.body.byteLength
+      ) as ArrayBuffer;
+      await r2Put(key, bodyBuf);
+      dedupR2Key = key;
+      await withSession(async (session) => {
+        await session.run(
+          `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
+          { snapId: existing.snapId, r2Key: key }
+        );
+      });
+    }
+
+    markQueueItemDone(input.queueId, existing.snapId, contentHash);
     return {
-      snapId: existing,
+      snapId: existing.snapId,
       docId: "",
       contentHash,
-      r2Key: null,
+      r2Key: dedupR2Key,
       deduplicated: true,
     };
   }

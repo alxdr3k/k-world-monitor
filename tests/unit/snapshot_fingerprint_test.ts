@@ -17,7 +17,12 @@ type SessionFn<T> = (session: unknown) => Promise<T>;
 
 // Records of Neo4j runs in the current test
 const neo4jRuns: Array<{ query: string; params: Record<string, unknown> }> = [];
-let findExistingResult: string | null = null; // what MATCH returns for dedup check
+
+interface FindExistingConfig {
+  snapId: string;
+  r2Key: string | null;
+}
+let findExistingResult: FindExistingConfig | null = null; // what MATCH returns for dedup check
 
 mock.module("../../src/storage/neo4j/connection", () => ({
   withSession: async <T>(fn: SessionFn<T>): Promise<T> => {
@@ -40,10 +45,14 @@ mock.module("../../src/storage/neo4j/connection", () => ({
     const session = {
       run: async (query: string, params: Record<string, unknown>) => {
         neo4jRuns.push({ query, params });
-        // Deduplication MATCH query returns existing snap_id if configured.
+        // Deduplication MATCH query returns existing snap_id + r2_key if configured.
         if (query.includes("MATCH (s:Snapshot") && findExistingResult) {
+          const cfg = findExistingResult;
           return {
-            records: [{ get: (_: string) => findExistingResult }],
+            records: [{
+              get: (field: string) =>
+                field === "snap_id" ? cfg.snapId : cfg.r2Key,
+            }],
           };
         }
         return { records: [] };
@@ -248,7 +257,8 @@ describe("createSnapshotFingerprint — new snapshot", () => {
 
 describe("createSnapshotFingerprint — deduplication", () => {
   it("returns deduplicated=true when content_hash already exists in Neo4j", async () => {
-    findExistingResult = "snap_EXISTING";
+    // Existing snapshot already has r2_key set — dedup path preserves it.
+    findExistingResult = { snapId: "snap_EXISTING", r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING" };
 
     const db = setupDb();
     const queueId = "dq_dedup001";
@@ -258,12 +268,12 @@ describe("createSnapshotFingerprint — deduplication", () => {
 
     expect(result.deduplicated).toBe(true);
     expect(result.snapId).toBe("snap_EXISTING");
-    expect(result.r2Key).toBeNull();
+    expect(result.r2Key).toBe("permitted_artifact/derived/snapshot/snap_EXISTING");
     expect(result.docId).toBe(""); // dedup path returns empty docId
   });
 
   it("skips Snapshot node creation and R2 upload when deduplicated", async () => {
-    findExistingResult = "snap_EXISTING";
+    findExistingResult = { snapId: "snap_EXISTING", r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING" };
 
     const db = setupDb();
     const queueId = "dq_dedup002";
@@ -281,7 +291,7 @@ describe("createSnapshotFingerprint — deduplication", () => {
   });
 
   it("still marks queue item as done when deduplicated", async () => {
-    findExistingResult = "snap_EXISTING";
+    findExistingResult = { snapId: "snap_EXISTING", r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING" };
 
     const db = setupDb();
     const queueId = "dq_dedup003";
@@ -294,6 +304,43 @@ describe("createSnapshotFingerprint — deduplication", () => {
       .get(queueId) as { status: string; error_detail: string } | null;
     expect(row?.status).toBe("done");
     expect(row?.error_detail).toBe("snap_id:snap_EXISTING");
+  });
+
+  it("back-fills R2 upload on dedup path when existing r2_key is null (retry after prior R2 failure)", async () => {
+    // Simulate a Snapshot that was created but R2 upload failed — r2_key is null.
+    findExistingResult = { snapId: "snap_EXISTING", r2Key: null };
+
+    const db = setupDb();
+    const queueId = "dq_dedup004";
+    seedQueue(db, queueId);
+
+    // Input has full_snapshot_allowed + allowed_public_data_only — R2 should be retried.
+    const result = await createSnapshotFingerprint(baseInput(queueId));
+
+    expect(result.deduplicated).toBe(true);
+    expect(result.r2Key).toMatch(/^permitted_artifact\/derived\/snapshot\/snap_EXISTING/);
+    expect(r2Puts).toHaveLength(1);
+
+    // r2_key back-patch SET query should have been issued.
+    const r2KeyPatch = neo4jRuns.find(
+      (r) => r.query.includes("SET s.r2_key") && r.params["snapId"] === "snap_EXISTING"
+    );
+    expect(r2KeyPatch).toBeDefined();
+  });
+
+  it("does NOT back-fill R2 upload on dedup path when existing r2_key is null but policy is metadata_only", async () => {
+    findExistingResult = { snapId: "snap_EXISTING", r2Key: null };
+
+    const db = setupDb();
+    const queueId = "dq_dedup005";
+    seedQueue(db, queueId);
+
+    const input = { ...baseInput(queueId), archivePolicy: "metadata_only" as const };
+    const result = await createSnapshotFingerprint(input);
+
+    expect(result.deduplicated).toBe(true);
+    expect(result.r2Key).toBeNull();
+    expect(r2Puts).toHaveLength(0);
   });
 });
 
