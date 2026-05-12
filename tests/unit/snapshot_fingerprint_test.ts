@@ -302,7 +302,7 @@ describe("createSnapshotFingerprint — deduplication", () => {
 // ---------------------------------------------------------------------------
 
 describe("createSnapshotFingerprint — content hash", () => {
-  it("produces the same content_hash for identical body+url", async () => {
+  it("produces the same content_hash for identical body+url (stable hashing)", async () => {
     const db = setupDb();
     const queueId1 = "dq_hash001";
     const queueId2 = "dq_hash002";
@@ -310,19 +310,37 @@ describe("createSnapshotFingerprint — content hash", () => {
 
     const r1 = await createSnapshotFingerprint(baseInput(queueId1));
 
-    // Reset dedup so second call doesn't short-circuit
+    // Reset dedup so second call doesn't short-circuit on the existing hash.
+    findExistingResult = null;
+    neo4jRuns.length = 0;
+    r2Puts.length = 0;
+    db.prepare(`INSERT INTO discovery_queue (queue_id, source_id, url, status)
+      VALUES (?, 'src-1', 'https://example.com/article', 'processing')`).run(queueId2);
+
+    // Same body + same URL → must produce the exact same hash (stable / deterministic).
+    const r2 = await createSnapshotFingerprint(baseInput(queueId2));
+    expect(r1.contentHash).toBe(r2.contentHash);
+  });
+
+  it("produces different content_hash for different URLs with same body", async () => {
+    const db = setupDb();
+    const queueId1 = "dq_hash003";
+    const queueId2 = "dq_hash004";
+    seedQueue(db, queueId1);
+
+    const r1 = await createSnapshotFingerprint(baseInput(queueId1));
+
     findExistingResult = null;
     neo4jRuns.length = 0;
     r2Puts.length = 0;
     db.prepare(`INSERT INTO discovery_queue (queue_id, source_id, url, status)
       VALUES (?, 'src-1', 'https://example.com/other', 'processing')`).run(queueId2);
 
+    // Different URL → different hash even for identical body.
     const r2 = await createSnapshotFingerprint({
       ...baseInput(queueId2),
       url: "https://example.com/other",
     });
-
-    // Different URLs → different hashes
     expect(r1.contentHash).not.toBe(r2.contentHash);
   });
 });
