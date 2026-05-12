@@ -90,12 +90,19 @@ async function writeChunks(
       `MATCH (s:Snapshot {snap_id: $snapId}) RETURN count(s) AS matched`,
       { snapId }
     );
-    const matched = (guardResult.records[0]?.get("matched") as number) ?? 0;
+    // Neo4j driver returns a custom Integer object for count(); Number() normalises
+    // it so `=== 0` works correctly regardless of whether the driver is in
+    // native-number or Integer-object mode.
+    const matchedRaw = guardResult.records[0]?.get("matched");
+    const matched = matchedRaw != null ? Number(matchedRaw) : 0;
     if (matched === 0) {
       await tx.rollback();
       throw new Error(`Snapshot not found: ${snapId}`);
     }
 
+    // Track commit attempts so the catch handler never rolls back after a
+    // commit is in-flight (Neo4j driver throws on rollback-after-commit).
+    let commitAttempted = false;
     try {
       // Idempotent upsert via MERGE on (snap_id, chunk_index) — the composite
       // uniqueness key.  ON CREATE assigns a fresh ULID; ON MATCH updates
@@ -136,17 +143,35 @@ async function writeChunks(
         ids.push(resolvedId);
 
         // Link Snapshot → Chunk (MERGE avoids duplicate relationships on re-run).
-        await tx.run(
+        // RETURN row count so we can detect a missing Snapshot at link time.
+        const linkResult = await tx.run(
           `MATCH (s:Snapshot {snap_id: $snapId}), (c:Chunk {snap_id: $snapId, chunk_index: $chunkIndex})
-           MERGE (s)-[:HAS_CHUNK]->(c)`,
+           MERGE (s)-[:HAS_CHUNK]->(c)
+           RETURN count(s) AS linked`,
           { snapId, chunkIndex: chunk.chunkIndex }
         );
+        const linked = linkResult.records[0]?.get("linked");
+        if (linked != null && Number(linked) === 0) {
+          throw new Error(`HAS_CHUNK link failed for chunk_index ${chunk.chunkIndex}: Snapshot not matched`);
+        }
       }
 
+      // P2: remove stale chunks from a previous run that had more chunks than
+      // the current one (chunk_index >= current length are now orphaned).
+      await tx.run(
+        `MATCH (s:Snapshot {snap_id: $snapId})-[:HAS_CHUNK]->(c:Chunk {snap_id: $snapId})
+         WHERE c.chunk_index >= $chunkCount
+         DETACH DELETE c`,
+        { snapId, chunkCount: chunks.length }
+      );
+
+      commitAttempted = true;
       await tx.commit();
       return ids;
     } catch (err) {
-      await tx.rollback();
+      if (!commitAttempted) {
+        await tx.rollback();
+      }
       throw err;
     }
   });
