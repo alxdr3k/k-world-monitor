@@ -57,8 +57,28 @@ async function migrateSqlite(): Promise<void> {
     }
     const sqlPath = join(REPO_ROOT, migration.file);
     const sql = readFileSync(sqlPath, "utf-8");
-    getDb().exec(sql);
-    console.log(`[SQLite] ✓ Applied ${migration.file}`);
+    try {
+      getDb().exec(sql);
+      console.log(`[SQLite] ✓ Applied ${migration.file}`);
+    } catch (err: unknown) {
+      // Idempotency for ALTER TABLE ADD COLUMN migrations on drifted schemas:
+      // if the column already exists, record the version and continue rather
+      // than stranding the DB in a non-upgradable state. SQLite does not
+      // support `ADD COLUMN IF NOT EXISTS`, so this guard belongs in the runner.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/duplicate column name/i.test(msg)) {
+        getDb()
+          .prepare(
+            "INSERT OR IGNORE INTO schema_migrations (version, description) VALUES (?, ?)"
+          )
+          .run(migration.version, `${migration.file} (column already present)`);
+        console.log(
+          `[SQLite] ✓ Recorded ${migration.version} (column already present, idempotent skip)`
+        );
+        continue;
+      }
+      throw err;
+    }
   }
 }
 

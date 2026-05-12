@@ -44,10 +44,50 @@ export interface SnapshotResult {
 
 // ---------------------------------------------------------------------------
 // P2-13: Hash raw bytes directly to avoid memory overhead of hex-encoding body.
+// Cross-source dedup: hash body only — identical bytes fetched from mirror URLs
+// or tracking-parameter variants must share one Snapshot. URL identity lives on
+// Document, not on content_hash.
 // ---------------------------------------------------------------------------
 
-function sha256HexBytes(body: Uint8Array, url: string): string {
-  return createHash("sha256").update(body).update(url, "utf8").digest("hex");
+function sha256HexBytes(body: Uint8Array): string {
+  return createHash("sha256").update(body).digest("hex");
+}
+
+// ---------------------------------------------------------------------------
+// Source id normalization: discovery producer v0 enqueues slug-form source_id
+// (e.g. "ft-asia"), but the graph and source_material_policy use canonical
+// src_<ULID> identifiers. Look up the canonical id via source_registry_slug_map
+// (v3 migration); fall back to the raw value if the table is absent or the
+// slug has no mapping yet (lets src_<ULID> rows pass through untouched).
+// ---------------------------------------------------------------------------
+
+function normalizeSourceId(rawSourceId: string): string {
+  if (rawSourceId.startsWith("src_")) return rawSourceId;
+  try {
+    const row = getDb()
+      .prepare("SELECT source_id FROM source_registry_slug_map WHERE slug = ?")
+      .get(rawSourceId) as { source_id: string } | undefined;
+    return row?.source_id ?? rawSourceId;
+  } catch {
+    return rawSourceId; // slug_map table absent (pre-v3 schema)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// discovery_queue schema detection — v6 has no `updated_at` column; v7+ does.
+// Cache the probe so we run it once per process.
+// ---------------------------------------------------------------------------
+
+let _hasUpdatedAt: boolean | null = null;
+function hasUpdatedAtColumn(): boolean {
+  if (_hasUpdatedAt !== null) return _hasUpdatedAt;
+  try {
+    getDb().prepare("SELECT updated_at FROM discovery_queue LIMIT 0").all();
+    _hasUpdatedAt = true;
+  } catch {
+    _hasUpdatedAt = false;
+  }
+  return _hasUpdatedAt;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,11 +249,12 @@ async function createDocumentAndSnapshot(
 async function ensureSourceLinkage(
   input: SnapshotInput,
   contentHash: string
-): Promise<void> {
-  await withSession(async (session) => {
+): Promise<boolean> {
+  return withSession(async (session) => {
     const tx = session.beginTransaction();
     try {
-      // On the dedup path tolerate a missing Source (do not throw).
+      // On the dedup path tolerate a missing Source (do not throw) — but report
+      // back to the caller so the queue row is marked error rather than done.
       const sourceCheck = await tx.run(
         `MATCH (src:Source {source_id: $sourceId}) RETURN count(src) AS matched`,
         { sourceId: input.sourceId }
@@ -224,7 +265,7 @@ async function ensureSourceLinkage(
           : 0;
       if (matched === 0) {
         await tx.rollback();
-        return;
+        return false;
       }
 
       const now = new Date().toISOString();
@@ -266,6 +307,7 @@ async function ensureSourceLinkage(
       );
 
       await tx.commit();
+      return true;
     } catch (err) {
       await tx.rollback();
       throw err;
@@ -282,23 +324,28 @@ async function ensureSourceLinkage(
 // Single UPDATE to ensure status, content_hash, and error_detail are written atomically.
 // error_detail stores snap_id as result metadata; a dedicated snap_id column will be
 // added in a later migration if needed.
+// updated_at clause is included only when v7 column is present (pre-v7 DBs would throw).
 function markQueueItemDone(queueId: string, snapId: string, contentHash: string): void {
+  const u = hasUpdatedAtColumn()
+    ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+    : "";
   getDb()
     .prepare(
       `UPDATE discovery_queue
-       SET status = 'done', content_hash = ?, error_detail = ?,
-           updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+       SET status = 'done', content_hash = ?, error_detail = ?${u}
        WHERE queue_id = ?`
     )
     .run(contentHash, `snap_id:${snapId}`, queueId);
 }
 
 function markQueueItemError(queueId: string, detail: string): void {
+  const u = hasUpdatedAtColumn()
+    ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+    : "";
   getDb()
     .prepare(
       `UPDATE discovery_queue
-       SET status = 'error', error_detail = ?,
-           updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+       SET status = 'error', error_detail = ?${u}
        WHERE queue_id = ?`
     )
     .run(detail.slice(0, 500), queueId);
@@ -312,13 +359,30 @@ export async function createSnapshotFingerprint(
   input: SnapshotInput
 ): Promise<SnapshotResult> {
   // P2-13: Hash raw Uint8Array bytes — no hex-stringify to avoid doubling memory.
-  const contentHash = sha256HexBytes(input.body, input.url);
+  // Body-only hash so mirror URLs / tracking-parameter variants of identical
+  // content all collide on one Snapshot (cross-source dedup).
+  const contentHash = sha256HexBytes(input.body);
 
   // Deduplication: if identical content already snapped, skip Neo4j write.
   const existing = await findExistingSnapshot(contentHash);
   if (existing) {
     // P1-6: Ensure Source→Document→Snapshot edges for current source_id even on dedup.
-    await ensureSourceLinkage(input, contentHash);
+    // If the Source node is missing, mark the queue row error instead of done so a
+    // later source backfill can re-process this row.
+    const linked = await ensureSourceLinkage(input, contentHash);
+    if (!linked) {
+      markQueueItemError(
+        input.queueId,
+        `dedup: source not found in graph: ${input.sourceId}`
+      );
+      return {
+        snapId: existing.snapId,
+        docId: "",
+        contentHash,
+        r2Key: existing.r2Key,
+        deduplicated: true,
+      };
+    }
 
     // Back-fill R2 upload if a previous attempt left r2_key=null for a permitted artifact.
     // This handles the case where a prior worker created the Snapshot node but then failed
@@ -447,9 +511,12 @@ export async function processDiscoveryQueue(
 
       if (pending.length > 0) {
         const ids = pending.map((r) => r.queue_id);
+        const u = hasUpdatedAtColumn()
+          ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+          : "";
         db.prepare(
           `UPDATE discovery_queue
-           SET status = 'processing', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+           SET status = 'processing'${u}
            WHERE queue_id IN (${ids.map(() => "?").join(",")})`
         ).run(...ids);
       }
@@ -495,8 +562,11 @@ export async function processDiscoveryQueue(
         res.headers.get("Content-Type")?.split(";")[0]?.trim() ?? "application/octet-stream";
 
       // P2-11: Use finalUrl (after redirects) as the canonical URL for snapshot identity.
+      // Normalize slug→canonical src_<ULID> so the graph MATCH against Source succeeds
+      // for rows enqueued by the v0 discovery producer (which writes slug-form ids).
+      const canonicalSourceId = normalizeSourceId(row.source_id);
       const result = await createSnapshotFingerprint({
-        sourceId: row.source_id,
+        sourceId: canonicalSourceId,
         queueId: row.queue_id,
         url: res.finalUrl,
         title: row.title ?? undefined,

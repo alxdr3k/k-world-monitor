@@ -370,7 +370,7 @@ describe("createSnapshotFingerprint — content hash", () => {
     expect(r1.contentHash).toBe(r2.contentHash);
   });
 
-  it("produces different content_hash for different URLs with same body", async () => {
+  it("produces identical content_hash for different URLs with same body (cross-source dedup)", async () => {
     const db = setupDb();
     const queueId1 = "dq_hash003";
     const queueId2 = "dq_hash004";
@@ -384,11 +384,12 @@ describe("createSnapshotFingerprint — content hash", () => {
     db.prepare(`INSERT INTO discovery_queue (queue_id, source_id, url, status)
       VALUES (?, 'src-1', 'https://example.com/other', 'processing')`).run(queueId2);
 
-    // Different URL → different hash even for identical body.
+    // Body-only hash: identical bytes from different URLs (mirrors,
+    // tracking-parameter variants) must collide so cross-source dedup works.
     const r2 = await createSnapshotFingerprint({
       ...baseInput(queueId2),
       url: "https://example.com/other",
     });
-    expect(r1.contentHash).not.toBe(r2.contentHash);
+    expect(r1.contentHash).toBe(r2.contentHash);
   });
 });
