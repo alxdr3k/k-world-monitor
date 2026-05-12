@@ -95,3 +95,25 @@
 - 리스크:
   - PR #10 CI 아직 queued — merge 전 완료 대기 (이슈 생성 실패: /home/user/k-world-monitor/.agents/scripts/dev-cycle-helper/brief-render.sh: line 206: gh: command not found) 다음 조치: CI 완료 후 merge, INFRA-1A.8 landed 처리 후 다음 사이클
 
+사이클 5 브리핑
+
+- 결과: ALL CLEAR
+- 이번에 한 일:
+  - INFRA-1A phase 잔여 slice 탐색: INFRA-1A.6 (Q-021 사용자 결정 필요), INFRA-1A.3 (R2 credential 필요), INFRA-1B.1 (INFRA-1A.6 완료 전제). 모두 현재 구현 불가.
+  - INFRA-1A.8 landed 반영 — 04_IMPLEMENTATION_PLAN.md + current-state.md 상태 문서 업데이트
+  - Auto-Promotion Gate 검토: INFRA-1A.6/INFRA-1A.3/INFRA-1B.1 모두 사용자 결정 또는 외부 관찰 필요로 auto-promotion 불가
+- 결론: INFRA-1A phase에서 현재 구현 가능한 ready slice 없음. 다음 진입 조건: (1) Q-021 사용자 결정 — 72개 source seed list review+accept → INFRA-1A.6 ready, (2) R2 credential 등록 확인 → INFRA-1A.3 ready INFRA-1A.6: Q-021 open (user decision needed). INFRA-1A.3: R2 credential 미등록. INFRA-1B.1: INFRA-1A.6 완료 전제.
+- 변경 범위: docs_only_contract (2 files)
+- 검증 계획: docs_contract, full CI 필요
+- 다음 검토 후보:
+  - INFRA-1A.6: Source registry seed 72개 + source_perspective 분포 균형 + collectability_score 초기치. docs/research/source-seed-list-2026-05.md 준비 완료 (planned) 시작 조건: Q-021 사용자 결정 — docs/research/source-seed-list-2026-05.md review + accept 후 data/sources_seed.yaml commit 시 resolved
+  - INFRA-1A.3: R2 버킷 + permitted_artifact prefix 정책 + raw_cloud_policy=always_prohibited 강제 + sha256 round-trip 테스트 (planned) 시작 조건: Cloudflare R2 credential 등록 확인 (P0-M2 진입 직전 예정)
+  - INFRA-1B.1: Source Registry + Collection Queue + manual_intake CLI + source_policy 3 필드 + 8 위험 행동 트리거 (planned) 시작 조건: INFRA-1A.6 완료 + INFRA-1A.3 완료 필요
+- 자동 승격 검토:
+  - INFRA-1A.6: 72개 source seed list + AC-027 분포 균형 준비 완료. Q-021 proposed_answer 문서화됨 (planned) - 자동 승격 제외 이유: Q-021 resolution이 사용자 review+accept 필요. 사용자 결정 없이 auto-promotion 불가
+  - INFRA-1A.3: INFRA-1A.1 landed (prerequisite 충족). R2 credential 등록 여부 외부 관찰 필요 (planned) - 자동 승격 제외 이유: R2 credential 등록 여부가 사용자/외부 확인 필요. 외부 관찰 없이 auto-promotion 불가
+- 자동 승격: 없음
+- 검증: 탐색 완료 — 모든 INFRA-1A 잔여 slice 상태 확인
+- 리뷰/반영: 상태 문서 변경만 (INFRA-1A.8 landed). PR 불필요.
+- 리스크: 없음
+
