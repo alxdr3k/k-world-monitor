@@ -29,11 +29,48 @@ export interface ChunkResult {
 const CHUNK_WORDS = 500;
 const OVERLAP_WORDS = 50;
 
+// For no-whitespace scripts (CJK, Thai, minified content) the word tokenizer
+// produces too few tokens for very long text, yielding a single oversized chunk.
+// The threshold: if token count is less than 10% of what we'd expect for the
+// text length (i.e., average token > 50 chars), treat as no-whitespace input
+// and fall back to a fixed-character window instead.
+const CHAR_CHUNK_SIZE = 1000; // ~500-word equivalent for CJK
+const CHAR_OVERLAP_SIZE = 100; // ~50-word equivalent
+const NO_WS_TOKEN_RATIO_THRESHOLD = 0.02; // tokens < 2% of chars → no-whitespace
+
 export interface TextChunk {
   text: string;
   charStart: number;
   charEnd: number;
   chunkIndex: number;
+}
+
+/**
+ * Splits long text without whitespace (CJK, Thai, minified) into fixed-size
+ * character windows with overlap, preserving charStart/charEnd into original text.
+ */
+function splitByCharWindow(text: string, trimmedStart: number): TextChunk[] {
+  const chunks: TextChunk[] = [];
+  // Walk over the non-whitespace span of the original text.
+  const len = text.length;
+  let pos = trimmedStart; // first non-whitespace character in original text
+  let chunkIndex = 0;
+
+  while (pos < len) {
+    const charStart = pos;
+    const charEnd = Math.min(pos + CHAR_CHUNK_SIZE, len);
+    chunks.push({
+      text: text.slice(charStart, charEnd),
+      charStart,
+      charEnd,
+      chunkIndex,
+    });
+    chunkIndex++;
+    if (charEnd >= len) break;
+    pos += CHAR_CHUNK_SIZE - CHAR_OVERLAP_SIZE;
+  }
+
+  return chunks;
 }
 
 export function splitIntoChunks(text: string): TextChunk[] {
@@ -43,6 +80,20 @@ export function splitIntoChunks(text: string): TextChunk[] {
   // Do NOT trim — offsets must be valid indices into the original `text` string.
   const wordMatches = [...text.matchAll(/\S+/g)];
   if (wordMatches.length === 0) return [];
+
+  // Fallback for no-whitespace scripts (CJK, Thai, minified JS, etc.):
+  // if word tokens are far fewer than text length, the text has very few (or
+  // no) whitespace separators. A single token covering the whole text would
+  // produce one oversized chunk — use a character-window split instead.
+  const trimmedLen = text.trim().length;
+  if (
+    trimmedLen > CHAR_CHUNK_SIZE &&
+    wordMatches.length / trimmedLen < NO_WS_TOKEN_RATIO_THRESHOLD
+  ) {
+    // Find the index of the first non-whitespace character for charStart alignment.
+    const firstNonWsIdx = wordMatches[0]!.index!;
+    return splitByCharWindow(text, firstNonWsIdx);
+  }
 
   const chunks: TextChunk[] = [];
   let chunkIndex = 0;
