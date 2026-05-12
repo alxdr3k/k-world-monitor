@@ -20,9 +20,13 @@ mock.module("../../src/storage/neo4j/connection", () => ({
   withSession: async <T>(fn: (session: unknown) => Promise<T>): Promise<T> => {
     // Returns matched=1 for all existence-check queries (count(i)/count(s) AS matched)
     // so node-exists guards in resolveIntervention / createManualClaimEntry pass in unit tests.
+    // Returns a stable URL for fetchInterventionUrl (used by temp_text path).
     const mockRun = async (query: string, params: Record<string, unknown>) => {
       if (neo4jShouldThrow) throw new Error("Neo4j error");
       neo4jRuns.push({ query, params });
+      if (query.includes("RETURN i.url AS url")) {
+        return { records: [{ get: (_k: string) => "https://graph.example.com/intervention-source" }] };
+      }
       if (
         query.includes("AS matched") ||
         query.includes("RETURN count(")
@@ -329,8 +333,8 @@ describe("reviewIntervention — manual_claim", () => {
 
 describe("reviewIntervention — temp_text", () => {
   it("registers URL in raw_cache_items and marks resolved_temp_text", async () => {
+    // URL is loaded from the intervention node (mock returns graph.example.com URL).
     const result = await reviewIntervention("aci_TEST005", "temp_text", {
-      interventionUrl: "https://example.com/blocked-article",
       sessionId: "sess_TMP",
     });
     expect(result.action).toBe("temp_text");
@@ -340,28 +344,21 @@ describe("reviewIntervention — temp_text", () => {
     expect(resolveQ).toBeTruthy();
 
     // Verify SQLite row uses real v1 schema columns (no raw text stored — INV-0018-3).
+    // URL is sourced from the intervention graph node, not caller-supplied.
     const { getDb } = require("../../src/storage/sqlite/connection");
     const row = getDb()
       .prepare("SELECT * FROM raw_cache_items WHERE cache_id = ?")
       .get(result.rawCacheItemId) as Record<string, unknown> | null;
     expect(row).toBeTruthy();
-    expect(row!["url"]).toBe("https://example.com/blocked-article");
+    expect(row!["url"]).toBe("https://graph.example.com/intervention-source");
     expect(row!["session_id"]).toBe("sess_TMP");
     expect(row!["indexed"]).toBe(0);
     expect(row!["embedded"]).toBe(0);
   });
 
-  it("throws when interventionUrl is missing", async () => {
-    await expect(
-      reviewIntervention("aci_TEST006", "temp_text", { sessionId: "sess_TMP" })
-    ).rejects.toThrow("interventionUrl is required");
-  });
-
   it("throws when sessionId is missing", async () => {
     await expect(
-      reviewIntervention("aci_TEST007", "temp_text", {
-        interventionUrl: "https://example.com/blocked",
-      })
+      reviewIntervention("aci_TEST007", "temp_text", {})
     ).rejects.toThrow("sessionId is required");
   });
 });

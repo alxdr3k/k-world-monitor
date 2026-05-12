@@ -117,10 +117,13 @@ function validateInput(input: ManualClaimInput): ClaimKind {
         "attribution.url is required when referencedQuote is set (INV-0018-2)."
       );
     }
-    // ADR-0018: referenced_quote ≤200 chars (ADR-0015 INV-0015-1 short-quote limit).
-    if (input.referencedQuote!.length > 200) {
+    // ADR-0018: referenced_quote ≤200 Unicode code points (ADR-0015 INV-0015-1 short-quote
+    // limit). Count with spread to correctly handle non-BMP characters (emoji, CJK ext.)
+    // that occupy two UTF-16 code units but one code point.
+    const cpLen = [...input.referencedQuote!].length;
+    if (cpLen > 200) {
       throw new ManualClaimValidationError(
-        `referenced_quote must be ≤200 characters (got ${input.referencedQuote!.length}).`
+        `referenced_quote must be ≤200 characters (got ${cpLen}).`
       );
     }
     return "referenced_quote";
