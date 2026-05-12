@@ -268,8 +268,12 @@ async function createDocumentAndSnapshot(
         { url: input.url, sourceId: input.sourceId, contentHash }
       );
 
-      await tx.commit();
+      // Set committed BEFORE tx.commit() so the catch handler never attempts
+      // rollback after a commit is in-flight. Mirrors the chunker.ts pattern
+      // (commitAttempted=true before await tx.commit()) to avoid the Neo4j
+      // driver error on rollback-after-commit.
       committed = true;
+      await tx.commit();
       return { docId: actualDocId, snapId: actualSnapId };
     } catch (err) {
       if (!committed) await tx.rollback();
@@ -354,8 +358,10 @@ async function ensureSourceLinkage(
         { url: input.url, sourceId: input.sourceId, contentHash }
       );
 
-      await tx.commit();
+      // Set committed BEFORE tx.commit() — same pattern as createDocumentAndSnapshot
+      // and chunker.ts to avoid rollback-after-commit Neo4j driver error.
       committed = true;
+      await tx.commit();
     } catch (err) {
       if (!committed) await tx.rollback();
       throw err;
