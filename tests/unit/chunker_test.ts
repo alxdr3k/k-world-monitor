@@ -31,6 +31,18 @@ mock.module("../../src/storage/neo4j/connection", () => ({
             ],
           };
         }
+        // MERGE Chunk query: return resolvedId so caller gets the correct chunk_id.
+        if (query.includes("MERGE (c:Chunk") && query.includes("resolvedId")) {
+          const chunkIdParam = params["chunkId"] as string;
+          return {
+            records: [
+              {
+                get: (key: string) =>
+                  key === "resolvedId" ? chunkIdParam : null,
+              },
+            ],
+          };
+        }
         return { records: [] };
       },
       commit: async () => {},

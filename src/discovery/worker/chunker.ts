@@ -82,28 +82,31 @@ async function writeChunks(
 
   const chunkIds: string[] = await withSession(async (session) => {
     const tx = session.beginTransaction();
-    try {
-      // Guard: verify the Snapshot node exists before writing any Chunk nodes.
-      // If the snap_id is invalid, abort the transaction before creating orphans.
-      const guardResult = await tx.run(
-        `MATCH (s:Snapshot {snap_id: $snapId}) RETURN count(s) AS matched`,
-        { snapId }
-      );
-      const matched = (guardResult.records[0]?.get("matched") as number) ?? 0;
-      if (matched === 0) {
-        await tx.rollback();
-        throw new Error(`Snapshot not found: ${snapId}`);
-      }
 
+    // Guard: verify the Snapshot node exists before writing any Chunk nodes.
+    // Checked outside the try/catch so a missing Snapshot throws cleanly
+    // without triggering a second rollback in the catch handler.
+    const guardResult = await tx.run(
+      `MATCH (s:Snapshot {snap_id: $snapId}) RETURN count(s) AS matched`,
+      { snapId }
+    );
+    const matched = (guardResult.records[0]?.get("matched") as number) ?? 0;
+    if (matched === 0) {
+      await tx.rollback();
+      throw new Error(`Snapshot not found: ${snapId}`);
+    }
+
+    try {
       // Idempotent upsert via MERGE on (snap_id, chunk_index) — the composite
       // uniqueness key.  ON CREATE assigns a fresh ULID; ON MATCH updates
       // mutable fields so a re-run refreshes text/offsets without duplicating.
+      // resolvedId is the chunk_id that actually lives in the DB (may differ
+      // from the candidate ULID on MATCH path); we return it to the caller.
       const ids: string[] = [];
       for (const chunk of chunks) {
         const chunkId = `chk_${ulid()}`;
-        ids.push(chunkId);
 
-        await tx.run(
+        const mergeResult = await tx.run(
           `MERGE (c:Chunk {snap_id: $snapId, chunk_index: $chunkIndex})
            ON CREATE SET
              c.chunk_id   = $chunkId,
@@ -126,6 +129,11 @@ async function writeChunks(
             createdAt: now,
           }
         );
+        // Use the chunk_id the DB reports — on MATCH this may be the existing id.
+        const resolvedId =
+          (mergeResult.records[0]?.get("resolvedId") as string | undefined) ??
+          chunkId;
+        ids.push(resolvedId);
 
         // Link Snapshot → Chunk (MERGE avoids duplicate relationships on re-run).
         await tx.run(
