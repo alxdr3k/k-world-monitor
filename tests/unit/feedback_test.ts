@@ -368,6 +368,20 @@ describe("reviewIntervention — manual_claim", () => {
       reviewIntervention("aci_TEST004", "manual_claim")
     ).rejects.toThrow("manualClaimInput is required");
   });
+
+  it("propagates resolveIntervention error — ManualClaimEntry persists, intervention stays pending (retryable)", async () => {
+    // Simulate: fetchInterventionContext + createManualClaimEntry succeed,
+    // but resolveIntervention (SET i.status) fails.
+    // Design: no compensation for manual_claim — claim created before status transition
+    // so intervention stays pending_user_review and the action is retryable.
+    neo4jThrowOnResolve = true;
+    await expect(
+      reviewIntervention("aci_TEST004b", "manual_claim", { manualClaimInput: baseInput() })
+    ).rejects.toThrow("Neo4j resolve error");
+    // ManualClaimEntry was created before the resolve attempt (ordering invariant).
+    const createQ = neo4jRuns.find((r) => r.query.includes("CREATE (m:ManualClaimEntry"));
+    expect(createQ).toBeTruthy();
+  });
 });
 
 describe("reviewIntervention — temp_text", () => {
