@@ -183,6 +183,9 @@ describe("completeRun", () => {
     expect(() => (completeRun as any)(id)).toThrow("totalCostUsd is required");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(() => (completeRun as any)(id, {})).toThrow("totalCostUsd is required");
+    // null payload must also be rejected (not just undefined).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => (completeRun as any)(id, null)).toThrow("totalCostUsd is required");
   });
 
   it("accepts zero cost (free runs)", () => {
@@ -295,6 +298,11 @@ describe("getDailyCostUsd", () => {
     completeRun(id1, { totalCostUsd: 0.05 });
     failRun(id2);
     expect(getDailyCostUsd(today)).toBeCloseTo(0.05, 6);
+  });
+
+  it("throws for unknown vendor filter", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => getDailyCostUsd("2026-01-01", "cohere" as any)).toThrow("unknown vendor");
   });
 
   it("filters by vendor when specified", () => {

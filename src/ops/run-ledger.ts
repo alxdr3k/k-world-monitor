@@ -108,8 +108,8 @@ export function startRun(input: StartRunInput): string {
 }
 
 export function completeRun(runId: string, output: CompleteRunInput): void {
-  // Runtime guard for JS callers that bypass TypeScript (no second arg or no totalCostUsd).
-  if ((output as unknown) === undefined || (output.totalCostUsd as unknown) === undefined)
+  // Runtime guard for JS callers that bypass TypeScript (no second arg, null, or missing totalCostUsd).
+  if ((output as unknown) == null || (output.totalCostUsd as unknown) === undefined)
     throw new Error("completeRun: totalCostUsd is required");
   if (!Number.isFinite(output.totalCostUsd) || output.totalCostUsd < 0)
     throw new Error(
@@ -192,6 +192,8 @@ function validateDate(date: string, caller: string): void {
 // Optional vendor filter.
 export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
   validateDate(date, "getDailyCostUsd");
+  if (vendor !== undefined && !VALID_VENDORS.has(vendor))
+    throw new Error(`getDailyCostUsd: unknown vendor '${vendor}'`);
   const nextDay = nextDateString(date);
   const row = vendor
     ? (getDb()
