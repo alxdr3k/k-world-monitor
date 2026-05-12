@@ -68,10 +68,18 @@ async function migrateSqlite(): Promise<void> {
       // limit the skip to migrations that are explicitly a single ALTER ...
       // ADD COLUMN plus the schema_migrations INSERT (v7 is the only one).
       const msg = err instanceof Error ? err.message : String(err);
+      // Strip SQL comments (`-- ...` line comments and `/* ... */` block comments)
+      // before counting ALTER statements; otherwise an explanatory comment that
+      // mentions `ALTER TABLE ... ADD COLUMN` inflates the count and defeats the
+      // single-statement guard. v7_discovery_queue_updated_at.sql is the
+      // concrete case — its header comment narrates the ALTER constraint.
+      const sqlNoComments = sql
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/--[^\n]*/g, "");
       const isAddColumnOnlyMigration =
-        /^\s*ALTER\s+TABLE\s+\S+\s+ADD\s+COLUMN\b/im.test(sql) &&
+        /^\s*ALTER\s+TABLE\s+\S+\s+ADD\s+COLUMN\b/im.test(sqlNoComments) &&
         // exactly one ALTER and at most the trailing schema_migrations INSERT
-        (sql.match(/\bALTER\s+TABLE\b/gi) ?? []).length === 1;
+        (sqlNoComments.match(/\bALTER\s+TABLE\b/gi) ?? []).length === 1;
       if (
         /duplicate column name/i.test(msg) &&
         isAddColumnOnlyMigration

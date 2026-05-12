@@ -21,6 +21,7 @@ const neo4jRuns: Array<{ query: string; params: Record<string, unknown> }> = [];
 interface FindExistingConfig {
   snapId: string;
   r2Key: string | null;
+  docId?: string; // R5 P2: optional override; falls back to `doc_dedup_<snapId>` in mock
 }
 let findExistingResult: FindExistingConfig | null = null; // what MATCH returns for dedup check
 
@@ -55,13 +56,19 @@ mock.module("../../src/storage/neo4j/connection", () => ({
             }],
           };
         }
-        // Deduplication MATCH query returns existing snap_id + r2_key if configured.
+        // Deduplication MATCH query returns existing snap_id + doc_id + r2_key.
+        // doc_id is included so the dedup return path can satisfy the
+        // SnapshotResult contract with a real document identifier (R5 P2 fix).
         if (query.includes("MATCH (s:Snapshot") && findExistingResult) {
           const cfg = findExistingResult;
           return {
             records: [{
               get: (field: string) =>
-                field === "snap_id" ? cfg.snapId : cfg.r2Key,
+                field === "snap_id"
+                  ? cfg.snapId
+                  : field === "doc_id"
+                    ? cfg.docId ?? `doc_dedup_${cfg.snapId}`
+                    : cfg.r2Key,
             }],
           };
         }
@@ -291,7 +298,9 @@ describe("createSnapshotFingerprint — deduplication", () => {
     expect(result.deduplicated).toBe(true);
     expect(result.snapId).toBe("snap_EXISTING");
     expect(result.r2Key).toBe("permitted_artifact/derived/snapshot/snap_EXISTING");
-    expect(result.docId).toBe(""); // dedup path returns empty docId
+    // R5 P2 fix — dedup path now returns the existing Snapshot's actual doc_id
+    // (queried via findExistingSnapshot) so the SnapshotResult contract holds.
+    expect(result.docId).toBe("doc_dedup_snap_EXISTING");
   });
 
   it("skips Snapshot node creation and R2 upload when deduplicated", async () => {

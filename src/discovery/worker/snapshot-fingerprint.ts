@@ -96,6 +96,7 @@ function hasUpdatedAtColumn(): boolean {
 
 interface ExistingSnapshot {
   snapId: string;
+  docId: string;
   r2Key: string | null;
 }
 
@@ -128,17 +129,20 @@ async function allLinkedSourcesAllowRawCloud(snapId: string): Promise<boolean> {
 }
 
 // Returns null when no Snapshot with this content_hash exists.
-// Also returns r2_key so dedup path can back-fill a failed R2 upload.
+// Also returns r2_key (so dedup can back-fill a failed R2 upload) and doc_id
+// (so the dedup result satisfies SnapshotResult contract with a real document
+// identifier instead of an empty string).
 async function findExistingSnapshot(contentHash: string): Promise<ExistingSnapshot | null> {
   return withSession(async (session) => {
     const result = await session.run(
-      "MATCH (s:Snapshot {content_hash: $hash}) RETURN s.snap_id AS snap_id, s.r2_key AS r2_key LIMIT 1",
+      "MATCH (s:Snapshot {content_hash: $hash}) RETURN s.snap_id AS snap_id, s.doc_id AS doc_id, s.r2_key AS r2_key LIMIT 1",
       { hash: contentHash }
     );
     const record = result.records[0];
     if (!record) return null;
     return {
       snapId: record.get("snap_id") as string,
+      docId: (record.get("doc_id") as string | null) ?? "",
       r2Key: (record.get("r2_key") as string | null) ?? null,
     };
   });
@@ -277,7 +281,7 @@ async function createDocumentAndSnapshot(
 async function ensureSourceLinkage(
   input: SnapshotInput,
   contentHash: string
-): Promise<boolean> {
+): Promise<string | null> {
   return withSession(async (session) => {
     const tx = session.beginTransaction();
     try {
@@ -293,13 +297,16 @@ async function ensureSourceLinkage(
           : 0;
       if (matched === 0) {
         await tx.rollback();
-        return false;
+        return null;
       }
 
       const now = new Date().toISOString();
+      const newDocId = `doc_${ulid()}`;
 
-      // Upsert Document for this source (may not exist if this is a new source).
-      await tx.run(
+      // Upsert Document for this source. RETURN d.doc_id so the caller can hand
+      // a real docId back from the dedup path (ON MATCH keeps the existing id,
+      // ON CREATE uses newDocId).
+      const docResult = await tx.run(
         `MERGE (d:Document {url: $url, source_id: $sourceId})
          ON CREATE SET
            d.doc_id       = $docId,
@@ -311,9 +318,10 @@ async function ensureSourceLinkage(
            d.created_at   = $createdAt
          ON MATCH SET
            d.title        = COALESCE($title, d.title),
-           d.published_at = COALESCE($publishedAt, d.published_at)`,
+           d.published_at = COALESCE($publishedAt, d.published_at)
+         RETURN d.doc_id AS doc_id`,
         {
-          docId: `doc_${ulid()}`,
+          docId: newDocId,
           sourceId: input.sourceId,
           url: input.url,
           title: input.title ?? null,
@@ -321,6 +329,10 @@ async function ensureSourceLinkage(
           createdAt: now,
         }
       );
+      const linkedDocId =
+        docResult.records.length > 0
+          ? (docResult.records[0]!.get("doc_id") as string)
+          : newDocId;
 
       await tx.run(
         `MATCH (src:Source {source_id: $sourceId}), (d:Document {url: $url, source_id: $sourceId})
@@ -335,7 +347,7 @@ async function ensureSourceLinkage(
       );
 
       await tx.commit();
-      return true;
+      return linkedDocId;
     } catch (err) {
       await tx.rollback();
       throw err;
@@ -440,7 +452,7 @@ export async function createSnapshotFingerprint(
     markQueueItemDone(input.queueId, existing.snapId, contentHash);
     return {
       snapId: existing.snapId,
-      docId: "",
+      docId: existing.docId,
       contentHash,
       r2Key: dedupR2Key,
       deduplicated: true,
@@ -461,25 +473,38 @@ export async function createSnapshotFingerprint(
   // R2 upload: only for explicitly permitted artifacts (ADR-0012 INV-0012-3/4).
   // P2-9 addendum: After Neo4j write, upload to R2 and then back-patch the
   // Snapshot node's r2_key so the stored graph reflects the actual R2 locator.
+  //
+  // R5 P1 — MERGE race cross-source guard: when `actualSnapId !== snapId`, the
+  // MERGE matched a Snapshot created by a concurrent worker that may have
+  // linked the node to a Source whose raw_cloud_policy is `always_prohibited`.
+  // Re-run the cross-source policy check (same guard as the dedup back-fill
+  // path) so we never grant an r2_key to a snapshot already shared with a
+  // prohibited source.
   let r2Key: string | null = null;
   if (
     input.archivePolicy === "full_snapshot_allowed" &&
     input.rawCloudPolicy === "allowed_public_data_only"
   ) {
-    const key = `permitted_artifact/derived/snapshot/${actualSnapId}`;
-    const bodyBuf = input.body.buffer.slice(
-      input.body.byteOffset,
-      input.body.byteOffset + input.body.byteLength
-    ) as ArrayBuffer;
-    await r2Put(key, bodyBuf);
-    r2Key = key;
-    // Back-patch r2_key on the Snapshot node now that upload succeeded.
-    await withSession(async (session) => {
-      await session.run(
-        `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
-        { snapId: actualSnapId, r2Key: key }
-      );
-    });
+    const mergeMatchedExisting = actualSnapId !== snapId;
+    const policyOk =
+      !mergeMatchedExisting ||
+      (await allLinkedSourcesAllowRawCloud(actualSnapId));
+    if (policyOk) {
+      const key = `permitted_artifact/derived/snapshot/${actualSnapId}`;
+      const bodyBuf = input.body.buffer.slice(
+        input.body.byteOffset,
+        input.body.byteOffset + input.body.byteLength
+      ) as ArrayBuffer;
+      await r2Put(key, bodyBuf);
+      r2Key = key;
+      // Back-patch r2_key on the Snapshot node now that upload succeeded.
+      await withSession(async (session) => {
+        await session.run(
+          `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
+          { snapId: actualSnapId, r2Key: key }
+        );
+      });
+    }
   }
 
   markQueueItemDone(input.queueId, actualSnapId, contentHash);
@@ -526,8 +551,28 @@ export async function processDiscoveryQueue(
     published_at: string | null;
   }> = [];
 
+  // R5 P2 — Bounded retry on SQLITE_BUSY: BEGIN IMMEDIATE acquires a write lock
+  // up front, and SQLite allows only one writer per database. Another worker
+  // (or the discovery producer's enqueue path) holding a write transaction will
+  // cause BEGIN IMMEDIATE to throw `SQLITE_BUSY`. Without retry, an otherwise
+  // healthy worker run aborts and processes zero rows. We retry a small number
+  // of times with linear backoff; if contention persists the caller still sees
+  // the error after the budget.
+  const MAX_BUSY_RETRIES = 5;
+  const BUSY_BACKOFF_MS = 50;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      db.prepare("BEGIN IMMEDIATE").run();
+      break;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/SQLITE_BUSY|database is locked/i.test(msg) || attempt >= MAX_BUSY_RETRIES) {
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, BUSY_BACKOFF_MS * (attempt + 1)));
+    }
+  }
   {
-    db.prepare("BEGIN IMMEDIATE").run();
     try {
       pending = db
         .prepare(
