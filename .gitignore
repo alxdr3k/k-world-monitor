@@ -13,6 +13,9 @@ research.db-wal
 # TypeScript build output
 dist/
 
+# Claude Code internal worktree state
+.claude/worktrees/
+
 # Generated invariant artifacts. Always rebuilt by the validator; never
 # trusted as source of truth (see ADR-0002 INV-0002-1: warning-level only).
 # CI uploads them as run artifacts for PR inspection; we never commit them.
