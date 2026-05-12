@@ -73,7 +73,7 @@ async function findExistingSnapshot(contentHash: string): Promise<string | null>
 // P1-3: Guard that Source exists before committing; throw if missing.
 // P1-4: MERGE on content_hash instead of CREATE for idempotent concurrent writes.
 //
-// Returns the actual doc_id stored in Neo4j.
+// Returns the actual { docId, snapId } stored in Neo4j (MERGE may match existing nodes).
 // ---------------------------------------------------------------------------
 
 async function createDocumentAndSnapshot(
@@ -81,7 +81,7 @@ async function createDocumentAndSnapshot(
   snapId: string,
   docId: string,
   contentHash: string
-): Promise<string> {
+): Promise<{ docId: string; snapId: string }> {
   const now = new Date().toISOString();
 
   return withSession(async (session) => {
@@ -134,9 +134,9 @@ async function createDocumentAndSnapshot(
       }
 
       // P1-4: MERGE on content_hash makes Snapshot creation idempotent.
-      // The uniqueness constraint on Snapshot.content_hash (v1_schema.cypher) ensures
-      // at most one node per content_hash under concurrent workers.
-      await tx.run(
+      // RETURN s.snap_id so the caller uses the actual persisted ID even when MERGE
+      // matches an existing node (race: two workers with the same contentHash).
+      const snapResult = await tx.run(
         `MERGE (s:Snapshot {content_hash: $contentHash})
          ON CREATE SET
            s.snap_id     = $snapId,
@@ -147,7 +147,8 @@ async function createDocumentAndSnapshot(
            s.mime        = $mime,
            s.byte_size   = $byteSize,
            s.r2_key      = null,
-           s.created_at  = $createdAt`,
+           s.created_at  = $createdAt
+         RETURN s.snap_id AS snap_id`,
         {
           snapId,
           actualDocId,
@@ -159,6 +160,10 @@ async function createDocumentAndSnapshot(
           createdAt: now,
         }
       );
+      const actualSnapId: string =
+        snapResult.records.length > 0
+          ? (snapResult.records[0]!.get("snap_id") as string)
+          : snapId;
 
       // Link Source→Document (MERGE to avoid duplicate edges).
       await tx.run(
@@ -175,7 +180,7 @@ async function createDocumentAndSnapshot(
       );
 
       await tx.commit();
-      return actualDocId;
+      return { docId: actualDocId, snapId: actualSnapId };
     } catch (err) {
       await tx.rollback();
       throw err;
@@ -317,7 +322,12 @@ export async function createSnapshotFingerprint(
   const docId = `doc_${ulid()}`;
 
   // P2-9: Neo4j write FIRST, R2 upload after — prevents orphaned R2 objects on Neo4j failure.
-  const actualDocId = await createDocumentAndSnapshot(input, snapId, docId, contentHash);
+  const { docId: actualDocId, snapId: actualSnapId } = await createDocumentAndSnapshot(
+    input,
+    snapId,
+    docId,
+    contentHash
+  );
 
   // R2 upload: only for explicitly permitted artifacts (ADR-0012 INV-0012-3/4).
   // P2-9 addendum: After Neo4j write, upload to R2 and then back-patch the
@@ -327,7 +337,7 @@ export async function createSnapshotFingerprint(
     input.archivePolicy === "full_snapshot_allowed" &&
     input.rawCloudPolicy === "allowed_public_data_only"
   ) {
-    const key = `permitted_artifact/derived/snapshot/${snapId}`;
+    const key = `permitted_artifact/derived/snapshot/${actualSnapId}`;
     const bodyBuf = input.body.buffer.slice(
       input.body.byteOffset,
       input.body.byteOffset + input.body.byteLength
@@ -338,14 +348,14 @@ export async function createSnapshotFingerprint(
     await withSession(async (session) => {
       await session.run(
         `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
-        { snapId, r2Key: key }
+        { snapId: actualSnapId, r2Key: key }
       );
     });
   }
 
-  markQueueItemDone(input.queueId, snapId, contentHash);
+  markQueueItemDone(input.queueId, actualSnapId, contentHash);
 
-  return { snapId, docId: actualDocId, contentHash, r2Key, deduplicated: false };
+  return { snapId: actualSnapId, docId: actualDocId, contentHash, r2Key, deduplicated: false };
 }
 
 export async function processDiscoveryQueue(

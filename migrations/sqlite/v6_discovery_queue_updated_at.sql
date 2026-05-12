@@ -6,9 +6,12 @@ ALTER TABLE discovery_queue
   ADD COLUMN updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'));
 
 -- Trigger to keep updated_at current on every status change.
+-- WHEN guard: skip when updated_at already changed in this update to prevent
+-- self-recursion under PRAGMA recursive_triggers=ON.
 CREATE TRIGGER IF NOT EXISTS discovery_queue_updated_at
   AFTER UPDATE ON discovery_queue
   FOR EACH ROW
+  WHEN NEW.updated_at = OLD.updated_at
   BEGIN
     UPDATE discovery_queue SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
     WHERE queue_id = NEW.queue_id;
