@@ -179,32 +179,34 @@ function validateDate(date: string, caller: string): void {
 
 // Returns total cost in USD for all completed runs on a UTC calendar date (YYYY-MM-DD).
 // Filters by completed_at so cross-midnight runs are attributed to the day they billed.
+// Uses a half-open range (>= date AND < next-day) to allow the composite index on
+// (completed_at, vendor) to be used efficiently — LIKE does not reliably use B-tree indexes.
 // Optional vendor filter.
 export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
   validateDate(date, "getDailyCostUsd");
-  const like = `${date}%`;
+  const nextDay = nextDateString(date);
   const row = vendor
     ? (getDb()
         .prepare(
           `SELECT COALESCE(SUM(total_cost_usd), 0) AS total
            FROM run_ledger
-           WHERE completed_at LIKE ? AND vendor = ? AND status = 'completed'`
+           WHERE completed_at >= ? AND completed_at < ? AND vendor = ? AND status = 'completed'`
         )
-        .get(like, vendor) as { total: number })
+        .get(date, nextDay, vendor) as { total: number })
     : (getDb()
         .prepare(
           `SELECT COALESCE(SUM(total_cost_usd), 0) AS total
            FROM run_ledger
-           WHERE completed_at LIKE ? AND status = 'completed'`
+           WHERE completed_at >= ? AND completed_at < ? AND status = 'completed'`
         )
-        .get(like) as { total: number });
+        .get(date, nextDay) as { total: number });
   return row.total;
 }
 
 // Returns per-vendor daily cost breakdown for a UTC calendar date.
 export function getDailyCostBreakdown(date: string): DailyCostRow[] {
   validateDate(date, "getDailyCostBreakdown");
-  const like = `${date}%`;
+  const nextDay = nextDateString(date);
   return getDb()
     .prepare(
       `SELECT substr(completed_at, 1, 10) AS date,
@@ -212,8 +214,15 @@ export function getDailyCostBreakdown(date: string): DailyCostRow[] {
               COALESCE(SUM(total_cost_usd), 0) AS totalCostUsd,
               COUNT(*) AS runCount
        FROM run_ledger
-       WHERE completed_at LIKE ? AND status = 'completed'
+       WHERE completed_at >= ? AND completed_at < ? AND status = 'completed'
        GROUP BY vendor`
     )
-    .all(like) as DailyCostRow[];
+    .all(date, nextDay) as DailyCostRow[];
+}
+
+/** Returns the ISO date string for the day after `date` (YYYY-MM-DD). */
+function nextDateString(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }

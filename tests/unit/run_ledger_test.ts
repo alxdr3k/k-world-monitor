@@ -3,9 +3,9 @@
  * SQLite in-memory; no Neo4j dependency.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 
-process.env["SQLITE_PATH"] = ":memory:";
+const _originalSqlitePath = process.env["SQLITE_PATH"];
 
 import { closeDb } from "../../src/storage/sqlite/connection";
 import {
@@ -55,7 +55,16 @@ function setupDb() {
 }
 
 beforeEach(() => {
+  process.env["SQLITE_PATH"] = ":memory:";
   setupDb();
+});
+
+afterEach(() => {
+  if (_originalSqlitePath === undefined) {
+    delete process.env["SQLITE_PATH"];
+  } else {
+    process.env["SQLITE_PATH"] = _originalSqlitePath;
+  }
 });
 
 describe("startRun", () => {
