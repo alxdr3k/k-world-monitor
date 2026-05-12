@@ -42,7 +42,7 @@ export interface CompleteRunInput {
   outputTokens?: number;
   cachedTokens?: number;
   /** Required — null cost silently disappears from SUM aggregation (AC-019). */
-  totalCostUsd?: number;
+  totalCostUsd: number;
 }
 
 export interface DailyCostRow {
@@ -57,8 +57,10 @@ const VALID_TIERS = new Set([0, 1, 2, 3]);
 export function startRun(input: StartRunInput): string {
   if (!VALID_TIERS.has(input.tier))
     throw new Error(`startRun: tier must be 0–3, got ${input.tier}`);
-  // ADR-0023: non-default vendor routing must record the override reason.
-  if (input.vendor !== "openai" && !input.domainOverrideReason)
+  if (!input.modelId?.trim())
+    throw new Error("startRun: modelId must be a non-empty string");
+  // ADR-0023: non-default vendor routing must record a non-blank override reason.
+  if (input.vendor !== "openai" && !input.domainOverrideReason?.trim())
     throw new Error(
       `startRun: domainOverrideReason is required for non-openai vendor '${input.vendor}'`
     );
@@ -97,9 +99,9 @@ export function startRun(input: StartRunInput): string {
   return runId;
 }
 
-export function completeRun(runId: string, output: CompleteRunInput = {}): void {
-  // totalCostUsd is required — omitting it silently excludes the run from SUM aggregation.
-  if (output.totalCostUsd === undefined)
+export function completeRun(runId: string, output: CompleteRunInput): void {
+  // Runtime guard for JS callers that bypass TypeScript (no second arg or no totalCostUsd).
+  if ((output as unknown) === undefined || (output.totalCostUsd as unknown) === undefined)
     throw new Error("completeRun: totalCostUsd is required");
   if (!Number.isFinite(output.totalCostUsd) || output.totalCostUsd < 0)
     throw new Error(

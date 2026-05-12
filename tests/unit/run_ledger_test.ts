@@ -119,6 +119,24 @@ describe("startRun", () => {
       startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" })
     ).not.toThrow();
   });
+
+  it("throws when non-openai domainOverrideReason is whitespace-only", () => {
+    expect(() =>
+      startRun({ stage: "extract", vendor: "anthropic", tier: 1, modelId: "claude-sonnet-4-6", domainOverrideReason: "   " })
+    ).toThrow("domainOverrideReason is required");
+    expect(() =>
+      startRun({ stage: "extract", vendor: "google", tier: 0, modelId: "gemini-2.5-pro", domainOverrideReason: "\t" })
+    ).toThrow("domainOverrideReason is required");
+  });
+
+  it("throws when modelId is empty or whitespace-only", () => {
+    expect(() =>
+      startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "" })
+    ).toThrow("modelId must be a non-empty string");
+    expect(() =>
+      startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "   " })
+    ).toThrow("modelId must be a non-empty string");
+  });
 });
 
 describe("completeRun", () => {
@@ -135,10 +153,13 @@ describe("completeRun", () => {
     expect(row["completed_at"]).toBeTruthy();
   });
 
-  it("throws when totalCostUsd is not provided", () => {
+  it("throws when totalCostUsd is not provided (JS-caller guard)", () => {
     const id = startRun({ stage: "dossier", vendor: "openai", tier: 1, modelId: "gpt-5-mini" });
-    expect(() => completeRun(id)).toThrow("totalCostUsd is required");
-    expect(() => completeRun(id, {})).toThrow("totalCostUsd is required");
+    // Cast to any to simulate untyped JS callers bypassing the TS interface.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => (completeRun as any)(id)).toThrow("totalCostUsd is required");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => (completeRun as any)(id, {})).toThrow("totalCostUsd is required");
   });
 
   it("accepts zero cost (free runs)", () => {
