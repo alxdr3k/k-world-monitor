@@ -150,6 +150,16 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
   const db = getDb();
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
+  // Fail fast with actionable message if migrations have not been run
+  const policyTableExists = db.query<{ name: string }, []>(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='source_material_policy'"
+  ).get();
+  if (!policyTableExists) {
+    throw new Error(
+      "source_material_policy table not found. Run migrations first: bun run migrate:sqlite"
+    );
+  }
+
   // Ensure slug→source_id mapping table exists for idempotency
   db.run(`
     CREATE TABLE IF NOT EXISTS source_registry_slug_map (

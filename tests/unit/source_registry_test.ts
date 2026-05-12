@@ -7,7 +7,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { load as yamlLoad } from "js-yaml";
 import { seedSources, SeedValidationError } from "../../src/storage/source-registry/seed";
@@ -254,5 +255,17 @@ describe("seedSources — YAML shape guard", () => {
   it("throws on null/empty YAML (dryRun path exercises shape check)", () => {
     // Use a non-existent dataRoot so readFileSync throws a controlled error
     expect(() => seedSources({ dryRun: true, dataRoot: "/nonexistent/path" })).toThrow();
+  });
+
+  it("throws actionable error message for malformed YAML (no sources array)", () => {
+    const dir = mkdtempSync(`${tmpdir()}/seed-test-`);
+    try {
+      writeFileSync(`${dir}/sources_seed.yaml`, "just a string\n");
+      expect(() => seedSources({ dryRun: true, dataRoot: dir })).toThrow(
+        "must be an object with a sources array"
+      );
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
   });
 });
