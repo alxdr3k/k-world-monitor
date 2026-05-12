@@ -31,7 +31,7 @@ ADR-0011~0021로 supersede됐다.
 - current milestone: `P0-M2` (Source Registry & Collection Queue) — INFRA-1B.1 시작으로 M2 진입. P0-M1 게이트는 별도로 통과 필요.
 - active tracks: `INFRA` (Source registry bootstrap + policy gate)
 - active phase: `INFRA-1B`
-- active slice: **`INFRA-1B.1.x` landed** — Hotfix: PRAGMA busy_timeout, v3 slug map migration, URL validation, Neo4j pool env vars. All shipped in c51b2ce (PR #15). In-flight PRs: #16 (INFRA-1B.2a safe-fetch), #17 (INFRA-1B.2b scheduler), #18-#20 (INFRA-1B.3/4 fingerprint/chunker), #21 (INFRA-1B.5 access-interventions), #22 (INFRA-1B.6 feedback CLI), #23 (OPS-1A.1 run ledger).
+- active slice: **`INFRA-1B.1.x` landed** — Hotfix: PRAGMA busy_timeout, v3 slug map migration, URL validation, Neo4j pool env vars. All shipped in c51b2ce (PR #15). Open PRs (slices still `planned` in canonical ledger): #16 (INFRA-1B.2a safe-fetch), #17 (INFRA-1B.2b scheduler), #18-#20 (INFRA-1B.3/4 fingerprint/chunker), #21 (INFRA-1B.5 access-interventions), #22 (INFRA-1B.6 feedback CLI), #23 (OPS-1A.1 run ledger).
   `INFRA-1A.3` landed (PR #14 merged 2026-05-12): R2 permitted-artifact prefix policy + sha256 round-trip tests.
   `INFRA-1A.6` landed (PR #12 merged 2026-05-12): Tier A source seed 72 sources + TEST-027.
   `INFRA-1A.8` landed (PR #10 merged 2026-05-12): Backup runbook docs-only (AC-032).
