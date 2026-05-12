@@ -545,6 +545,27 @@ describe("safeFetch — redirect defense (INV-0028-3)", () => {
     );
     expect(result.status).toBe(300);
   });
+
+  it("returns 304 status directly without throwing RedirectError (conditional GET)", async () => {
+    // 304 must not be treated as a redirect — it carries no Location header and
+    // the scheduler's not_modified path depends on receiving it cleanly.
+    const fetcher: FetchFn = (url, _init) => {
+      if (url.includes("robots.txt")) return Promise.resolve(new Response("", { status: 404 }));
+      return Promise.resolve(
+        new Response(null, {
+          status: 304,
+          headers: { ETag: '"abc123"' },
+        })
+      );
+    };
+    const result = await safeFetch(
+      "https://example.com/feed.xml",
+      { maxBytes: MAX_BYTES.rss, requestHeaders: { "If-None-Match": '"abc123"' } },
+      { dnsLookup: publicDns, fetcher }
+    );
+    expect(result.status).toBe(304);
+    expect(result.headers.get("ETag")).toBe('"abc123"');
+  });
 });
 
 describe("safeFetch — body size cap (INV-0028-4)", () => {
