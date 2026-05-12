@@ -11,8 +11,8 @@ export function getDriver(): Driver {
       throw new Error("NEO4J_PASSWORD env var is required");
     }
     _driver = neo4j.driver(uri, neo4j.auth.basic(user, password), {
-      maxConnectionPoolSize: 10,
-      connectionAcquisitionTimeout: 5000,
+      maxConnectionPoolSize: parseInt(process.env["NEO4J_MAX_POOL_SIZE"] ?? "10"),
+      connectionAcquisitionTimeout: parseInt(process.env["NEO4J_ACQ_TIMEOUT_MS"] ?? "5000"),
     });
   }
   return _driver;

@@ -239,17 +239,20 @@ export function seedSources(opts: { dryRun?: boolean; dataRoot?: string } = {}):
         continue;
       }
 
-      const source_id = `src_${ulid()}`;
-      insertSlugMap.run(s.slug, source_id);
+      const generated_id = `src_${ulid()}`;
+      insertSlugMap.run(s.slug, generated_id);
+      // Re-read canonical ID: if INSERT was ignored (concurrent seeder race),
+      // use the already-mapped ID to avoid orphan policy rows.
+      const canonical = getIdBySlug.get(s.slug)!;
       upsertPolicy.run(
-        source_id,
+        canonical.source_id,
         s.archive_policy,
         s.raw_cloud_policy,
         s.external_llm_policy,
         now
       );
       rows.push({
-        source_id,
+        source_id: canonical.source_id,
         slug: s.slug,
         name: s.name,
         archive_policy: s.archive_policy,
