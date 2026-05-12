@@ -38,7 +38,7 @@ export interface ScenarioNode {
   horizon: string;                     // Q-001 (open: enum TBD)
   meta_category: string;
   impact_targets: string;              // JSON array of target labels (AC-026)
-  impact_direction_by_target: string;  // JSON dict: target → "positive"|"negative"|"mixed" (AC-026)
+  impact_direction_by_target: string;  // JSON dict: target → upside|downside|mixed|neutral (REQ-021 AC-026)
   transmission_channels: string;       // JSON array of channel labels (AC-026)
   created_at: string;                  // ISO 8601 datetime
 }

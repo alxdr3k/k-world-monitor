@@ -72,25 +72,26 @@ describe("isSourcePerspective", () => {
     expect(isSourcePerspective(v)).toBe(true);
   });
 
-  it("covers all 4 AC-027 required values", () => {
+  it("covers all 4 AC-027 required values (REQ-022 canonical labels)", () => {
     expect(SOURCE_PERSPECTIVE).toHaveLength(4);
-    const required = ["risk", "opportunity", "neutral", "mixed"];
+    const required = ["risk_observer", "opportunity_observer", "neutral", "mixed"];
     for (const v of required) {
       expect(isSourcePerspective(v)).toBe(true);
     }
   });
 
   it("rejects unknown perspective", () => {
+    expect(isSourcePerspective("risk")).toBe(false);
+    expect(isSourcePerspective("opportunity")).toBe(false);
     expect(isSourcePerspective("negative")).toBe(false);
     expect(isSourcePerspective("positive")).toBe(false);
-    expect(isSourcePerspective("risk_observer")).toBe(false);
     expect(isSourcePerspective("")).toBe(false);
     expect(isSourcePerspective(null)).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// AC-027 distribution constraint (≤50% risk, ≥25% opportunity, ≥15% neutral)
+// AC-027 distribution constraint (REQ-022: risk_observer ≤50%, opportunity_observer ≥25%, neutral ≥15%)
 // Tested as a helper function to validate a source portfolio
 // ---------------------------------------------------------------------------
 describe("AC-027 source_perspective distribution constraint", () => {
@@ -102,8 +103,8 @@ describe("AC-027 source_perspective distribution constraint", () => {
   } {
     const total = perspectives.length;
     if (total === 0) return { valid: false, riskPct: 0, opportunityPct: 0, neutralPct: 0 };
-    const riskPct = (perspectives.filter((p) => p === "risk").length / total) * 100;
-    const opportunityPct = (perspectives.filter((p) => p === "opportunity").length / total) * 100;
+    const riskPct = (perspectives.filter((p) => p === "risk_observer").length / total) * 100;
+    const opportunityPct = (perspectives.filter((p) => p === "opportunity_observer").length / total) * 100;
     const neutralPct = (perspectives.filter((p) => p === "neutral").length / total) * 100;
     return {
       valid: riskPct <= 50 && opportunityPct >= 25 && neutralPct >= 15,
@@ -113,10 +114,10 @@ describe("AC-027 source_perspective distribution constraint", () => {
     };
   }
 
-  it("passes a compliant distribution (40% risk, 40% opportunity, 20% neutral)", () => {
+  it("passes a compliant distribution (40% risk_observer, 40% opportunity_observer, 20% neutral)", () => {
     const portfolio = [
-      ...Array(4).fill("risk"),
-      ...Array(4).fill("opportunity"),
+      ...Array(4).fill("risk_observer"),
+      ...Array(4).fill("opportunity_observer"),
       ...Array(2).fill("neutral"),
     ];
     const result = checkDistribution(portfolio);
@@ -128,8 +129,8 @@ describe("AC-027 source_perspective distribution constraint", () => {
 
   it("fails when risk_observer exceeds 50%", () => {
     const portfolio = [
-      ...Array(6).fill("risk"),
-      ...Array(3).fill("opportunity"),
+      ...Array(6).fill("risk_observer"),
+      ...Array(3).fill("opportunity_observer"),
       ...Array(1).fill("neutral"),
     ];
     const result = checkDistribution(portfolio);
@@ -139,8 +140,8 @@ describe("AC-027 source_perspective distribution constraint", () => {
 
   it("fails when opportunity_observer is below 25%", () => {
     const portfolio = [
-      ...Array(5).fill("risk"),
-      ...Array(2).fill("opportunity"),
+      ...Array(5).fill("risk_observer"),
+      ...Array(2).fill("opportunity_observer"),
       ...Array(3).fill("neutral"),
     ];
     const result = checkDistribution(portfolio);
@@ -150,8 +151,8 @@ describe("AC-027 source_perspective distribution constraint", () => {
 
   it("fails when neutral is below 15%", () => {
     const portfolio = [
-      ...Array(4).fill("risk"),
-      ...Array(5).fill("opportunity"),
+      ...Array(4).fill("risk_observer"),
+      ...Array(5).fill("opportunity_observer"),
       ...Array(1).fill("neutral"),
     ];
     const result = checkDistribution(portfolio);
@@ -159,10 +160,10 @@ describe("AC-027 source_perspective distribution constraint", () => {
     expect(result.neutralPct).toBeLessThan(15);
   });
 
-  it("passes at the exact boundary (50% risk, 25% opportunity, 15% neutral + 10% mixed)", () => {
+  it("passes at the exact boundary (50% risk_observer, 25% opportunity_observer, 15% neutral + 10% mixed)", () => {
     const portfolio = [
-      ...Array(10).fill("risk"),
-      ...Array(5).fill("opportunity"),
+      ...Array(10).fill("risk_observer"),
+      ...Array(5).fill("opportunity_observer"),
       ...Array(3).fill("neutral"),
       ...Array(2).fill("mixed"),
     ];

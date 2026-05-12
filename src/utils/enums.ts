@@ -160,7 +160,7 @@ export function isThesisMarketStance(v: unknown): v is ThesisMarketStance {
 // ---------------------------------------------------------------------------
 // Source bidirectional perspective enum (ADR-0019, AC-027)
 // ---------------------------------------------------------------------------
-export const SOURCE_PERSPECTIVE = ["risk", "opportunity", "neutral", "mixed"] as const;
+export const SOURCE_PERSPECTIVE = ["risk_observer", "opportunity_observer", "neutral", "mixed"] as const;
 export type SourcePerspective = (typeof SOURCE_PERSPECTIVE)[number];
 export function isSourcePerspective(v: unknown): v is SourcePerspective {
   return typeof v === "string" && (SOURCE_PERSPECTIVE as readonly string[]).includes(v);

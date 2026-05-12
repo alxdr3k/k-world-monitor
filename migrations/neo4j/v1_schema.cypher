@@ -179,7 +179,7 @@ OPTIONS {
 //   url: string,
 //   reliability_tier: integer,    // 0-3 (ADR-0011 INV-0011-2)
 //   collectability_score: float,  // 0-1 (ADR-0016)
-//   source_perspective: string,   // risk|opportunity|neutral|mixed (ADR-0019)
+//   source_perspective: string,   // risk_observer|opportunity_observer|neutral|mixed (ADR-0019 REQ-022)
 //   archive_policy: string,       // metadata_only|excerpt_only|full_snapshot_allowed|do_not_collect
 //   raw_cloud_policy: string,     // always_prohibited|allowed_public_data_only
 //   external_llm_policy: string,  // allowed|manual_review_required|prohibited
@@ -245,7 +245,7 @@ OPTIONS {
 //   horizon: string,                          // Q-001 (open: enum TBD)
 //   meta_category: string,
 //   impact_targets: string,                   // JSON array of target labels (ADR-0019 AC-026)
-//   impact_direction_by_target: string,       // JSON dict target→direction (AC-026)
+//   impact_direction_by_target: string,       // JSON dict target→upside|downside|mixed|neutral (REQ-021 AC-026)
 //   transmission_channels: string,            // JSON array of channel labels (AC-026)
 //   created_at: datetime
 // }
