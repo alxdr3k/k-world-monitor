@@ -21,26 +21,40 @@ const doSqlite = args.has("--sqlite") || (!args.has("--sqlite") && !args.has("--
 const REPO_ROOT = join(import.meta.dir, "..");
 
 // ---------------------------------------------------------------------------
-// SQLite migration
+// SQLite migration — versioned chain v1 → v2
 // ---------------------------------------------------------------------------
+const SQLITE_MIGRATIONS: Array<{ version: string; file: string }> = [
+  { version: "v1", file: "migrations/sqlite/v1_schema.sql" },
+  { version: "v2", file: "migrations/sqlite/v2_enum_constraints.sql" },
+];
+
 async function migrateSqlite(): Promise<void> {
   const { getDb, getMigrationVersion } = await import("../src/storage/sqlite/connection");
-  const sqlPath = join(REPO_ROOT, "migrations/sqlite/v1_schema.sql");
 
-  const existingVersion = getMigrationVersion();
-  if (existingVersion === "v1") {
-    console.log("[SQLite] Already at v1 — skipping.");
-    return;
-  }
-
-  const sql = readFileSync(sqlPath, "utf-8");
   if (dryRun) {
-    console.log("[SQLite] --dry-run: would apply:\n", sqlPath);
+    const current = getMigrationVersion();
+    const pending = SQLITE_MIGRATIONS.filter((m) => m.version > (current ?? ""));
+    if (pending.length === 0) {
+      console.log("[SQLite] --dry-run: already at latest version.");
+    } else {
+      for (const m of pending) {
+        console.log(`[SQLite] --dry-run: would apply ${m.file} (${m.version})`);
+      }
+    }
     return;
   }
 
-  getDb().exec(sql);
-  console.log("[SQLite] ✓ Applied v1_schema.sql");
+  for (const migration of SQLITE_MIGRATIONS) {
+    const current = getMigrationVersion();
+    if (current !== null && current >= migration.version) {
+      console.log(`[SQLite] Already at ${current} — skipping ${migration.version}.`);
+      continue;
+    }
+    const sqlPath = join(REPO_ROOT, migration.file);
+    const sql = readFileSync(sqlPath, "utf-8");
+    getDb().exec(sql);
+    console.log(`[SQLite] ✓ Applied ${migration.file}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
