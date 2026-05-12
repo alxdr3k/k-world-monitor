@@ -19,9 +19,10 @@
     "seed-sources:dry-run": "bun run scripts/seed-sources.ts --dry-run"
   },
   "dependencies": {
+    "fast-xml-parser": "^5.8.0",
+    "js-yaml": "^4.1.0",
     "neo4j-driver": "^5.26.0",
-    "ulid": "^2.3.0",
-    "js-yaml": "^4.1.0"
+    "ulid": "^2.3.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
