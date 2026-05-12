@@ -128,8 +128,19 @@ function registerTempTextUrl(
 ): string {
   const cacheId = `rcache_${ulid()}`;
   const now = new Date().toISOString();
-  // expires_at: 7 days from now (DEC-007 ceiling).
   const db = getDb();
+  // Precondition: raw_cache_items.session_id is a FK to research_session.
+  // Verify the parent row exists to surface a clear error instead of a cryptic FK violation.
+  const sessionRow = db
+    .prepare("SELECT session_id FROM research_session WHERE session_id = ?")
+    .get(sessionId);
+  if (!sessionRow) {
+    throw new Error(
+      `registerTempTextUrl: research_session not found for session_id='${sessionId}'. ` +
+      `Ensure the session is initialized in SQLite before resolving interventions via temp_text.`
+    );
+  }
+  // expires_at: 7 days from now (DEC-007 ceiling).
   db.prepare(
     `INSERT INTO raw_cache_items
        (cache_id, session_id, url, content_hash, indexed, embedded, expires_at)
@@ -178,9 +189,27 @@ export async function reviewIntervention(
       sessionId: ctx.sessionId,
       sourceId: ctx.sourceId,
       url: ctx.url,
+      // Override canonicalUrl to match the intervention's source URL for provenance consistency.
+      canonicalUrl: ctx.url,
       interventionId,
     });
-    await resolveIntervention(interventionId, "resolved_manual_claim", resolvedAt);
+    // Compensation: if resolveIntervention fails after claim creation, delete the claim
+    // so retries do not accumulate duplicate ManualClaimEntry nodes. Mirrors temp_text pattern.
+    try {
+      await resolveIntervention(interventionId, "resolved_manual_claim", resolvedAt);
+    } catch (resolveErr) {
+      try {
+        await withSession(async (session) => {
+          await session.run(
+            `MATCH (m:ManualClaimEntry {manual_claim_id: $id}) DETACH DELETE m`,
+            { id: record.manualClaimId }
+          );
+        });
+      } catch {
+        // swallow cleanup error — original resolve error is authoritative
+      }
+      throw resolveErr;
+    }
     return { interventionId, action, resolvedAt, manualClaimRecord: record };
   }
 

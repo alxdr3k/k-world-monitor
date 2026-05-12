@@ -189,8 +189,12 @@ export async function createManualClaimEntry(
           userWrittenClaim: input.userWrittenClaim || null,
           userOpinion: input.userOpinion || null,
           referencedQuote: input.referencedQuote || null,
-          quoteReason: input.quoteReason ?? null,
-          attributionJson: input.attribution ? JSON.stringify(input.attribution) : null,
+          // Gate quote metadata to referenced_quote only — enforce 3-way separation (INV-0018-1).
+          quoteReason: kind === "referenced_quote" ? (input.quoteReason ?? null) : null,
+          attributionJson:
+            kind === "referenced_quote" && input.attribution
+              ? JSON.stringify(input.attribution)
+              : null,
           selfAssessedConfidence: input.selfAssessedConfidence,
           interventionId: input.interventionId || null,
           createdAt: now,
