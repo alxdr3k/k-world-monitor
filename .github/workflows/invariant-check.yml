@@ -102,16 +102,22 @@ jobs:
         run: bun run scripts/validate_invariants.ts --ci
 
       - name: Run fixture regression tests
-        # BLOCKING. Live repo validation is warning-level (INV-0002-1)
-        # by design, but the fixture tests are the only check that
-        # actually fails when the detector itself regresses. Round 48:
-        # invoke the harness directly so this workflow is self-contained
-        # — adopter package.json is not required to expose
-        # `invariant:fixtures` for CI to work.
+        # BLOCKING when fixtures are synced from boilerplate. The fixture
+        # tests are the only check that actually fails when the detector
+        # itself regresses (live repo validation is warning-level by
+        # INV-0002-1). In this repo (k-world-monitor) the fixtures and
+        # harness are boilerplate-owned and not currently synced — skip
+        # with an informational notice rather than fail. If the harness
+        # is later imported via `boilerplate-sync-docs.sh fixtures`, the
+        # branches below are re-enabled automatically.
         run: |
           set -euo pipefail
-          bash scripts/test_fixture.sh docs/_examples/scope_creep
-          bash scripts/test_fixture.sh docs/_examples/glossary_drift
+          if [ -f scripts/test_fixture.sh ] && [ -d docs/_examples/scope_creep ] && [ -d docs/_examples/glossary_drift ]; then
+            bash scripts/test_fixture.sh docs/_examples/scope_creep
+            bash scripts/test_fixture.sh docs/_examples/glossary_drift
+          else
+            echo "::notice::Fixture regression skipped — scripts/test_fixture.sh or docs/_examples/{scope_creep,glossary_drift} absent (boilerplate-owned, not synced to this repo)."
+          fi
 
       - name: Upload generated artifacts
         if: always()

@@ -62,6 +62,7 @@ Then  <기대 결과>
 | AC-041 | DEC-012 (CQ-006) | Given publication preflight. When forecast language 검사. Then **과장 forecast 없음** — 단정적 prediction ("폭락한다") X, 확률 / 조건 / horizon 명시 ("X 조건 시 1~3년 내 가격 -30% 시나리오 가능성 ↑") O | TEST-041 (manual v0) | defined |
 | AC-042 | DEC-012 (CQ-007) | Given publication preflight. When 글 말미 / 별도 section 검사. Then **correction 가능성 / 불확실성 명시** — "본 thesis 의 retraction trigger" 또는 "이 글이 틀릴 수 있는 시나리오" section 존재 | TEST-042 (manual v0) | defined |
 | AC-044 | ADR-0027 / REQ-023 | Given Dossier 합성. When 각 thesis 후보별 evidence_role 분류 검사. Then (a) supporting_evidence ≥ 3 claim + opposing_evidence ≥ 2 claim + monitoring_signal ≥ 3 claim **minimum coverage 충족** (미달 시 Dossier reject → manual review queue), (b) 모든 `:EVIDENCE_FOR` relationship 의 `evidence_role` 필드 (6 enum 중 하나) + `assigned_by = operator_lock` (LLM-only 진입 차단, INV-0027-5), (c) EvidencePack v0 4-section 이 evidence_role grouping 기준으로 생성 (REQ-023 본문 + ADR-0027 INV-0027-3) | TEST-044 | defined |
+| AC-043 | ADR-0027 (proposed — Q-043 결정 대기) | Given Claim → Thesis 후보 link. When `:EVIDENCE_FOR` relationship 생성. Then `evidence_role` 필드 (6 enum: supporting / opposing / mitigating / amplifying / monitoring / context) 가 항상 채워지고, NULL 또는 enum 외 값이면 schema 검증 fail. (proposed 상태 — Q-043 사용자 결정 후 채택/제거 결정. 채택 시 REQ-028 (proposed) 신규 row 추가 또는 REQ-023 본문 확장으로 매핑) | TEST-043 (proposed) | proposed |
 
 ## Status vocabulary
 
@@ -121,6 +122,7 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-041 | Editorial Quality Rubric CQ-006 — 과장 forecast language 없음 manual verify | manual review (v0) / LLM judge (v1+) | AC-041 |
 | TEST-042 | Editorial Quality Rubric CQ-007 — correction 가능성 / 불확실성 section 존재 | `tests/publishing/editorial_rubric_cq7_test.ts` (planned, section heading lint) | AC-042 |
 | TEST-044 | Dossier evidence_role minimum coverage (supporting ≥3 / opposing ≥2 / monitoring ≥3) + operator_lock enforcement (LLM-only progression 차단) | `tests/aggregation/dossier_evidence_role_test.ts` (planned) | AC-044 |
+| TEST-043 | evidence_role schema lock — `:EVIDENCE_FOR` relationship 의 `evidence_role` enum (6 값) 검증 + NULL/enum 외 값 reject (proposed — Q-043 결정 대기) | `tests/aggregation/evidence_role_schema_test.ts` (proposed) | AC-043 (proposed) |
 
 ## CI/CD gates
 
