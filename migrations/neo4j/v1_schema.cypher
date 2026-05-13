@@ -15,6 +15,11 @@ FOR (n:Source) REQUIRE n.source_id IS UNIQUE;
 CREATE CONSTRAINT document_unique IF NOT EXISTS
 FOR (n:Document) REQUIRE n.doc_id IS UNIQUE;
 
+// INFRA-1B.3: Pre-clean duplicate (url, source_id) Document pairs before adding the
+// composite uniqueness constraint. No-op on fresh databases. On upgrades with legacy
+// duplicates the runner would abort mid-file; this keeps the first-collected node per pair.
+MATCH (d:Document) WITH d.url AS url, d.source_id AS source_id, collect(d) AS dups WHERE size(dups) > 1 UNWIND dups[1..] AS dup DETACH DELETE dup;
+
 // INFRA-1B.3: composite uniqueness on (url, source_id) prevents duplicate Document nodes
 // from concurrent workers. MERGE (d:Document {url, source_id}) in createDocumentAndSnapshot
 // and ensureSourceLinkage relies on this constraint for idempotency.
@@ -23,6 +28,12 @@ FOR (n:Document) REQUIRE (n.url, n.source_id) IS UNIQUE;
 
 CREATE CONSTRAINT snapshot_unique IF NOT EXISTS
 FOR (n:Snapshot) REQUIRE n.snap_id IS UNIQUE;
+
+// INFRA-1B.3: Drop legacy snapshot_content_hash_idx standalone index before adding the
+// uniqueness constraint. Neo4j 5 backs a uniqueness constraint with a range index; a
+// pre-existing standalone index on the same label/property can conflict and prevent
+// constraint creation. IF EXISTS makes this a no-op on fresh databases.
+DROP INDEX snapshot_content_hash_idx IF EXISTS;
 
 // INFRA-1B.3: content_hash uniqueness prevents duplicate Snapshot nodes from
 // concurrent workers. MERGE on content_hash in createDocumentAndSnapshot relies
@@ -109,7 +120,7 @@ CREATE INDEX document_source_fk_idx IF NOT EXISTS FOR (n:Document) ON (n.source_
 CREATE INDEX document_published_at_idx IF NOT EXISTS FOR (n:Document) ON (n.published_at);
 
 CREATE INDEX snapshot_url_idx IF NOT EXISTS FOR (n:Snapshot) ON (n.url);
-CREATE INDEX snapshot_content_hash_idx IF NOT EXISTS FOR (n:Snapshot) ON (n.content_hash);
+// snapshot_content_hash_idx removed: snapshot_content_hash_unique constraint provides the backing index.
 CREATE INDEX snapshot_accessed_at_idx IF NOT EXISTS FOR (n:Snapshot) ON (n.accessed_at);
 
 CREATE INDEX claim_lifecycle_state_idx IF NOT EXISTS FOR (n:Claim) ON (n.lifecycle_state);
