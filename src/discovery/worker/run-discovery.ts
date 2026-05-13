@@ -29,21 +29,50 @@ const DAILY_CANDIDATE_CAP = 20;
 // ---------------------------------------------------------------------------
 
 // Extract the scalar value after `key:` on a single YAML line, stripping a
-// trailing comment, matching surrounding single/double quotes, and trimming
-// whitespace. Returns "" when only quotes / whitespace remain so the caller
-// can treat the field as absent.
+// trailing whitespace-prefixed comment, matching surrounding single/double
+// quotes, and trimming whitespace. Returns "" when only quotes / whitespace
+// remain so the caller can treat the field as absent.
+//
+// Comment stripping is quote-aware: a `#` inside `"..."` or `'...'` (e.g. a
+// fragment URL `https://example.com/#section`) is preserved, while a real
+// `whitespace + #` comment marker is stripped. Mismatched quotes (open
+// quote but no matching close) emit a warning instead of silently producing
+// a corrupted value with a leading quote.
 function parseScalarValue(line: string, key: string): string {
   let v = line.slice(key.length).trim();
-  // Strip trailing # comment (not inside quotes — the simple parser assumes
-  // the seed file is hand-curated and does not contain `#` inside scalars).
-  const hashIdx = v.indexOf("#");
-  if (hashIdx >= 0) v = v.slice(0, hashIdx).trim();
-  // Strip matching surrounding single or double quotes.
-  if (v.length >= 2) {
+  // Quote-aware comment strip: walk the string; toggle quote state on
+  // unescaped " or '; on a `#` outside quotes that is preceded by whitespace
+  // (or at index 0), truncate. This preserves `#` inside quoted scalars and
+  // inside URL fragments, while still removing `value  # explanation`.
+  let inQuote: '"' | "'" | null = null;
+  for (let i = 0; i < v.length; i++) {
+    const ch = v[i];
+    if (inQuote) {
+      if (ch === inQuote) inQuote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inQuote = ch as '"' | "'";
+      continue;
+    }
+    if (ch === "#" && (i === 0 || /\s/.test(v[i - 1] ?? ""))) {
+      v = v.slice(0, i).trimEnd();
+      break;
+    }
+  }
+  // Strip matching surrounding single or double quotes; warn on mismatch so
+  // a seed-file typo is loud rather than producing a corrupted scalar.
+  if (v.length >= 1) {
     const first = v[0];
     const last = v[v.length - 1];
-    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-      v = v.slice(1, -1);
+    if (first === '"' || first === "'") {
+      if (v.length >= 2 && first === last) {
+        v = v.slice(1, -1);
+      } else {
+        console.warn(
+          `[discovery] parseScalarValue: value starts with ${first} but does not match an end quote — leaving quote in place: ${JSON.stringify(v)}`
+        );
+      }
     }
   }
   return v;
@@ -241,14 +270,16 @@ async function main(): Promise<void> {
       if (charsetMatch) {
         // Tolerate single or double quotes surrounding the charset value
         // (e.g. charset='utf-8' or charset="utf-8"), then strip any
-        // trailing/leading non-charset characters (stray punctuation, residual
-        // quote). TextDecoder labels are ASCII alphanumeric + '-' / '_'; reject
-        // everything else from the edges so a typo like `utf-8"` does not
-        // force the whole source into backoff for legitimate UTF-8 content.
+        // trailing/leading non-label characters (stray punctuation, residual
+        // quote). WHATWG encoding labels are [a-z0-9._+-]+ (case-insensitive
+        // — we already lowercased); reject anything else from the edges so a
+        // typo like `utf-8"` does not force the whole source into backoff
+        // for legitimate UTF-8 content, while still keeping legitimate
+        // labels with `.` or `+` (e.g. iso-2022-jp) intact.
         charset = charsetMatch[1]!
           .toLowerCase()
           .replace(/^["'](.*)["']$/, "$1")
-          .replace(/^[^a-z0-9_-]+|[^a-z0-9_-]+$/g, "");
+          .replace(/^[^a-z0-9._+-]+|[^a-z0-9._+-]+$/g, "");
         if (!charset) charset = "utf-8";
       } else {
         try {

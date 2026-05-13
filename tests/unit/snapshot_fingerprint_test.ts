@@ -27,6 +27,11 @@ let findExistingResult: FindExistingConfig | null = null; // what MATCH returns 
 // When true, the Source-existence guard query returns count=0 — used to
 // exercise ensureSourceLinkage's missing-Source rollback path on dedup.
 let sourceMissingOnGuard = false;
+// When set, MERGE Document's RETURN d.doc_id ignores the input params.docId
+// and returns this value — simulating Neo4j's ON MATCH branch where the
+// stored docId differs from the freshly generated candidate (the production
+// guarantee F-10 depends on). Default null → echo input (ON CREATE behavior).
+let mergeDocIdOverride: string | null = null;
 
 mock.module("../../src/storage/neo4j/connection", () => ({
   withSession: async <T>(fn: SessionFn<T>): Promise<T> => {
@@ -39,9 +44,13 @@ mock.module("../../src/storage/neo4j/connection", () => ({
         if (query.includes("MATCH (src:Source") && query.includes("count(src)")) {
           return { records: [{ get: (_: string) => (sourceMissingOnGuard ? 0 : 1) }] };
         }
-        // P1-1 MERGE Document RETURN: echo back the pre-generated docId parameter.
+        // P1-1 MERGE Document RETURN: by default echo the pre-generated docId
+        // (ON CREATE branch). When mergeDocIdOverride is set, return that
+        // value instead so tests can exercise the ON MATCH branch where the
+        // stored docId differs from the candidate.
         if (query.includes("MERGE (d:Document") && query.includes("RETURN d.doc_id")) {
-          return { records: [{ get: (_: string) => params["docId"] }] };
+          const ret = mergeDocIdOverride ?? (params["docId"] as string);
+          return { records: [{ get: (_: string) => ret }] };
         }
         return { records: [] };
       },
@@ -184,6 +193,7 @@ beforeEach(() => {
   r2Puts.length = 0;
   findExistingResult = null;
   sourceMissingOnGuard = false;
+  mergeDocIdOverride = null;
   setupDb();
 });
 
@@ -382,6 +392,29 @@ describe("createSnapshotFingerprint — deduplication", () => {
     expect(result.deduplicated).toBe(true);
     expect(result.r2Key).toBeNull();
     expect(r2Puts).toHaveLength(0);
+  });
+
+  // F-21: dedup docId must come from the CURRENT source's linked Document,
+  // not from the Snapshot's first-writer s.doc_id property. Previous test
+  // only verified the ON CREATE branch (mock echoed input). Force the MERGE
+  // Document RETURN to give a value that does NOT match the input candidate,
+  // simulating Neo4j's ON MATCH branch where a prior writer's stored docId
+  // is preserved. The dedup return must propagate THAT value.
+  it("dedup return docId reflects ensureSourceLinkage ON MATCH (stored != candidate)", async () => {
+    findExistingResult = { snapId: "snap_EXISTING", r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING" };
+    mergeDocIdOverride = "doc_PRIOR_LINKER";
+
+    const db = setupDb();
+    const queueId = "dq_dedup_onmatch";
+    seedQueue(db, queueId);
+
+    const result = await createSnapshotFingerprint(baseInput(queueId));
+
+    expect(result.deduplicated).toBe(true);
+    // The dedup path must surface the linker's MERGE-resolved doc_id, not
+    // the freshly generated candidate that the linker would have produced
+    // on the ON CREATE branch.
+    expect(result.docId).toBe("doc_PRIOR_LINKER");
   });
 
   // F-23: ensureSourceLinkage must return null when the Source node is absent

@@ -43,7 +43,10 @@ export function getEligibleSources(sourceIds: string[]): CrawlState[] {
   // Single pass: pull ALL rows for the requested source IDs, then partition in
   // TypeScript. The previous two-pass implementation issued an eligible-only
   // SELECT and a separate known-id SELECT for the same set; merging into one
-  // SELECT halves the round-trips and the prepare/execute overhead.
+  // SELECT halves the round-trips and the prepare/execute overhead. Each chunk
+  // is ORDER BY'd locally but chunk concatenation does not preserve global
+  // order, so we re-sort across all chunks after collection — least-recently
+  // polled first (NULL is "never polled", treated as least-recent).
   const allRows: CrawlState[] = [];
   for (let i = 0; i < uniqueSourceIds.length; i += CHUNK_SIZE) {
     const chunk = uniqueSourceIds.slice(i, i + CHUNK_SIZE);
@@ -53,17 +56,23 @@ export function getEligibleSources(sourceIds: string[]): CrawlState[] {
         `SELECT source_id, last_polled_at, last_etag, last_modified_header,
                 last_status, consecutive_failures, next_eligible_at
          FROM crawl_state
-         WHERE source_id IN (${placeholders})
-         ORDER BY last_polled_at ASC NULLS FIRST`
+         WHERE source_id IN (${placeholders})`
       )
       .all(...chunk) as CrawlState[];
     allRows.push(...rows);
   }
 
   // Eligible = rows whose next_eligible_at is NULL or <= now.
-  const existing = allRows.filter(
-    (r) => r.next_eligible_at === null || r.next_eligible_at <= now
-  );
+  // Re-sort globally (chunk-local ORDER BY does not survive concatenation).
+  // NULL last_polled_at sorts first (least-recently polled).
+  const existing = allRows
+    .filter((r) => r.next_eligible_at === null || r.next_eligible_at <= now)
+    .sort((a, b) => {
+      if (a.last_polled_at === null && b.last_polled_at === null) return 0;
+      if (a.last_polled_at === null) return -1;
+      if (b.last_polled_at === null) return 1;
+      return a.last_polled_at < b.last_polled_at ? -1 : a.last_polled_at > b.last_polled_at ? 1 : 0;
+    });
   // Known = every source_id that returned ANY row (eligible OR in backoff).
   const knownIds = new Set(allRows.map((r) => r.source_id));
 

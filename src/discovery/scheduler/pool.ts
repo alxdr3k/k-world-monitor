@@ -88,11 +88,20 @@ function getHostPool(hostname: string): Semaphore {
 // Acquires per-host first, then global — this ensures tasks blocked on a
 // busy host do not consume global capacity and starve other hosts.
 // Release in reverse order: global first, then per-host.
+//
+// The second acquire (global) is wrapped so a future AbortSignal-aware
+// Semaphore that rejects acquire() does not leak the host slot. Today the
+// Semaphore never rejects, but the structural guarantee matches the comment.
 export async function runWithPool<T>(hostname: string, fn: () => Promise<T>): Promise<T> {
   const hostPool = getHostPool(hostname);
   const gPool = getGlobalPool();
   await hostPool.acquire();
-  await gPool.acquire();
+  try {
+    await gPool.acquire();
+  } catch (err) {
+    hostPool.release();
+    throw err;
+  }
   try {
     return await fn();
   } finally {

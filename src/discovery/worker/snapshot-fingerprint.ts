@@ -8,7 +8,7 @@
 import { ulid } from "ulid";
 import { createHash } from "crypto";
 import { withSession } from "../../storage/neo4j/connection";
-import { r2Put, r2Delete } from "../../storage/r2/client";
+import { r2Put } from "../../storage/r2/client";
 import { getDb } from "../../storage/sqlite/connection";
 import type { ContentKind } from "../fetch/safe-fetch";
 
@@ -68,8 +68,15 @@ function normalizeSourceId(rawSourceId: string): string {
       .prepare("SELECT source_id FROM source_registry_slug_map WHERE slug = ?")
       .get(rawSourceId) as { source_id: string } | undefined;
     return row?.source_id ?? rawSourceId;
-  } catch {
-    return rawSourceId; // slug_map table absent (pre-v3 schema)
+  } catch (err) {
+    // Only fall back when the slug_map table genuinely does not exist
+    // (pre-v3 schema). Other failures (SQLITE_BUSY, corrupted DB) must
+    // propagate so a transient lock during normalization does not silently
+    // ship a slug-form id to Neo4j and surface as a misleading "Source not
+    // found in graph".
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/no such table:\s*source_registry_slug_map/i.test(msg)) return rawSourceId;
+    throw err;
   }
 }
 
@@ -387,10 +394,23 @@ async function ensureSourceLinkage(
 // error_detail stores snap_id as result metadata; a dedicated snap_id column will be
 // added in a later migration if needed.
 // updated_at clause is included only when v7 column is present (pre-v7 DBs would throw).
+// hasUpdatedAtColumn() now rethrows non-"no such column" errors (iter-1 F-03),
+// so calling it from inside the queue-marker helpers risks shadowing the
+// ORIGINAL snapshot-creation error that the marker was invoked to record.
+// Wrap the probe locally and fall back to the no-updated_at form on any
+// probe failure so we always record SOMETHING.
+function tryUpdatedAtClause(): string {
+  try {
+    return hasUpdatedAtColumn()
+      ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+      : "";
+  } catch {
+    return "";
+  }
+}
+
 function markQueueItemDone(queueId: string, snapId: string, contentHash: string): void {
-  const u = hasUpdatedAtColumn()
-    ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
-    : "";
+  const u = tryUpdatedAtClause();
   getDb()
     .prepare(
       `UPDATE discovery_queue
@@ -401,9 +421,7 @@ function markQueueItemDone(queueId: string, snapId: string, contentHash: string)
 }
 
 function markQueueItemError(queueId: string, detail: string): void {
-  const u = hasUpdatedAtColumn()
-    ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
-    : "";
+  const u = tryUpdatedAtClause();
   getDb()
     .prepare(
       `UPDATE discovery_queue
@@ -479,17 +497,31 @@ export async function createSnapshotFingerprint(
       await r2Put(key, bodyBuf);
       // ADR-0012 INV-0012-3 TOCTOU close: re-check linked-source policy AFTER
       // r2Put completes. A concurrent linker can attach a prohibited source
-      // between the first check and now; if so, delete the just-uploaded
-      // object and leave r2_key = null. The next eligible retry will re-evaluate.
-      const stillAllowed = await allLinkedSourcesAllowRawCloud(existing.snapId);
-      if (!stillAllowed) {
-        try { await r2Delete(key); } catch (cleanupErr) {
-          console.warn(
-            `[snapshot] dedup r2 cleanup failed for ${key} (post-r2Put policy revert):`,
-            cleanupErr instanceof Error ? cleanupErr.message : cleanupErr
-          );
-        }
-      } else {
+      // between the first check and now; if so, skip the SET r2_key Neo4j
+      // write so the Snapshot remains r2_key=null and the prohibited source
+      // never sees an r2-backed reference.
+      //
+      // We DO NOT r2Delete the uploaded object here: another worker may have
+      // legitimately re-uploaded the same idempotent key during this window,
+      // and an asymmetric delete (r2Delete does not call checkPermittedPrefix)
+      // would wipe their legitimate object. The orphan is bounded — the next
+      // eligible retry will dedup-match and re-evaluate policy; if still
+      // allowed it back-fills the r2_key via r2Put's idempotent overwrite.
+      //
+      // If the re-check itself throws (transient Neo4j blip), the SAFE default
+      // is to skip the SET so we never escalate a verification failure into a
+      // graph link the prohibited source could observe.
+      let stillAllowed: boolean;
+      try {
+        stillAllowed = await allLinkedSourcesAllowRawCloud(existing.snapId);
+      } catch (recheckErr) {
+        console.warn(
+          `[snapshot] dedup post-r2Put policy recheck failed; leaving r2_key=null for safety:`,
+          recheckErr instanceof Error ? recheckErr.message : recheckErr
+        );
+        stillAllowed = false;
+      }
+      if (stillAllowed) {
         // SET r2_key is best-effort: if Neo4j is unavailable here the r2 object
         // already exists, the Snapshot node still has r2_key=null, and a later
         // retry will dedup-match and back-fill via the same idempotent path
@@ -568,19 +600,27 @@ export async function createSnapshotFingerprint(
       await r2Put(key, bodyBuf);
       // ADR-0012 INV-0012-3 TOCTOU close (MERGE-matched branch only): if our
       // Snapshot CREATE collided with a concurrent worker, re-check policy
-      // after r2Put. A linker that attached a prohibited source between the
-      // first check and now must trigger r2Delete + r2_key stays null.
-      const stillAllowed =
-        !mergeMatchedExisting ||
-        (await allLinkedSourcesAllowRawCloud(actualSnapId));
-      if (!stillAllowed) {
-        try { await r2Delete(key); } catch (cleanupErr) {
-          console.warn(
-            `[snapshot] new-path r2 cleanup failed for ${key} (post-r2Put policy revert):`,
-            cleanupErr instanceof Error ? cleanupErr.message : cleanupErr
-          );
-        }
+      // after r2Put. If a linker attached a prohibited source between the
+      // first check and now, skip the SET so r2_key stays null. See the
+      // dedup-backfill path above for the rationale on NOT r2Delete'ing here
+      // (avoids wiping a concurrent legitimate re-upload of the same key).
+      // A re-check throw is treated as "not allowed" so we fail safe — the
+      // prohibited source must never see a SET back-patched r2_key.
+      let stillAllowed: boolean;
+      if (!mergeMatchedExisting) {
+        stillAllowed = true;
       } else {
+        try {
+          stillAllowed = await allLinkedSourcesAllowRawCloud(actualSnapId);
+        } catch (recheckErr) {
+          console.warn(
+            `[snapshot] new-path post-r2Put policy recheck failed; leaving r2_key=null for safety:`,
+            recheckErr instanceof Error ? recheckErr.message : recheckErr
+          );
+          stillAllowed = false;
+        }
+      }
+      if (stillAllowed) {
         // SET r2_key is best-effort (same rationale as the dedup back-fill
         // path above): a Neo4j failure here is non-fatal because the r2 object
         // exists and the next dedup-matched retry will back-fill via the same
