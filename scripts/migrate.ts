@@ -21,7 +21,7 @@ const doSqlite = args.has("--sqlite") || (!args.has("--sqlite") && !args.has("--
 const REPO_ROOT = join(import.meta.dir, "..");
 
 // ---------------------------------------------------------------------------
-// SQLite migration — versioned chain v1 → v7
+// SQLite migration — versioned chain v1 → v6
 // ---------------------------------------------------------------------------
 const SQLITE_MIGRATIONS: Array<{ version: string; file: string }> = [
   { version: "v1", file: "migrations/sqlite/v1_schema.sql" },
@@ -30,7 +30,6 @@ const SQLITE_MIGRATIONS: Array<{ version: string; file: string }> = [
   { version: "v4", file: "migrations/sqlite/v4_run_ledger_completed_at_idx.sql" },
   { version: "v5", file: "migrations/sqlite/v5_crawl_state.sql" },
   { version: "v6", file: "migrations/sqlite/v6_discovery_queue.sql" },
-  { version: "v7", file: "migrations/sqlite/v7_discovery_queue_updated_at.sql" },
 ];
 
 async function migrateSqlite(): Promise<void> {
@@ -57,60 +56,23 @@ async function migrateSqlite(): Promise<void> {
     }
     const sqlPath = join(REPO_ROOT, migration.file);
     const sql = readFileSync(sqlPath, "utf-8");
+    // Wrap each migration in BEGIN/COMMIT so a multi-statement file that
+    // errors mid-way rolls back cleanly instead of leaving the DB with
+    // partial DDL applied AND no schema_migrations row (the resulting
+    // state masks the original failure on re-run because IF NOT EXISTS
+    // makes the surviving partial state look idempotent). SQLite supports
+    // DDL inside transactions; the only exception (CREATE VIRTUAL TABLE
+    // for some FTS5 variants) is not used in this project's migrations.
+    const db = getDb();
+    db.exec("BEGIN");
     try {
-      // Wrap each migration in BEGIN/COMMIT so a multi-statement file that
-      // errors mid-way rolls back cleanly instead of leaving the DB with
-      // partial DDL applied AND no schema_migrations row (the resulting
-      // state masks the original failure on re-run because IF NOT EXISTS
-      // makes the surviving partial state look idempotent). SQLite supports
-      // DDL inside transactions; the only exception (CREATE VIRTUAL TABLE
-      // for some FTS5 variants) is not used in this project's migrations.
-      const db = getDb();
-      db.exec("BEGIN");
-      try {
-        db.exec(sql);
-        db.exec("COMMIT");
-      } catch (innerErr) {
-        try { db.exec("ROLLBACK"); } catch { /* ignore rollback failure */ }
-        throw innerErr;
-      }
-      console.log(`[SQLite] ✓ Applied ${migration.file}`);
-    } catch (err: unknown) {
-      // Idempotency guard, scoped to single-statement ALTER TABLE ADD COLUMN
-      // migrations on drifted schemas. SQLite stops executing after an error
-      // mid-file, so a generic `duplicate column name` swallow could mask a
-      // multi-statement migration where only the first statement applied. We
-      // limit the skip to migrations that are explicitly a single ALTER ...
-      // ADD COLUMN plus the schema_migrations INSERT (v7 is the only one).
-      const msg = err instanceof Error ? err.message : String(err);
-      // Strip SQL comments (`-- ...` line comments and `/* ... */` block comments)
-      // before counting ALTER statements; otherwise an explanatory comment that
-      // mentions `ALTER TABLE ... ADD COLUMN` inflates the count and defeats the
-      // single-statement guard. v7_discovery_queue_updated_at.sql is the
-      // concrete case — its header comment narrates the ALTER constraint.
-      const sqlNoComments = sql
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/--[^\n]*/g, "");
-      const isAddColumnOnlyMigration =
-        /^\s*ALTER\s+TABLE\s+\S+\s+ADD\s+COLUMN\b/im.test(sqlNoComments) &&
-        // exactly one ALTER and at most the trailing schema_migrations INSERT
-        (sqlNoComments.match(/\bALTER\s+TABLE\b/gi) ?? []).length === 1;
-      if (
-        /duplicate column name/i.test(msg) &&
-        isAddColumnOnlyMigration
-      ) {
-        getDb()
-          .prepare(
-            "INSERT OR IGNORE INTO schema_migrations (version, description) VALUES (?, ?)"
-          )
-          .run(migration.version, `${migration.file} (column already present)`);
-        console.log(
-          `[SQLite] ✓ Recorded ${migration.version} (column already present, idempotent skip)`
-        );
-        continue;
-      }
+      db.exec(sql);
+      db.exec("COMMIT");
+    } catch (err) {
+      try { db.exec("ROLLBACK"); } catch { /* ignore rollback failure */ }
       throw err;
     }
+    console.log(`[SQLite] ✓ Applied ${migration.file}`);
   }
 }
 

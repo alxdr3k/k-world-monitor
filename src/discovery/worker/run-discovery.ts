@@ -6,9 +6,11 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
+import { load as yamlLoad } from "js-yaml";
 import { pollEligibleSources, type DiscoverySource } from "../scheduler/scheduler";
 import { recordFetchOutcome } from "../scheduler/crawl-state";
 import { parseRssFeed, enqueueDiscoveredItems } from "./rss-worker";
+import { getDb } from "../../storage/sqlite/connection";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -25,57 +27,29 @@ import { parseRssFeed, enqueueDiscoveredItems } from "./rss-worker";
 const DAILY_CANDIDATE_CAP = 20;
 
 // ---------------------------------------------------------------------------
-// Load sources from seed YAML (v0: reads YAML directly; INFRA-1B.1+ reads SQLite)
+// Load sources from seed YAML.
+// Parsed via js-yaml (already a transitive dep used by source-registry seed)
+// instead of a hand-rolled scalar parser — handles quoted strings, nested
+// objects, comments, anchors, and multi-line scalars correctly.
+//
+// Slug → canonical src_<ULID> resolution happens HERE, at the entry point,
+// so every downstream consumer (scheduler, crawl_state, rss-worker,
+// discovery_queue, source_material_policy lookups) operates on canonical
+// ids only. This removes the dual-form source_id problem that previously
+// required normalizeSourceId / resolveCanonicalSourceId helpers in two
+// separate modules.
 // ---------------------------------------------------------------------------
 
-// Extract the scalar value after `key:` on a single YAML line, stripping a
-// trailing whitespace-prefixed comment, matching surrounding single/double
-// quotes, and trimming whitespace. Returns "" when only quotes / whitespace
-// remain so the caller can treat the field as absent.
-//
-// Comment stripping is quote-aware: a `#` inside `"..."` or `'...'` (e.g. a
-// fragment URL `https://example.com/#section`) is preserved, while a real
-// `whitespace + #` comment marker is stripped. Mismatched quotes (open
-// quote but no matching close) emit a warning instead of silently producing
-// a corrupted value with a leading quote.
-function parseScalarValue(line: string, key: string): string {
-  let v = line.slice(key.length).trim();
-  // Quote-aware comment strip: walk the string; toggle quote state on
-  // unescaped " or '; on a `#` outside quotes that is preceded by whitespace
-  // (or at index 0), truncate. This preserves `#` inside quoted scalars and
-  // inside URL fragments, while still removing `value  # explanation`.
-  let inQuote: '"' | "'" | null = null;
-  for (let i = 0; i < v.length; i++) {
-    const ch = v[i];
-    if (inQuote) {
-      if (ch === inQuote) inQuote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      inQuote = ch as '"' | "'";
-      continue;
-    }
-    if (ch === "#" && (i === 0 || /\s/.test(v[i - 1] ?? ""))) {
-      v = v.slice(0, i).trimEnd();
-      break;
-    }
-  }
-  // Strip matching surrounding single or double quotes; warn on mismatch so
-  // a seed-file typo is loud rather than producing a corrupted scalar.
-  if (v.length >= 1) {
-    const first = v[0];
-    const last = v[v.length - 1];
-    if (first === '"' || first === "'") {
-      if (v.length >= 2 && first === last) {
-        v = v.slice(1, -1);
-      } else {
-        console.warn(
-          `[discovery] parseScalarValue: value starts with ${first} but does not match an end quote — leaving quote in place: ${JSON.stringify(v)}`
-        );
-      }
-    }
-  }
-  return v;
+interface SeedRecord {
+  slug: string;
+  rss_url?: string;
+  access_method?: string;
+  reliability_tier?: number;
+  active_v0?: boolean;
+}
+
+interface SeedFile {
+  sources?: SeedRecord[];
 }
 
 function isValidHttpUrl(raw: string): boolean {
@@ -87,79 +61,48 @@ function isValidHttpUrl(raw: string): boolean {
   }
 }
 
+// Resolve slug → canonical src_<ULID> via source_registry_slug_map (created by
+// INFRA-1B.1 seed). Missing mapping is an operator error — seed must run first.
+function resolveCanonicalId(slug: string): string | null {
+  if (slug.startsWith("src_")) return slug;
+  const row = getDb()
+    .prepare("SELECT source_id FROM source_registry_slug_map WHERE slug = ?")
+    .get(slug) as { source_id: string } | undefined;
+  return row?.source_id ?? null;
+}
+
 function loadRssSources(filterSlug?: string): DiscoverySource[] {
-  // Dynamically parse YAML without a dependency — the seed file uses a simple
-  // flat structure that can be extracted with a lightweight manual parse.
-  // Once INFRA-1B.1 lands, this will switch to SQLite source_material_policy.
   const repoRoot = join(import.meta.dir, "../../..");
   const raw = readFileSync(join(repoRoot, "data/sources_seed.yaml"), "utf-8");
+  const parsed = yamlLoad(raw) as SeedFile | null;
+  const records = parsed?.sources ?? [];
 
-  // Parse YAML manually for the fields we need (avoids adding a yaml dep).
-  // ADR-0026: `active_v0` flag (when present in seed) restricts polling to the
-  // v0 active source subset. If the field is absent from a record, default to
-  // true for backward compatibility (forward-only filter).
   const sources: DiscoverySource[] = [];
-  let currentSlug = "";
-  let currentRssUrl = "";
-  let currentMethod = "";
-  let currentTier = 1;
-  let currentActiveV0 = true;
-
-  function flush() {
-    if (
-      currentSlug &&
-      currentRssUrl &&
-      currentMethod === "rss" &&
-      currentTier === 0 &&
-      currentActiveV0
-    ) {
-      // Drop malformed feed URLs at load time so the per-host pool, conditional-
-      // GET state machine, and safeFetch never receive non-URL strings (which
-      // would otherwise leak a per-host pool entry keyed by the raw garbage).
-      if (!isValidHttpUrl(currentRssUrl)) {
-        console.warn(
-          `[discovery] skip ${currentSlug}: rss_url is not a valid http(s) URL`
-        );
-        return;
-      }
-      if (!filterSlug || filterSlug === currentSlug) {
-        sources.push({
-          source_id: currentSlug, // v0: use slug as source_id; INFRA-1B.1+ uses src_<ULID>
-          feed_url: currentRssUrl,
-        });
-      }
+  for (const r of records) {
+    if (!r.slug) continue;
+    // ADR-0026 `active_v0`: restrict to v0 active subset. Missing → default
+    // true (forward-only filter).
+    if (r.active_v0 === false) continue;
+    if (r.access_method !== "rss") continue;
+    if (r.reliability_tier !== 0) continue;
+    if (!r.rss_url) continue;
+    if (!isValidHttpUrl(r.rss_url)) {
+      console.warn(`[discovery] skip ${r.slug}: rss_url is not a valid http(s) URL`);
+      continue;
     }
-  }
-
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("- slug:")) {
-      flush();
-      currentSlug = parseScalarValue(trimmed, "- slug:");
-      currentRssUrl = "";
-      currentMethod = "";
-      currentTier = 1;
-      currentActiveV0 = true;
-    } else if (trimmed.startsWith("slug:")) {
-      flush();
-      currentSlug = parseScalarValue(trimmed, "slug:");
-      currentRssUrl = "";
-      currentMethod = "";
-      currentTier = 1;
-      currentActiveV0 = true;
-    } else if (trimmed.startsWith("rss_url:")) {
-      currentRssUrl = parseScalarValue(trimmed, "rss_url:");
-    } else if (trimmed.startsWith("access_method:")) {
-      currentMethod = parseScalarValue(trimmed, "access_method:");
-    } else if (trimmed.startsWith("reliability_tier:")) {
-      currentTier = parseInt(parseScalarValue(trimmed, "reliability_tier:"), 10);
-    } else if (trimmed.startsWith("active_v0:")) {
-      const v = parseScalarValue(trimmed, "active_v0:").toLowerCase();
-      currentActiveV0 = v !== "false" && v !== "no" && v !== "0";
+    if (filterSlug && filterSlug !== r.slug) continue;
+    const canonical = resolveCanonicalId(r.slug);
+    if (canonical === null) {
+      // Operator forgot to run `bun run seed:sources` first. Fail loud
+      // rather than fall back to slug-form (would trip the FK on every
+      // discovery_queue INSERT downstream).
+      throw new Error(
+        `[discovery] cannot resolve slug '${r.slug}' to canonical src_<ULID>. ` +
+          `Run \`bun run seed:sources\` first to populate source_registry_slug_map.`
+      );
     }
+    sources.push({ source_id: canonical, feed_url: r.rss_url });
   }
-  flush();
-
   return sources;
 }
 

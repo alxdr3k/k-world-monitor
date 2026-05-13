@@ -1,6 +1,12 @@
 -- v6: discovery_queue table for INFRA-1B.2 Discovery Worker
 -- Stores discovered document URLs from RSS/Atom feed polling,
 -- pending Snapshot fingerprint creation (INFRA-1B.3).
+--
+-- updated_at is folded into the base schema (previously a separate v7
+-- ALTER COLUMN migration). Stale-row reclaim in processDiscoveryQueue
+-- requires it; treating it as optional led to a 3-helper smell
+-- (hasUpdatedAtColumn / tryHasUpdatedAtColumn / tryUpdatedAtClause)
+-- defending against a non-existent pre-v7 schema.
 
 CREATE TABLE IF NOT EXISTS discovery_queue (
   queue_id        TEXT NOT NULL PRIMARY KEY,    -- `dq_<ULID>`
@@ -13,7 +19,14 @@ CREATE TABLE IF NOT EXISTS discovery_queue (
   content_hash    TEXT,                         -- sha256 of url — stored for future change-detection (not used for dedup)
   status          TEXT NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('pending','processing','done','error')),
-  error_detail    TEXT
+  error_detail    TEXT,
+  -- Stale-row reclaim: processDiscoveryQueue resets rows where
+  -- status='processing' AND updated_at < NOW-1h back to 'pending' to
+  -- recover them from crashed workers. Application code (claim UPDATE,
+  -- heartbeat, markers) sets this on every write — no trigger, since
+  -- triggers with time-string precision guards are unreliable under
+  -- PRAGMA recursive_triggers=ON.
+  updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
 -- Deduplication: one URL per source, only pending/processing rows.
@@ -23,6 +36,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS discovery_queue_url_source_active_idx
 
 CREATE INDEX IF NOT EXISTS discovery_queue_status_idx
   ON discovery_queue (status, discovered_at);
+
+-- Stale-row reclaim index: lookup on processing rows ordered by stamp.
+CREATE INDEX IF NOT EXISTS discovery_queue_processing_updated_at_idx
+  ON discovery_queue (updated_at)
+  WHERE status = 'processing';
 
 INSERT OR IGNORE INTO schema_migrations (version, description)
   VALUES ('v6', 'discovery_queue table — discovered document URLs pending snapshot creation');

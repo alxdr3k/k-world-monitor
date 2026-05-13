@@ -4,17 +4,10 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { runWithPool, getGlobalPool, getGlobalLimit, perHostPools, resetPools } from "../../src/discovery/scheduler/pool";
+import { runWithPool, getGlobalPool, getGlobalLimit, perHostPoolsSnapshot, resetPools } from "../../src/discovery/scheduler/pool";
 
-// Reset per-host pool map between tests so that accumulated entries from one
-// test do not bleed into the next. Without this, tests that fill the map
-// (PER_HOST_MAX_ENTRIES = 10_000) could trigger the eviction path unexpectedly
-// in later tests, and the map could accumulate thousands of stale entries.
-beforeEach(() => {
-  perHostPools.clear();
-});
-
-// Clear the per-host pool map before each test to prevent state leakage.
+// Reset entire pool state between tests so that env-var changes and map
+// accumulation from one test do not bleed into the next.
 beforeEach(() => {
   resetPools();
 });
@@ -49,16 +42,16 @@ describe("runWithPool — basic behavior", () => {
       runWithPool("host-a.example.com", async () => null),
       runWithPool("host-b.example.com", async () => null),
     ]);
-    expect(perHostPools.has("host-a.example.com")).toBe(true);
-    expect(perHostPools.has("host-b.example.com")).toBe(true);
+    expect(perHostPoolsSnapshot().has("host-a.example.com")).toBe(true);
+    expect(perHostPoolsSnapshot().has("host-b.example.com")).toBe(true);
     assertPoolsIdle();
   });
 
   it("reuses existing per-host pool for same hostname", async () => {
     await runWithPool("reuse-host.example.com", async () => null);
-    const first = perHostPools.get("reuse-host.example.com");
+    const first = perHostPoolsSnapshot().get("reuse-host.example.com");
     await runWithPool("reuse-host.example.com", async () => null);
-    const second = perHostPools.get("reuse-host.example.com");
+    const second = perHostPoolsSnapshot().get("reuse-host.example.com");
     expect(first).toBe(second);
     assertPoolsIdle();
   });
@@ -72,9 +65,9 @@ describe("getHostPool — eviction safety", () => {
     const { Semaphore } = await import("../../src/discovery/scheduler/semaphore");
     const host = `evict-active-${Date.now()}.example.com`;
 
-    // Insert the host via runWithPool so it appears in perHostPools.
+    // Insert the host via runWithPool so it appears in perHostPoolsSnapshot.
     await runWithPool(host, async () => null);
-    const semBefore = perHostPools.get(host);
+    const semBefore = perHostPoolsSnapshot().get(host);
     expect(semBefore).toBeDefined();
 
     // Simulate an active acquisition on this semaphore.
@@ -84,7 +77,7 @@ describe("getHostPool — eviction safety", () => {
     // A subsequent runWithPool for the same host should reuse semBefore.
     // We cannot await it (it would block on the held slot), so just check the
     // map still points to the same instance after the lookup path runs.
-    const semAfter = perHostPools.get(host);
+    const semAfter = perHostPoolsSnapshot().get(host);
     expect(semAfter).toBe(semBefore);
 
     // Release the manually acquired permit.
