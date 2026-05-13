@@ -174,6 +174,7 @@ async function createDocumentAndSnapshot(
 
   return withSession(async (session) => {
     const tx = session.beginTransaction();
+    let committed = false;
     try {
       // Upsert Document (idempotent on url+source_id).
       // RETURN d.doc_id so ON MATCH case returns the existing stored value.
@@ -267,10 +268,15 @@ async function createDocumentAndSnapshot(
         { url: input.url, sourceId: input.sourceId, contentHash }
       );
 
+      // Set committed BEFORE tx.commit() so the catch handler never attempts
+      // rollback after a commit is in-flight. Mirrors the chunker.ts pattern
+      // (commitAttempted=true before await tx.commit()) to avoid the Neo4j
+      // driver error on rollback-after-commit.
+      committed = true;
       await tx.commit();
       return { docId: actualDocId, snapId: actualSnapId };
     } catch (err) {
-      await tx.rollback();
+      if (!committed) await tx.rollback();
       throw err;
     }
   });
@@ -289,6 +295,7 @@ async function ensureSourceLinkage(
 ): Promise<string | null> {
   return withSession(async (session) => {
     const tx = session.beginTransaction();
+    let committed = false;
     try {
       // On the dedup path tolerate a missing Source (do not throw) — but report
       // back to the caller so the queue row is marked error rather than done.
@@ -351,10 +358,13 @@ async function ensureSourceLinkage(
         { url: input.url, sourceId: input.sourceId, contentHash }
       );
 
+      // Set committed BEFORE tx.commit() — same pattern as createDocumentAndSnapshot
+      // and chunker.ts to avoid rollback-after-commit Neo4j driver error.
+      committed = true;
       await tx.commit();
       return linkedDocId;
     } catch (err) {
-      await tx.rollback();
+      if (!committed) await tx.rollback();
       throw err;
     }
   });

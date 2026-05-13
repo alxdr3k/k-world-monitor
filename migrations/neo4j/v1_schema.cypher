@@ -87,6 +87,14 @@ FOR (n:AccessIntervention) REQUIRE n.intervention_id IS UNIQUE;
 CREATE CONSTRAINT manual_claim_entry_unique IF NOT EXISTS
 FOR (n:ManualClaimEntry) REQUIRE n.manual_claim_id IS UNIQUE;
 
+CREATE CONSTRAINT chunk_unique IF NOT EXISTS
+FOR (n:Chunk) REQUIRE n.chunk_id IS UNIQUE;
+
+// Composite uniqueness: one Chunk per (snap_id, chunk_index) — enables idempotent
+// MERGE-based upserts so re-runs don't produce duplicate Chunk nodes (INFRA-1B.4).
+CREATE CONSTRAINT chunk_snap_index_unique IF NOT EXISTS
+FOR (n:Chunk) REQUIRE (n.snap_id, n.chunk_index) IS UNIQUE;
+
 // --- Node property existence constraints ------------------------------------
 // Enforce required fields at DB level for core entities.
 
@@ -138,6 +146,9 @@ CREATE INDEX document_published_at_idx IF NOT EXISTS FOR (n:Document) ON (n.publ
 CREATE INDEX snapshot_url_idx IF NOT EXISTS FOR (n:Snapshot) ON (n.url);
 // snapshot_content_hash_idx removed: snapshot_content_hash_unique constraint provides the backing index.
 CREATE INDEX snapshot_accessed_at_idx IF NOT EXISTS FOR (n:Snapshot) ON (n.accessed_at);
+
+CREATE INDEX chunk_snap_id_idx IF NOT EXISTS FOR (n:Chunk) ON (n.snap_id);
+CREATE INDEX chunk_chunk_index_idx IF NOT EXISTS FOR (n:Chunk) ON (n.chunk_index);
 
 CREATE INDEX claim_lifecycle_state_idx IF NOT EXISTS FOR (n:Claim) ON (n.lifecycle_state);
 CREATE INDEX claim_source_id_idx IF NOT EXISTS FOR (n:Claim) ON (n.source_id);
@@ -201,6 +212,16 @@ OPTIONS {
 CREATE FULLTEXT INDEX thesis_fts IF NOT EXISTS
 FOR (n:Thesis)
 ON EACH [n.statement, n.summary]
+OPTIONS {
+  indexConfig: {
+    `fulltext.analyzer`: "english",
+    `fulltext.eventually_consistent`: false
+  }
+};
+
+CREATE FULLTEXT INDEX chunk_fts IF NOT EXISTS
+FOR (n:Chunk)
+ON EACH [n.text]
 OPTIONS {
   indexConfig: {
     `fulltext.analyzer`: "english",

@@ -173,6 +173,18 @@ Step 2가 **ALL CLEAR**를 반환하면 아래 순서로 ready 자동 승격 가
 - 모델 라우팅이 가능해도 구현 handoff가 현재 작업 맥락보다 커지면 sub-agent를 만들지 말고 main/Sonnet execution에서 최소 diff로 수정한다.
 - `--phase <id>` 범위를 벗어난 작업은 하지 않는다.
 
+### 구현 시 필수 확인 항목 (Implementation Invariants)
+
+구현 완료 후 Review Pass 전에 아래 네 항목을 명시적으로 확인한다. 체크 누락이 Review Pass에서 P1 finding으로 반복 발생한 주요 패턴이다.
+
+1. **상태 쓰기 레이어 단일화**: 동일 상태(DB row, 카운터, 그래프 노드 속성 등)를 변경하는 함수 호출이 두 레이어에 각각 존재하면, 어느 레이어가 최종 기록자인지 명시적으로 결정한다. "기록 → 덮어쓰기" 패턴은 호출 순서에 따라 상태가 달라지는 버그의 온상이다. 나머지 레이어의 중간 기록은 제거하거나 조건부로 위임한다.
+
+2. **MERGE/Upsert 후 실제 ID 사용**: DB/그래프 MERGE(Upsert)가 기존 row/node와 match됐을 때 로컬에서 생성한 ID를 downstream에 그대로 쓰지 않는다. MERGE 이후 실제 저장된 ID를 `RETURN`/`SELECT`로 가져와서 사용한다. "ON CREATE SET id = $localId" 후 $localId를 downstream에 전달하는 패턴은 race/dedup 케이스에서 잘못된 ID 참조를 만든다.
+
+3. **관련 ADR/DEC invariant 코드 대조**: 구현 범위에 관련된 ADR/DEC를 나열하고 각 invariant가 코드에 반영됐는지 항목별로 확인한다. 예: DEC-013 daily cap 숫자가 코드에 있는가, INV-0030-2 serial write가 구현됐는가, ADR-0012 INV-0012-3 raw text 저장 금지가 지켜지는가.
+
+4. **trigger/hook 재귀 가드**: SQLite trigger, DB hook 등 동일 테이블/자원에 다시 쓰는 after-write 핸들러가 있으면 `WHEN NEW.col = OLD.col` guard 또는 `BEFORE UPDATE` 패턴으로 재귀 실행을 방지한다. `PRAGMA recursive_triggers=ON` 환경에서 guard 없는 `AFTER UPDATE` trigger는 무한 재귀로 실패한다.
+
 ## Step 5 - Verify
 
 먼저 변경 범위와 검증 프로필을 계산한다.
@@ -216,6 +228,11 @@ Direct-push repo는 회차와 무관하게 항상 `/codex:adversarial-review`를
 - Review Pass는 diff review와 impact triage/scan이 함께 통과한 상태다.
 - Impact triage: docs/typo/slice/test-only처럼 외부 surface가 없으면 `Impact: local only`로 끝낸다.
 - 위험 trigger: shared helper/API, command/skill, deploy/build/test infra, config/env/schema, persistence, auth/security, public CLI/output, 파일 경로/계약 변경, 변경 파일 5개 초과. 해당하면 변경된 symbol/path/env/command를 `rg`로 repo 전체에서 추적해 call site/docs/tests/deploy refs를 확인한다.
+- **구현 계약 위반 scan (Step 4 Implementation Invariants 대조)**: 아래 네 항목을 리뷰의 일부로 명시적으로 확인한다. Codex/Opus에게 위임하기 전에 먼저 체크하고, 유효한 finding이면 수정한다.
+  - 동일 상태를 쓰는 호출이 두 레이어에 있는가 → 최종 기록 레이어를 단일화했는가
+  - MERGE/Upsert 후 실제 저장된 ID를 RETURN해서 downstream에 사용하는가
+  - 관련 ADR/DEC invariant가 코드에 반영됐는가 (cap 숫자, serial write, 저장 금지 조건 등)
+  - trigger/hook 재귀 가드가 있는가
 - 리뷰 결과는 그대로 수용하지 말고 적대적/비판적으로 재평가한다. 각 finding마다 주장, 근거, 재현 가능성, 실제 영향, severity, 범위 적합성을 확인하고 duplicate/이미 처리됨/추측성 edge/단순 취향이면 근거와 함께 제외한다.
 - 유효한 finding은 가장 합리적인 해결 방식을 고른다: root-cause code fix, test 보강, 문서/계약 정정, 요구사항 clarification, 또는 사용자 결정 요청. 리뷰를 만족시키려고 보안/검증/계약을 약화하거나 symptom-only patch를 만들지 않는다.
 ### Review Loop
