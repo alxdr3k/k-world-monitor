@@ -78,16 +78,21 @@ function normalizeSourceId(rawSourceId: string): string {
 // Cache the probe so we run it once per process.
 // ---------------------------------------------------------------------------
 
-let _hasUpdatedAt: boolean | null = null;
+let _hasUpdatedAt: boolean | undefined;
 function hasUpdatedAtColumn(): boolean {
-  if (_hasUpdatedAt !== null) return _hasUpdatedAt;
+  // Only cache true: once the column exists it cannot disappear, so we skip
+  // the probe forever. Never cache false — in long-lived processes that run
+  // migrations and workers in the same runtime, v7 may be applied after the
+  // first probe, and a stale false would permanently disable stale-row reclaim
+  // and heartbeats until restart.
+  if (_hasUpdatedAt === true) return true;
   try {
-    getDb().prepare("SELECT updated_at FROM discovery_queue LIMIT 0").all();
+    getDb().prepare("SELECT updated_at FROM discovery_queue LIMIT 0").run();
     _hasUpdatedAt = true;
+    return true;
   } catch {
-    _hasUpdatedAt = false;
+    return false;
   }
-  return _hasUpdatedAt;
 }
 
 // ---------------------------------------------------------------------------
@@ -524,7 +529,9 @@ export async function createSnapshotFingerprint(
 
   markQueueItemDone(input.queueId, actualSnapId, contentHash);
 
-  return { snapId: actualSnapId, docId: actualDocId, contentHash, r2Key, deduplicated: false };
+  // P2: MERGE race — if another worker created the Snapshot first, actualSnapId !== snapId.
+  // Count this as a deduplicated result so processDiscoveryQueue metrics are accurate.
+  return { snapId: actualSnapId, docId: actualDocId, contentHash, r2Key, deduplicated: actualSnapId !== snapId };
 }
 
 export async function processDiscoveryQueue(
