@@ -175,9 +175,11 @@ export function failRun(runId: string): void {
 function validateDate(date: string, caller: string): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
     throw new Error(`${caller}: date must be YYYY-MM-DD, got '${date}'`);
-  // Semantic validation: parse and round-trip to reject impossible dates like 2026-99-99.
-  // Date.UTC parses the components; if the month/day are out-of-range JS wraps them,
-  // so we verify the formatted result matches the input.
+  // Semantic validation: parse and round-trip to reject impossible dates like
+  // 2026-99-99 or 0000-00-00. The regex above guarantees every part is a
+  // digit string, so Date.UTC never receives NaN — JS wraps out-of-range
+  // month/day to a different real date, and the round-trip comparison
+  // catches every mismatch.
   const parts = date.split("-").map(Number);
   const parsed = new Date(Date.UTC(parts[0]!, parts[1]! - 1, parts[2]!));
   const roundTrip = parsed.toISOString().slice(0, 10);

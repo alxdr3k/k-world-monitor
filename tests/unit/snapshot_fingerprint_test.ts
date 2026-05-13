@@ -24,19 +24,33 @@ interface FindExistingConfig {
   docId?: string; // R5 P2: optional override; falls back to `doc_dedup_<snapId>` in mock
 }
 let findExistingResult: FindExistingConfig | null = null; // what MATCH returns for dedup check
+// When true, the Source-existence guard query returns count=0 — used to
+// exercise ensureSourceLinkage's missing-Source rollback path on dedup.
+let sourceMissingOnGuard = false;
+// When set, MERGE Document's RETURN d.doc_id ignores the input params.docId
+// and returns this value — simulating Neo4j's ON MATCH branch where the
+// stored docId differs from the freshly generated candidate (the production
+// guarantee F-10 depends on). Default null → echo input (ON CREATE behavior).
+let mergeDocIdOverride: string | null = null;
 
 mock.module("../../src/storage/neo4j/connection", () => ({
   withSession: async <T>(fn: SessionFn<T>): Promise<T> => {
     const tx = {
       run: async (query: string, params: Record<string, unknown>) => {
         neo4jRuns.push({ query, params });
-        // P1-3 source guard: return count=1 so the guard does not throw in tests.
+        // P1-3 source guard: return count=1 by default; flip to 0 when the
+        // test toggles sourceMissingOnGuard so we can verify ensureSourceLinkage
+        // returns null and the caller marks the queue row error.
         if (query.includes("MATCH (src:Source") && query.includes("count(src)")) {
-          return { records: [{ get: (_: string) => 1 }] };
+          return { records: [{ get: (_: string) => (sourceMissingOnGuard ? 0 : 1) }] };
         }
-        // P1-1 MERGE Document RETURN: echo back the pre-generated docId parameter.
+        // P1-1 MERGE Document RETURN: by default echo the pre-generated docId
+        // (ON CREATE branch). When mergeDocIdOverride is set, return that
+        // value instead so tests can exercise the ON MATCH branch where the
+        // stored docId differs from the candidate.
         if (query.includes("MERGE (d:Document") && query.includes("RETURN d.doc_id")) {
-          return { records: [{ get: (_: string) => params["docId"] }] };
+          const ret = mergeDocIdOverride ?? (params["docId"] as string);
+          return { records: [{ get: (_: string) => ret }] };
         }
         return { records: [] };
       },
@@ -178,6 +192,8 @@ beforeEach(() => {
   neo4jRuns.length = 0;
   r2Puts.length = 0;
   findExistingResult = null;
+  sourceMissingOnGuard = false;
+  mergeDocIdOverride = null;
   setupDb();
 });
 
@@ -298,9 +314,13 @@ describe("createSnapshotFingerprint — deduplication", () => {
     expect(result.deduplicated).toBe(true);
     expect(result.snapId).toBe("snap_EXISTING");
     expect(result.r2Key).toBe("permitted_artifact/derived/snapshot/snap_EXISTING");
-    // R5 P2 fix — dedup path now returns the existing Snapshot's actual doc_id
-    // (queried via findExistingSnapshot) so the SnapshotResult contract holds.
-    expect(result.docId).toBe("doc_dedup_snap_EXISTING");
+    // F-10 fix — docId on dedup must be the CURRENT source's linked Document
+    // (created/matched by ensureSourceLinkage), not the first-writer doc_id
+    // denormalized on the Snapshot (s.doc_id), which would be stale across
+    // cross-source dedup. The linkage MERGE returns a fresh doc_<ulid> via the
+    // mock's docId echo, so any doc_<ulid> shape proves the new return path.
+    expect(result.docId).toMatch(/^doc_[0-9A-HJKMNP-TV-Z]+$/);
+    expect(result.docId).not.toBe("doc_dedup_snap_EXISTING");
   });
 
   it("skips Snapshot node creation and R2 upload when deduplicated", async () => {
@@ -371,6 +391,55 @@ describe("createSnapshotFingerprint — deduplication", () => {
 
     expect(result.deduplicated).toBe(true);
     expect(result.r2Key).toBeNull();
+    expect(r2Puts).toHaveLength(0);
+  });
+
+  // F-21: dedup docId must come from the CURRENT source's linked Document,
+  // not from the Snapshot's first-writer s.doc_id property. Previous test
+  // only verified the ON CREATE branch (mock echoed input). Force the MERGE
+  // Document RETURN to give a value that does NOT match the input candidate,
+  // simulating Neo4j's ON MATCH branch where a prior writer's stored docId
+  // is preserved. The dedup return must propagate THAT value.
+  it("dedup return docId reflects ensureSourceLinkage ON MATCH (stored != candidate)", async () => {
+    findExistingResult = { snapId: "snap_EXISTING", r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING" };
+    mergeDocIdOverride = "doc_PRIOR_LINKER";
+
+    const db = setupDb();
+    const queueId = "dq_dedup_onmatch";
+    seedQueue(db, queueId);
+
+    const result = await createSnapshotFingerprint(baseInput(queueId));
+
+    expect(result.deduplicated).toBe(true);
+    // The dedup path must surface the linker's MERGE-resolved doc_id, not
+    // the freshly generated candidate that the linker would have produced
+    // on the ON CREATE branch.
+    expect(result.docId).toBe("doc_PRIOR_LINKER");
+  });
+
+  // F-23: ensureSourceLinkage must return null when the Source node is absent
+  // on the dedup path; the caller must mark the queue row 'error' and throw
+  // (not silently return success). This exercises lines 310-313 +
+  // 442-449 of snapshot-fingerprint.ts, which the previous mock could not
+  // reach because count(src) always returned 1.
+  it("marks queue error and throws when dedup linkage finds no Source node", async () => {
+    findExistingResult = { snapId: "snap_EXISTING", r2Key: null };
+    sourceMissingOnGuard = true;
+
+    const db = setupDb();
+    const queueId = "dq_dedup_no_source";
+    seedQueue(db, queueId);
+
+    await expect(createSnapshotFingerprint(baseInput(queueId))).rejects.toThrow(
+      /dedup: source not found in graph/
+    );
+
+    const row = db
+      .prepare("SELECT status, error_detail FROM discovery_queue WHERE queue_id = ?")
+      .get(queueId) as { status: string; error_detail: string } | null;
+    expect(row?.status).toBe("error");
+    expect(row?.error_detail).toMatch(/dedup: source not found in graph/);
+    // No R2 upload should occur when linkage fails.
     expect(r2Puts).toHaveLength(0);
   });
 });

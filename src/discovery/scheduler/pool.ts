@@ -14,17 +14,44 @@ function readEnvInt(key: string, fallback: number): number {
   return n > 0 ? n : fallback;
 }
 
-const globalLimit = readEnvInt("DISCOVERY_MAX_CONCURRENCY", 8);
-const perHostLimit = readEnvInt("DISCOVERY_MAX_PER_HOST", 1);
 // Cap the per-host map to avoid unbounded growth for long-running crawlers.
 const PER_HOST_MAX_ENTRIES = 10_000;
 
-const globalPool = new Semaphore(globalLimit);
+// Limits are resolved lazily on first use so tests (and callers that set
+// DISCOVERY_MAX_CONCURRENCY / DISCOVERY_MAX_PER_HOST AFTER module import)
+// observe their env value instead of the module-load snapshot. Once resolved
+// the values are frozen for the rest of the process; call resetPools() to
+// also reset the limit cache between test runs.
+let globalLimit: number | undefined;
+let perHostLimit: number | undefined;
+let globalPool: Semaphore | undefined;
 const perHostPools = new Map<string, Semaphore>();
+
+function getGlobalLimit(): number {
+  if (globalLimit === undefined) {
+    globalLimit = readEnvInt("DISCOVERY_MAX_CONCURRENCY", 8);
+  }
+  return globalLimit;
+}
+
+function getPerHostLimit(): number {
+  if (perHostLimit === undefined) {
+    perHostLimit = readEnvInt("DISCOVERY_MAX_PER_HOST", 1);
+  }
+  return perHostLimit;
+}
+
+function getGlobalPool(): Semaphore {
+  if (!globalPool) {
+    globalPool = new Semaphore(getGlobalLimit());
+  }
+  return globalPool;
+}
 
 function getHostPool(hostname: string): Semaphore {
   let sem = perHostPools.get(hostname);
   if (!sem) {
+    const limit = getPerHostLimit();
     // Evict the oldest idle entry when map is full to cap memory growth.
     // Skip semaphores that still have active or queued work (available < limit)
     // to avoid splitting a host's concurrency across two semaphore instances,
@@ -36,7 +63,7 @@ function getHostPool(hostname: string): Semaphore {
       // and prevent unbounded memory growth.
       let evicted = false;
       for (const [key, candidate] of perHostPools) {
-        if (candidate.available === perHostLimit) {
+        if (candidate.available === limit) {
           perHostPools.delete(key);
           evicted = true;
           break;
@@ -51,7 +78,7 @@ function getHostPool(hostname: string): Semaphore {
         );
       }
     }
-    sem = new Semaphore(perHostLimit);
+    sem = new Semaphore(limit);
     perHostPools.set(hostname, sem);
   }
   return sem;
@@ -61,23 +88,39 @@ function getHostPool(hostname: string): Semaphore {
 // Acquires per-host first, then global — this ensures tasks blocked on a
 // busy host do not consume global capacity and starve other hosts.
 // Release in reverse order: global first, then per-host.
+//
+// The second acquire (global) is wrapped so a future AbortSignal-aware
+// Semaphore that rejects acquire() does not leak the host slot. Today the
+// Semaphore never rejects, but the structural guarantee matches the comment.
 export async function runWithPool<T>(hostname: string, fn: () => Promise<T>): Promise<T> {
   const hostPool = getHostPool(hostname);
+  const gPool = getGlobalPool();
   await hostPool.acquire();
-  await globalPool.acquire();
+  try {
+    await gPool.acquire();
+  } catch (err) {
+    hostPool.release();
+    throw err;
+  }
   try {
     return await fn();
   } finally {
-    globalPool.release();
+    gPool.release();
     hostPool.release();
   }
 }
 
 // Exposed for testing only.
-export { globalPool, perHostPools };
+export { perHostPools, getGlobalPool, getGlobalLimit, getPerHostLimit };
 
 // Clear the per-host pool map between tests to prevent state leakage.
+// Also clears the cached limits + global pool so the NEXT call re-reads
+// DISCOVERY_MAX_CONCURRENCY / DISCOVERY_MAX_PER_HOST env values — required
+// when a test sets env vars after the module has already been imported.
 // Only safe to call when all tasks have completed (no active semaphores).
 export function resetPools(): void {
   perHostPools.clear();
+  globalLimit = undefined;
+  perHostLimit = undefined;
+  globalPool = undefined;
 }

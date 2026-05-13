@@ -68,8 +68,15 @@ function normalizeSourceId(rawSourceId: string): string {
       .prepare("SELECT source_id FROM source_registry_slug_map WHERE slug = ?")
       .get(rawSourceId) as { source_id: string } | undefined;
     return row?.source_id ?? rawSourceId;
-  } catch {
-    return rawSourceId; // slug_map table absent (pre-v3 schema)
+  } catch (err) {
+    // Only fall back when the slug_map table genuinely does not exist
+    // (pre-v3 schema). Other failures (SQLITE_BUSY, corrupted DB) must
+    // propagate so a transient lock during normalization does not silently
+    // ship a slug-form id to Neo4j and surface as a misleading "Source not
+    // found in graph".
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/no such table:\s*source_registry_slug_map/i.test(msg)) return rawSourceId;
+    throw err;
   }
 }
 
@@ -90,8 +97,15 @@ function hasUpdatedAtColumn(): boolean {
     getDb().prepare("SELECT updated_at FROM discovery_queue LIMIT 0").run();
     _hasUpdatedAt = true;
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    // Only treat "no such column: updated_at" as the pre-v7 schema marker.
+    // Transient SQLite errors (SQLITE_BUSY, "database is locked") and other
+    // setup-time failures (missing table during early init) must propagate so
+    // they are not silently misread as "column absent" — which would otherwise
+    // permanently disable updated_at writes for the duration of the process.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/no such column:\s*updated_at/i.test(msg)) return false;
+    throw err;
   }
 }
 
@@ -380,10 +394,30 @@ async function ensureSourceLinkage(
 // error_detail stores snap_id as result metadata; a dedicated snap_id column will be
 // added in a later migration if needed.
 // updated_at clause is included only when v7 column is present (pre-v7 DBs would throw).
-function markQueueItemDone(queueId: string, snapId: string, contentHash: string): void {
-  const u = hasUpdatedAtColumn()
+// hasUpdatedAtColumn() rethrows non-"no such column" errors (iter-1 F-03),
+// which is the desired behavior at the module boundary but dangerous at any
+// call site that runs OUTSIDE the per-row error-handling try/catch (codex
+// review iter-3 #2). Wrap the probe with a swallow-on-error variant for
+// use in row-claim, heartbeat, and marker paths so a transient SQLite
+// failure during the probe degrades to "skip updated_at" instead of
+// aborting the entire worker run.
+function tryHasUpdatedAtColumn(): boolean {
+  try {
+    return hasUpdatedAtColumn();
+  } catch {
+    return false;
+  }
+}
+
+// Marker helpers always want the SQL fragment form ("" or ", updated_at = ...").
+function tryUpdatedAtClause(): string {
+  return tryHasUpdatedAtColumn()
     ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
     : "";
+}
+
+function markQueueItemDone(queueId: string, snapId: string, contentHash: string): void {
+  const u = tryUpdatedAtClause();
   getDb()
     .prepare(
       `UPDATE discovery_queue
@@ -394,9 +428,7 @@ function markQueueItemDone(queueId: string, snapId: string, contentHash: string)
 }
 
 function markQueueItemError(queueId: string, detail: string): void {
-  const u = hasUpdatedAtColumn()
-    ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
-    : "";
+  const u = tryUpdatedAtClause();
   getDb()
     .prepare(
       `UPDATE discovery_queue
@@ -470,19 +502,66 @@ export async function createSnapshotFingerprint(
         input.body.byteOffset + input.body.byteLength
       ) as ArrayBuffer;
       await r2Put(key, bodyBuf);
-      dedupR2Key = key;
-      await withSession(async (session) => {
-        await session.run(
-          `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
-          { snapId: existing.snapId, r2Key: key }
+      // ADR-0012 INV-0012-3 TOCTOU close: re-check linked-source policy AFTER
+      // r2Put completes. A concurrent linker can attach a prohibited source
+      // between the first check and now; if so, skip the SET r2_key Neo4j
+      // write so the Snapshot remains r2_key=null and the prohibited source
+      // never sees an r2-backed reference.
+      //
+      // We DO NOT r2Delete the uploaded object here: another worker may have
+      // legitimately re-uploaded the same idempotent key during this window,
+      // and an asymmetric delete (r2Delete does not call checkPermittedPrefix)
+      // would wipe their legitimate object. The orphan is bounded — the next
+      // eligible retry will dedup-match and re-evaluate policy; if still
+      // allowed it back-fills the r2_key via r2Put's idempotent overwrite.
+      //
+      // If the re-check itself throws (transient Neo4j blip), the SAFE default
+      // is to skip the SET so we never escalate a verification failure into a
+      // graph link the prohibited source could observe.
+      let stillAllowed: boolean;
+      try {
+        stillAllowed = await allLinkedSourcesAllowRawCloud(existing.snapId);
+      } catch (recheckErr) {
+        console.warn(
+          `[snapshot] dedup post-r2Put policy recheck failed; leaving r2_key=null for safety:`,
+          recheckErr instanceof Error ? recheckErr.message : recheckErr
         );
-      });
+        stillAllowed = false;
+      }
+      if (stillAllowed) {
+        // SET r2_key is best-effort: if Neo4j is unavailable here the r2 object
+        // already exists, the Snapshot node still has r2_key=null, and a later
+        // retry will dedup-match and back-fill via the same idempotent path
+        // (r2Put overwrites by key). Treat the SET failure as a soft warning
+        // rather than escalating to markQueueItemError (which would inflate
+        // the failure counter and mislead operators about a real outage).
+        try {
+          await withSession(async (session) => {
+            await session.run(
+              `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
+              { snapId: existing.snapId, r2Key: key }
+            );
+          });
+          dedupR2Key = key;
+        } catch (setErr) {
+          console.warn(
+            `[snapshot] dedup r2_key back-patch failed for ${existing.snapId}; ` +
+              `r2 object uploaded, retry will back-fill:`,
+            setErr instanceof Error ? setErr.message : setErr
+          );
+        }
+      }
     }
 
     markQueueItemDone(input.queueId, existing.snapId, contentHash);
     return {
       snapId: existing.snapId,
-      docId: existing.docId,
+      // F-10: use the current-source's linked docId, not the first writer's
+      // s.doc_id property on the deduplicated Snapshot (which would be stale
+      // across cross-source dedup). `linked` is the doc_id from
+      // ensureSourceLinkage's MERGE for THIS source — that is the authoritative
+      // Document for this dedup call's source.
+      docId: linked,
       contentHash,
       r2Key: dedupR2Key,
       deduplicated: true,
@@ -526,14 +605,51 @@ export async function createSnapshotFingerprint(
         input.body.byteOffset + input.body.byteLength
       ) as ArrayBuffer;
       await r2Put(key, bodyBuf);
-      r2Key = key;
-      // Back-patch r2_key on the Snapshot node now that upload succeeded.
-      await withSession(async (session) => {
-        await session.run(
-          `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
-          { snapId: actualSnapId, r2Key: key }
-        );
-      });
+      // ADR-0012 INV-0012-3 TOCTOU close (MERGE-matched branch only): if our
+      // Snapshot CREATE collided with a concurrent worker, re-check policy
+      // after r2Put. If a linker attached a prohibited source between the
+      // first check and now, skip the SET so r2_key stays null. See the
+      // dedup-backfill path above for the rationale on NOT r2Delete'ing here
+      // (avoids wiping a concurrent legitimate re-upload of the same key).
+      // A re-check throw is treated as "not allowed" so we fail safe — the
+      // prohibited source must never see a SET back-patched r2_key.
+      let stillAllowed: boolean;
+      if (!mergeMatchedExisting) {
+        stillAllowed = true;
+      } else {
+        try {
+          stillAllowed = await allLinkedSourcesAllowRawCloud(actualSnapId);
+        } catch (recheckErr) {
+          console.warn(
+            `[snapshot] new-path post-r2Put policy recheck failed; leaving r2_key=null for safety:`,
+            recheckErr instanceof Error ? recheckErr.message : recheckErr
+          );
+          stillAllowed = false;
+        }
+      }
+      if (stillAllowed) {
+        // SET r2_key is best-effort (same rationale as the dedup back-fill
+        // path above): a Neo4j failure here is non-fatal because the r2 object
+        // exists and the next dedup-matched retry will back-fill via the same
+        // idempotent key. Escalating to markQueueItemError would inflate the
+        // failure counter for a transient Neo4j blip even though graph + r2
+        // are recoverable.
+        try {
+          await withSession(async (session) => {
+            await session.run(
+              `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
+              { snapId: actualSnapId, r2Key: key }
+            );
+          });
+          r2Key = key;
+        } catch (setErr) {
+          console.warn(
+            `[snapshot] new-path r2_key back-patch failed for ${actualSnapId}; ` +
+              `r2 object uploaded, retry will back-fill:`,
+            setErr instanceof Error ? setErr.message : setErr
+          );
+        }
+      }
     }
   }
 
@@ -620,9 +736,11 @@ export async function processDiscoveryQueue(
 
       if (pending.length > 0) {
         const ids = pending.map((r) => r.queue_id);
-        const u = hasUpdatedAtColumn()
-          ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
-          : "";
+        // tryUpdatedAtClause swallows probe failures so a transient SQLITE_BUSY
+        // during the column check degrades to a no-updated_at UPDATE rather
+        // than aborting the entire row-claim transaction and rolling back the
+        // batch (codex review iter-3 #2).
+        const u = tryUpdatedAtClause();
         db.prepare(
           `UPDATE discovery_queue
            SET status = 'processing'${u}
@@ -660,19 +778,26 @@ export async function processDiscoveryQueue(
     // Heartbeat: touch updated_at before processing so the 1h stale-reclaim
     // does not requeue a still-active row mid-batch (long fetch/Neo4j writes
     // can exceed the threshold for batches of large items).
-    if (hasUpdatedAtColumn()) {
+    // tryHasUpdatedAtColumn swallows probe failures so a transient SQLITE_BUSY
+    // during the probe does not abort the entire worker run (codex review
+    // iter-3 #2): the heartbeat is skipped for this row only, and the next
+    // iteration re-probes.
+    if (tryHasUpdatedAtColumn()) {
       db.prepare(
         `UPDATE discovery_queue SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE queue_id = ?`
       ).run(row.queue_id);
     }
 
-    // Normalize slug→canonical src_<ULID> up front so both the policy lookup
-    // and the downstream graph MATCH operate on the same id namespace. The v0
-    // discovery producer enqueues slug-form ids while source_material_policy
-    // and Source nodes are keyed by canonical ids.
-    const canonicalSourceId = normalizeSourceId(row.source_id);
-
     try {
+      // Normalize slug→canonical src_<ULID> INSIDE the row try/catch (codex
+      // review iter-3 #1). normalizeSourceId rethrows non-"no such table"
+      // SQLite errors so a transient lock / corruption during the slug
+      // lookup must be surfaced as a per-row error, not as a worker-wide
+      // abort that leaves already-claimed rows stuck in 'processing' until
+      // stale-reclaim. The v0 discovery producer enqueues slug-form ids
+      // while source_material_policy / Source nodes are keyed by canonical
+      // src_<ULID> ids.
+      const canonicalSourceId = normalizeSourceId(row.source_id);
       const { archivePolicy, rawCloudPolicy } = await archivePolicyFn(canonicalSourceId);
 
       // P1-7: Enforce do_not_collect before any outbound fetch.

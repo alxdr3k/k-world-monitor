@@ -27,29 +27,55 @@ export interface EnqueueResult {
 // RSS/Atom parsing
 // ---------------------------------------------------------------------------
 
+// Find a key whose local-name part (after any namespace prefix) matches
+// localKey, case-insensitively. XML element names are technically case
+// sensitive per spec, but wild RSS feeds in the field sometimes emit
+// <RSS> / <Rss> / <Channel> capitalizations; lowercase-fold so the parser
+// does not drop those silently.
+//
+// When multiple keys match (e.g. proxies that emit both <Title> and <title>
+// at the same level), prefer the exact-case match for determinism. If no
+// exact-case match exists, the lexically smallest match wins so the same
+// feed always parses identically.
+function findLocalKey(obj: Record<string, unknown>, localKey: string): string | undefined {
+  const want = localKey.toLowerCase();
+  const matches: string[] = [];
+  let exact: string | undefined;
+  for (const k of Object.keys(obj)) {
+    const tail = k.includes(":") ? k.slice(k.lastIndexOf(":") + 1) : k;
+    if (tail.toLowerCase() === want) {
+      matches.push(k);
+      if (tail === localKey && exact === undefined) exact = k;
+    }
+  }
+  if (exact !== undefined) return exact;
+  if (matches.length === 0) return undefined;
+  return matches.sort()[0];
+}
+
 // Extract items from a parsed RSS 2.0 or Atom 1.0 feed object.
 function extractItems(parsed: unknown): FeedItem[] {
   if (typeof parsed !== "object" || parsed === null) return [];
   const obj = parsed as Record<string, unknown>;
 
   // RSS 2.0: rss.channel.item[]  (also handles namespace-prefixed root like rss:rss)
-  const rssKey = Object.keys(obj).find((k) => k === "rss" || k.endsWith(":rss"));
+  const rssKey = findLocalKey(obj, "rss");
   const rss = rssKey ? (obj[rssKey] as Record<string, unknown> | undefined) : undefined;
   if (rss) {
-    const channelKey = Object.keys(rss).find((k) => k === "channel" || k.endsWith(":channel"));
+    const channelKey = findLocalKey(rss, "channel");
     const channel = channelKey ? (rss[channelKey] as Record<string, unknown> | undefined) : undefined;
     if (channel) {
-      const itemKey = Object.keys(channel).find((k) => k === "item" || k.endsWith(":item"));
+      const itemKey = findLocalKey(channel, "item");
       const items = itemKey ? channel[itemKey] : undefined;
       return normalizeItems(Array.isArray(items) ? items : items ? [items] : [], "rss");
     }
   }
 
   // Atom 1.0: feed.entry[]  (also handles namespace-prefixed root like atom:feed)
-  const feedKey = Object.keys(obj).find((k) => k === "feed" || k.endsWith(":feed"));
+  const feedKey = findLocalKey(obj, "feed");
   const feed = feedKey ? (obj[feedKey] as Record<string, unknown> | undefined) : undefined;
   if (feed) {
-    const entryKey = Object.keys(feed).find((k) => k === "entry" || k.endsWith(":entry"));
+    const entryKey = findLocalKey(feed, "entry");
     const entries = entryKey ? feed[entryKey] : undefined;
     return normalizeItems(Array.isArray(entries) ? entries : entries ? [entries] : [], "atom");
   }
@@ -58,11 +84,10 @@ function extractItems(parsed: unknown): FeedItem[] {
 }
 
 // Look up a field from a parsed XML element by its local name, ignoring any
-// namespace prefix (e.g. "atom:link" matches localKey "link").
+// namespace prefix (e.g. "atom:link" matches localKey "link") and casing
+// (e.g. <Title> matches "title").
 function getLocal(obj: Record<string, unknown>, localKey: string): unknown {
-  if (localKey in obj) return obj[localKey];
-  const suffixed = `:${localKey}`;
-  const key = Object.keys(obj).find((k) => k === localKey || k.endsWith(suffixed));
+  const key = findLocalKey(obj, localKey);
   return key ? obj[key] : undefined;
 }
 
@@ -102,16 +127,21 @@ function normalizeItems(raw: unknown[], format: "rss" | "atom"): FeedItem[] {
         url = linkVal;
       } else if (Array.isArray(linkVal)) {
         const links = linkVal as Record<string, unknown>[];
+        const isSelf = (l: Record<string, unknown>): boolean => l["@rel"] === "self";
         const isAlternate = (l: Record<string, unknown>): boolean =>
           l["@rel"] === "alternate" || !l["@rel"];
         const isHtmlOrUnspecified = (l: Record<string, unknown>): boolean => {
           const t = typeof l["@type"] === "string" ? (l["@type"] as string).toLowerCase() : "";
           return t === "" || t.includes("html");
         };
+        // Filter out rel="self" feed pointers before ranking — they advertise
+        // the feed endpoint itself, not an article URL, and would route the
+        // downstream snapshot/fingerprint pipeline back to the feed.
+        const candidates = links.filter((l) => !isSelf(l));
         const chosen =
-          links.find((l) => isAlternate(l) && isHtmlOrUnspecified(l)) ??
-          links.find(isAlternate) ??
-          links[0];
+          candidates.find((l) => isAlternate(l) && isHtmlOrUnspecified(l)) ??
+          candidates.find(isAlternate) ??
+          candidates[0];
         if (chosen) url = str(chosen["@href"]);
       } else if (typeof linkVal === "object" && linkVal !== null) {
         url = str((linkVal as Record<string, unknown>)["@href"]);
@@ -164,12 +194,43 @@ export function parseRssFeed(xmlBody: string): FeedItem[] {
   return extractItems(parsed);
 }
 
+// Resolve a v0 slug-form source_id to the canonical src_<ULID> stored in
+// source_material_policy. discovery_queue.source_id has a FK constraint on
+// source_material_policy(source_id) and connections enable foreign_keys, so
+// inserting a raw slug fails with "FOREIGN KEY constraint failed" in any
+// production schema (tests omit the FK clause and therefore missed this).
+// Returns null when the slug has no mapping yet — caller decides whether to
+// raise or skip; we raise so a misconfigured slug is loud, not silently dropped.
+function resolveCanonicalSourceId(rawSourceId: string): string | null {
+  if (rawSourceId.startsWith("src_")) return rawSourceId;
+  const db = getDb();
+  try {
+    const row = db
+      .prepare("SELECT source_id FROM source_registry_slug_map WHERE slug = ?")
+      .get(rawSourceId) as { source_id: string } | undefined;
+    return row?.source_id ?? null;
+  } catch (err) {
+    // The slug_map table is created by migration v3; if it is missing here,
+    // the caller is running against a pre-v3 schema and should surface that
+    // rather than silently accepting a non-canonical id that the FK will
+    // reject downstream. Re-raise unrecognised errors so a real DB problem
+    // is not masked as "slug not found".
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/no such table:\s*source_registry_slug_map/i.test(msg)) return null;
+    throw err;
+  }
+}
+
 // Enqueue discovered items into discovery_queue (INV-0030-2: serial write, no network I/O).
 // Skips duplicates via the unique index (source_id, url) WHERE status IN pending/processing.
 // maxInsert: if provided, stop after this many successful insertions (DEC-013 daily cap).
 // Passing all items with a budget limit (rather than pre-slicing) ensures non-duplicate
 // items later in the feed are still attempted even when early items are duplicates.
 // Returns counts of inserted and skipped rows.
+//
+// Throws when `sourceId` is slug-form (not `src_*`) and no entry exists in
+// source_registry_slug_map — production schemas enforce the FK so a silent
+// fallback would cause every insert to fail with a confusing constraint error.
 export function enqueueDiscoveredItems(
   sourceId: string,
   items: FeedItem[],
@@ -178,6 +239,13 @@ export function enqueueDiscoveredItems(
   if (items.length === 0) return { sourceId, inserted: 0, skipped: 0 };
 
   const db = getDb();
+  const canonicalId = resolveCanonicalSourceId(sourceId);
+  if (canonicalId === null) {
+    throw new Error(
+      `enqueueDiscoveredItems: cannot resolve source_id='${sourceId}' to a canonical src_<ULID>. ` +
+      `Run the source registry seed (bun run seed:sources) or check source_registry_slug_map.`
+    );
+  }
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
@@ -202,7 +270,7 @@ export function enqueueDiscoveredItems(
       const queueId = `dq_${ulid()}`;
       const changes = stmt.run(
         queueId,
-        sourceId,
+        canonicalId,
         item.url,
         item.title ?? null,
         item.publishedAt ?? null,

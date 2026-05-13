@@ -58,7 +58,22 @@ async function migrateSqlite(): Promise<void> {
     const sqlPath = join(REPO_ROOT, migration.file);
     const sql = readFileSync(sqlPath, "utf-8");
     try {
-      getDb().exec(sql);
+      // Wrap each migration in BEGIN/COMMIT so a multi-statement file that
+      // errors mid-way rolls back cleanly instead of leaving the DB with
+      // partial DDL applied AND no schema_migrations row (the resulting
+      // state masks the original failure on re-run because IF NOT EXISTS
+      // makes the surviving partial state look idempotent). SQLite supports
+      // DDL inside transactions; the only exception (CREATE VIRTUAL TABLE
+      // for some FTS5 variants) is not used in this project's migrations.
+      const db = getDb();
+      db.exec("BEGIN");
+      try {
+        db.exec(sql);
+        db.exec("COMMIT");
+      } catch (innerErr) {
+        try { db.exec("ROLLBACK"); } catch { /* ignore rollback failure */ }
+        throw innerErr;
+      }
       console.log(`[SQLite] ✓ Applied ${migration.file}`);
     } catch (err: unknown) {
       // Idempotency guard, scoped to single-statement ALTER TABLE ADD COLUMN

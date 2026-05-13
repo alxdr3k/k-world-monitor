@@ -24,6 +24,14 @@ export class Semaphore {
   }
 
   release(): void {
+    // Guard against double-release: with no queued waiters, `active` would
+    // underflow below zero and `available` would silently exceed `limit`,
+    // weakening the concurrency invariant. Throw so a release/acquire bug is
+    // caught immediately instead of hiding in production with subtle
+    // over-concurrency.
+    if (this.queue.length === 0 && this.active <= 0) {
+      throw new Error("Semaphore.release(): no active holder to release");
+    }
     const next = this.queue.shift();
     if (next) {
       next();

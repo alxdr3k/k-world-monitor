@@ -9,6 +9,12 @@ process.env["SQLITE_PATH"] = ":memory:";
 import { closeDb } from "../../src/storage/sqlite/connection";
 import { parseRssFeed, enqueueDiscoveredItems, type FeedItem } from "../../src/discovery/worker/rss-worker";
 
+// Mirror the production v6 schema: discovery_queue.source_id has a FK to
+// source_material_policy(source_id), and connections enable foreign_keys.
+// The previous setup omitted both the FK and the slug map, so a slug-form
+// enqueue (the real worker's v0 input) would have passed in tests but
+// failed loudly in production with "FOREIGN KEY constraint failed".
+// Pre-seed each test slug via seedSlug() so enqueue resolves to src_<ULID>.
 function setupDb() {
   closeDb();
   const { getDb } = require("../../src/storage/sqlite/connection");
@@ -19,9 +25,22 @@ function setupDb() {
       applied_at TEXT NOT NULL DEFAULT (datetime('now')),
       description TEXT
     );
+    CREATE TABLE IF NOT EXISTS source_material_policy (
+      source_id            TEXT NOT NULL PRIMARY KEY,
+      archive_policy       TEXT NOT NULL DEFAULT 'metadata_only',
+      raw_cloud_policy     TEXT NOT NULL DEFAULT 'always_prohibited',
+      external_llm_policy  TEXT NOT NULL DEFAULT 'allowed',
+      checked_at           TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z',
+      updated_at           TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z'
+    );
+    CREATE TABLE IF NOT EXISTS source_registry_slug_map (
+      slug       TEXT NOT NULL PRIMARY KEY,
+      source_id  TEXT NOT NULL REFERENCES source_material_policy(source_id)
+    );
     CREATE TABLE IF NOT EXISTS discovery_queue (
       queue_id      TEXT NOT NULL PRIMARY KEY,
-      source_id     TEXT NOT NULL,
+      source_id     TEXT NOT NULL
+                    REFERENCES source_material_policy(source_id),
       url           TEXT NOT NULL,
       title         TEXT,
       published_at  TEXT,
@@ -37,6 +56,24 @@ function setupDb() {
     CREATE INDEX IF NOT EXISTS discovery_queue_status_idx
       ON discovery_queue (status, discovered_at);
   `);
+}
+
+// Seed a slug → src_<ULID> mapping mirroring INFRA-1B.1 source registry
+// bootstrap, then return the canonical source_id so tests can assert against
+// the value that actually lands in discovery_queue.source_id.
+function seedSlug(slug: string): string {
+  const { getDb } = require("../../src/storage/sqlite/connection");
+  const canonical = `src_${slug.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()}`;
+  const db = getDb();
+  db.prepare(
+    `INSERT OR IGNORE INTO source_material_policy
+       (source_id, archive_policy, raw_cloud_policy, external_llm_policy)
+     VALUES (?, 'full_snapshot_allowed', 'allowed_public_data_only', 'allowed')`
+  ).run(canonical);
+  db.prepare(
+    `INSERT OR IGNORE INTO source_registry_slug_map (slug, source_id) VALUES (?, ?)`
+  ).run(slug, canonical);
+  return canonical;
 }
 
 beforeEach(() => { setupDb(); });
@@ -193,7 +230,8 @@ describe("parseRssFeed — edge cases", () => {
 // ---------------------------------------------------------------------------
 
 describe("enqueueDiscoveredItems", () => {
-  it("inserts new items and returns correct count", () => {
+  it("inserts new items, resolves slug → canonical src_<ULID>, and returns counts", () => {
+    const canonical = seedSlug("src-test");
     const items: FeedItem[] = [
       { url: "https://example.com/1", title: "One" },
       { url: "https://example.com/2", title: "Two" },
@@ -205,12 +243,15 @@ describe("enqueueDiscoveredItems", () => {
     const { getDb } = require("../../src/storage/sqlite/connection");
     const rows = getDb().prepare("SELECT * FROM discovery_queue ORDER BY url").all();
     expect(rows).toHaveLength(2);
-    expect((rows[0] as Record<string,unknown>)["source_id"]).toBe("src-test");
+    // Production schema enforces FK on source_material_policy(source_id); the
+    // inserted row must carry the canonical src_<ULID>, not the input slug.
+    expect((rows[0] as Record<string,unknown>)["source_id"]).toBe(canonical);
     expect((rows[0] as Record<string,unknown>)["status"]).toBe("pending");
     expect((rows[0] as Record<string,unknown>)["content_hash"]).toBeTruthy();
   });
 
   it("skips duplicate URLs (same source, pending status)", () => {
+    seedSlug("src-dupe");
     const items: FeedItem[] = [{ url: "https://example.com/dupe", title: "Dupe" }];
     enqueueDiscoveredItems("src-dupe", items);
     const result = enqueueDiscoveredItems("src-dupe", items);
@@ -218,13 +259,16 @@ describe("enqueueDiscoveredItems", () => {
     expect(result.skipped).toBe(1);
   });
 
-  it("returns zero counts for empty items", () => {
+  it("returns zero counts for empty items (no slug lookup needed)", () => {
+    // Empty items short-circuits before slug resolution — no seed required.
     const result = enqueueDiscoveredItems("src-empty", []);
     expect(result.inserted).toBe(0);
     expect(result.skipped).toBe(0);
   });
 
   it("allows same URL from different source IDs", () => {
+    seedSlug("source-a");
+    seedSlug("source-b");
     const items: FeedItem[] = [{ url: "https://shared.example.com/article" }];
     const r1 = enqueueDiscoveredItems("source-a", items);
     const r2 = enqueueDiscoveredItems("source-b", items);
@@ -233,6 +277,7 @@ describe("enqueueDiscoveredItems", () => {
   });
 
   it("stores publishedAt correctly", () => {
+    seedSlug("src-dated");
     const items: FeedItem[] = [
       { url: "https://example.com/dated", publishedAt: "2026-05-01T10:00:00.000Z" },
     ];
@@ -242,5 +287,31 @@ describe("enqueueDiscoveredItems", () => {
       .prepare("SELECT published_at FROM discovery_queue WHERE url = ?")
       .get("https://example.com/dated") as { published_at: string } | null;
     expect(row?.published_at).toBe("2026-05-01T10:00:00.000Z");
+  });
+
+  it("throws when slug has no mapping (FK would reject in production)", () => {
+    // F-01: production schema enforces FK to source_material_policy. A slug
+    // with no slug_map entry must surface as a clear application error rather
+    // than letting the INSERT trip a confusing "FOREIGN KEY constraint failed".
+    const items: FeedItem[] = [{ url: "https://example.com/orphan" }];
+    expect(() => enqueueDiscoveredItems("orphan-slug", items)).toThrow(
+      /cannot resolve source_id='orphan-slug'/
+    );
+  });
+
+  it("accepts a pre-canonicalised src_<ULID> input without slug map lookup", () => {
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    getDb().prepare(
+      `INSERT INTO source_material_policy
+         (source_id, archive_policy, raw_cloud_policy, external_llm_policy)
+       VALUES ('src_DIRECT', 'metadata_only', 'always_prohibited', 'allowed')`
+    ).run();
+    const items: FeedItem[] = [{ url: "https://example.com/direct" }];
+    const result = enqueueDiscoveredItems("src_DIRECT", items);
+    expect(result.inserted).toBe(1);
+    const row = getDb()
+      .prepare("SELECT source_id FROM discovery_queue WHERE url = ?")
+      .get("https://example.com/direct") as { source_id: string };
+    expect(row.source_id).toBe("src_DIRECT");
   });
 });
