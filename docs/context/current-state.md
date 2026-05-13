@@ -197,11 +197,11 @@ ADR-0011~0021로 supersede됐다.
   youtube_long → shorts)
 - Q-033 외부 플랫폼 auto cross-post timing (Substack / YouTube / X)
 - Q-034 Auto retraction trigger 정책 v1+
-- **Q-037 AccessIntervention concurrency hardening** (INFRA-1B.6.x slice — PR #25 retro F-08; apoc.lock.nodes vs CAS)
-- **Q-038 discovery_queue multi-worker worker_id CAS** (INFRA-1B.3.x slice — PR #25 retro F-15)
-- **Q-039 pollEligibleSources Phase 1/2 streaming** (INFRA-1B.2.x slice — PR #25 retro F-13)
-- **Q-040 v0→production schema migration framework** (DEPLOY-1A.1 slice — PR #26 codex review)
-- **Q-041 updated_at timestamp CHECK constraints** (DEPLOY-1A.2 slice — PR #25 retro F-17)
+- ~~Q-037~~ **resolved by DEC-019** — apoc.lock.nodes 채택, INFRA-1B.6.x 슬라이스에서 implement
+- ~~Q-038~~ **resolved by DEC-019** — worker_id CAS 채택, INFRA-1B.3.x 슬라이스에서 implement
+- ~~Q-039~~ **resolved by DEC-019** — chunked allSettled 채택, INFRA-1B.2.x 슬라이스에서 implement
+- ~~Q-040~~ **resolved by DEC-019** — v0 pre-deploy contract 명문화(docs/05_RUNBOOK.md) + P1-MVP-prep milestone + backfill 위치 lock; framework implement는 DEPLOY-1A.1
+- ~~Q-041~~ **resolved by DEC-019** — millis-bearing 일관 통일 채택, DEPLOY-1A.2 슬라이스에서 implement
 - SPIKE-001 Neo4j Community + native FTS가 1만 graph object 시점 검색 < 1초
   NFR-001을 만족하는지 (SQLite+FTS5에서 대상 갱신)
 
