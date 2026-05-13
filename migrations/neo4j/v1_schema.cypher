@@ -16,8 +16,14 @@ CREATE CONSTRAINT document_unique IF NOT EXISTS
 FOR (n:Document) REQUIRE n.doc_id IS UNIQUE;
 
 // INFRA-1B.3: Pre-clean duplicate (url, source_id) Document pairs before adding the
-// composite uniqueness constraint. No-op on fresh databases. On upgrades with legacy
-// duplicates the runner would abort mid-file; this keeps the first-collected node per pair.
+// composite uniqueness constraint. No-op on fresh databases. Steps:
+// (1) redirect HAS_SNAPSHOT edges from extras to survivor so Snapshots are not orphaned,
+// (2) redirect incoming HAS_DOCUMENT edges to survivor,
+// (3) delete now-disconnected extras.
+MATCH (d:Document) WITH d.url AS url, d.source_id AS source_id, collect(d) AS dups WHERE size(dups) > 1 WITH dups[0] AS survivor, dups[1..] AS extras UNWIND extras AS dup MATCH (dup)-[r:HAS_SNAPSHOT]->(sn:Snapshot) MERGE (survivor)-[:HAS_SNAPSHOT]->(sn) DELETE r;
+
+MATCH (d:Document) WITH d.url AS url, d.source_id AS source_id, collect(d) AS dups WHERE size(dups) > 1 WITH dups[0] AS survivor, dups[1..] AS extras UNWIND extras AS dup MATCH (src)-[r:HAS_DOCUMENT]->(dup) MERGE (src)-[:HAS_DOCUMENT]->(survivor) DELETE r;
+
 MATCH (d:Document) WITH d.url AS url, d.source_id AS source_id, collect(d) AS dups WHERE size(dups) > 1 UNWIND dups[1..] AS dup DETACH DELETE dup;
 
 // INFRA-1B.3: composite uniqueness on (url, source_id) prevents duplicate Document nodes
@@ -34,6 +40,13 @@ FOR (n:Snapshot) REQUIRE n.snap_id IS UNIQUE;
 // pre-existing standalone index on the same label/property can conflict and prevent
 // constraint creation. IF EXISTS makes this a no-op on fresh databases.
 DROP INDEX snapshot_content_hash_idx IF EXISTS;
+
+// INFRA-1B.3: Pre-clean duplicate content_hash Snapshot nodes before adding uniqueness
+// constraint. No-op on fresh databases. Redirects incoming HAS_SNAPSHOT edges from
+// extras to survivor so Documents retain their snapshot chain, then deletes extras.
+MATCH (s:Snapshot) WITH s.content_hash AS ch, collect(s) AS dups WHERE size(dups) > 1 WITH dups[0] AS survivor, dups[1..] AS extras UNWIND extras AS dup MATCH (d:Document)-[r:HAS_SNAPSHOT]->(dup) MERGE (d)-[:HAS_SNAPSHOT]->(survivor) DELETE r;
+
+MATCH (s:Snapshot) WITH s.content_hash AS ch, collect(s) AS dups WHERE size(dups) > 1 UNWIND dups[1..] AS dup DETACH DELETE dup;
 
 // INFRA-1B.3: content_hash uniqueness prevents duplicate Snapshot nodes from
 // concurrent workers. MERGE on content_hash in createDocumentAndSnapshot relies

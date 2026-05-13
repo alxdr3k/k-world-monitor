@@ -628,6 +628,18 @@ export async function processDiscoveryQueue(
   let errors = 0;
 
   for (const row of pending) {
+    // P2-13: Verify the row is still in 'processing' state before doing any outbound
+    // work. The stale-reclaim step resets rows to 'pending' after 1h; if another worker
+    // claimed and completed the row in the interim, skip to avoid duplicate fetches and
+    // redundant graph writes. The heartbeat below then re-anchors ownership for rows
+    // we do process.
+    const stillProcessing = db
+      .prepare(
+        `SELECT 1 FROM discovery_queue WHERE queue_id = ? AND status = 'processing'`
+      )
+      .get(row.queue_id);
+    if (!stillProcessing) continue;
+
     // Heartbeat: touch updated_at before processing so the 1h stale-reclaim
     // does not requeue a still-active row mid-batch (long fetch/Neo4j writes
     // can exceed the threshold for batches of large items).
