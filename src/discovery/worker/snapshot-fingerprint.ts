@@ -8,7 +8,7 @@
 import { ulid } from "ulid";
 import { createHash } from "crypto";
 import { withSession } from "../../storage/neo4j/connection";
-import { r2Put } from "../../storage/r2/client";
+import { r2Put, r2Delete } from "../../storage/r2/client";
 import { getDb } from "../../storage/sqlite/connection";
 import type { ContentKind } from "../fetch/safe-fetch";
 
@@ -90,8 +90,15 @@ function hasUpdatedAtColumn(): boolean {
     getDb().prepare("SELECT updated_at FROM discovery_queue LIMIT 0").run();
     _hasUpdatedAt = true;
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    // Only treat "no such column: updated_at" as the pre-v7 schema marker.
+    // Transient SQLite errors (SQLITE_BUSY, "database is locked") and other
+    // setup-time failures (missing table during early init) must propagate so
+    // they are not silently misread as "column absent" — which would otherwise
+    // permanently disable updated_at writes for the duration of the process.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/no such column:\s*updated_at/i.test(msg)) return false;
+    throw err;
   }
 }
 
@@ -470,19 +477,52 @@ export async function createSnapshotFingerprint(
         input.body.byteOffset + input.body.byteLength
       ) as ArrayBuffer;
       await r2Put(key, bodyBuf);
-      dedupR2Key = key;
-      await withSession(async (session) => {
-        await session.run(
-          `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
-          { snapId: existing.snapId, r2Key: key }
-        );
-      });
+      // ADR-0012 INV-0012-3 TOCTOU close: re-check linked-source policy AFTER
+      // r2Put completes. A concurrent linker can attach a prohibited source
+      // between the first check and now; if so, delete the just-uploaded
+      // object and leave r2_key = null. The next eligible retry will re-evaluate.
+      const stillAllowed = await allLinkedSourcesAllowRawCloud(existing.snapId);
+      if (!stillAllowed) {
+        try { await r2Delete(key); } catch (cleanupErr) {
+          console.warn(
+            `[snapshot] dedup r2 cleanup failed for ${key} (post-r2Put policy revert):`,
+            cleanupErr instanceof Error ? cleanupErr.message : cleanupErr
+          );
+        }
+      } else {
+        // SET r2_key is best-effort: if Neo4j is unavailable here the r2 object
+        // already exists, the Snapshot node still has r2_key=null, and a later
+        // retry will dedup-match and back-fill via the same idempotent path
+        // (r2Put overwrites by key). Treat the SET failure as a soft warning
+        // rather than escalating to markQueueItemError (which would inflate
+        // the failure counter and mislead operators about a real outage).
+        try {
+          await withSession(async (session) => {
+            await session.run(
+              `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
+              { snapId: existing.snapId, r2Key: key }
+            );
+          });
+          dedupR2Key = key;
+        } catch (setErr) {
+          console.warn(
+            `[snapshot] dedup r2_key back-patch failed for ${existing.snapId}; ` +
+              `r2 object uploaded, retry will back-fill:`,
+            setErr instanceof Error ? setErr.message : setErr
+          );
+        }
+      }
     }
 
     markQueueItemDone(input.queueId, existing.snapId, contentHash);
     return {
       snapId: existing.snapId,
-      docId: existing.docId,
+      // F-10: use the current-source's linked docId, not the first writer's
+      // s.doc_id property on the deduplicated Snapshot (which would be stale
+      // across cross-source dedup). `linked` is the doc_id from
+      // ensureSourceLinkage's MERGE for THIS source — that is the authoritative
+      // Document for this dedup call's source.
+      docId: linked,
       contentHash,
       r2Key: dedupR2Key,
       deduplicated: true,
@@ -526,14 +566,43 @@ export async function createSnapshotFingerprint(
         input.body.byteOffset + input.body.byteLength
       ) as ArrayBuffer;
       await r2Put(key, bodyBuf);
-      r2Key = key;
-      // Back-patch r2_key on the Snapshot node now that upload succeeded.
-      await withSession(async (session) => {
-        await session.run(
-          `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
-          { snapId: actualSnapId, r2Key: key }
-        );
-      });
+      // ADR-0012 INV-0012-3 TOCTOU close (MERGE-matched branch only): if our
+      // Snapshot CREATE collided with a concurrent worker, re-check policy
+      // after r2Put. A linker that attached a prohibited source between the
+      // first check and now must trigger r2Delete + r2_key stays null.
+      const stillAllowed =
+        !mergeMatchedExisting ||
+        (await allLinkedSourcesAllowRawCloud(actualSnapId));
+      if (!stillAllowed) {
+        try { await r2Delete(key); } catch (cleanupErr) {
+          console.warn(
+            `[snapshot] new-path r2 cleanup failed for ${key} (post-r2Put policy revert):`,
+            cleanupErr instanceof Error ? cleanupErr.message : cleanupErr
+          );
+        }
+      } else {
+        // SET r2_key is best-effort (same rationale as the dedup back-fill
+        // path above): a Neo4j failure here is non-fatal because the r2 object
+        // exists and the next dedup-matched retry will back-fill via the same
+        // idempotent key. Escalating to markQueueItemError would inflate the
+        // failure counter for a transient Neo4j blip even though graph + r2
+        // are recoverable.
+        try {
+          await withSession(async (session) => {
+            await session.run(
+              `MATCH (s:Snapshot {snap_id: $snapId}) SET s.r2_key = $r2Key`,
+              { snapId: actualSnapId, r2Key: key }
+            );
+          });
+          r2Key = key;
+        } catch (setErr) {
+          console.warn(
+            `[snapshot] new-path r2_key back-patch failed for ${actualSnapId}; ` +
+              `r2 object uploaded, retry will back-fill:`,
+            setErr instanceof Error ? setErr.message : setErr
+          );
+        }
+      }
     }
   }
 

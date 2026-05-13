@@ -140,11 +140,15 @@ function registerTempTextUrl(
       `Ensure the session is initialized in SQLite before resolving interventions via temp_text.`
     );
   }
-  // expires_at: 7 days from now (DEC-007 ceiling).
+  // expires_at: 7 days from now (DEC-007 ceiling). Use ISO-8601 with
+  // T-separator and trailing Z so lexicographic comparison matches the rest of
+  // the codebase's `new Date().toISOString()` writers. SQLite's `datetime()`
+  // produces 'YYYY-MM-DD HH:MM:SS' (space, no Z) which sorts inconsistently
+  // against ISO timestamps and would break any future expiry/GC query.
   db.prepare(
     `INSERT INTO raw_cache_items
        (cache_id, session_id, url, content_hash, indexed, embedded, expires_at)
-     VALUES (?, ?, ?, NULL, 0, 0, datetime(?, '+7 days'))`
+     VALUES (?, ?, ?, NULL, 0, 0, strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+7 days'))`
   ).run(cacheId, sessionId, interventionUrl, now);
   return cacheId;
 }

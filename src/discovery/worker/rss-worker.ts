@@ -27,29 +27,43 @@ export interface EnqueueResult {
 // RSS/Atom parsing
 // ---------------------------------------------------------------------------
 
+// Find a key whose local-name part (after any namespace prefix) matches
+// localKey, case-insensitively. XML element names are technically case
+// sensitive per spec, but wild RSS feeds in the field sometimes emit
+// <RSS> / <Rss> / <Channel> capitalizations; lowercase-fold so the parser
+// does not drop those silently.
+function findLocalKey(obj: Record<string, unknown>, localKey: string): string | undefined {
+  const want = localKey.toLowerCase();
+  for (const k of Object.keys(obj)) {
+    const tail = k.includes(":") ? k.slice(k.lastIndexOf(":") + 1) : k;
+    if (tail.toLowerCase() === want) return k;
+  }
+  return undefined;
+}
+
 // Extract items from a parsed RSS 2.0 or Atom 1.0 feed object.
 function extractItems(parsed: unknown): FeedItem[] {
   if (typeof parsed !== "object" || parsed === null) return [];
   const obj = parsed as Record<string, unknown>;
 
   // RSS 2.0: rss.channel.item[]  (also handles namespace-prefixed root like rss:rss)
-  const rssKey = Object.keys(obj).find((k) => k === "rss" || k.endsWith(":rss"));
+  const rssKey = findLocalKey(obj, "rss");
   const rss = rssKey ? (obj[rssKey] as Record<string, unknown> | undefined) : undefined;
   if (rss) {
-    const channelKey = Object.keys(rss).find((k) => k === "channel" || k.endsWith(":channel"));
+    const channelKey = findLocalKey(rss, "channel");
     const channel = channelKey ? (rss[channelKey] as Record<string, unknown> | undefined) : undefined;
     if (channel) {
-      const itemKey = Object.keys(channel).find((k) => k === "item" || k.endsWith(":item"));
+      const itemKey = findLocalKey(channel, "item");
       const items = itemKey ? channel[itemKey] : undefined;
       return normalizeItems(Array.isArray(items) ? items : items ? [items] : [], "rss");
     }
   }
 
   // Atom 1.0: feed.entry[]  (also handles namespace-prefixed root like atom:feed)
-  const feedKey = Object.keys(obj).find((k) => k === "feed" || k.endsWith(":feed"));
+  const feedKey = findLocalKey(obj, "feed");
   const feed = feedKey ? (obj[feedKey] as Record<string, unknown> | undefined) : undefined;
   if (feed) {
-    const entryKey = Object.keys(feed).find((k) => k === "entry" || k.endsWith(":entry"));
+    const entryKey = findLocalKey(feed, "entry");
     const entries = entryKey ? feed[entryKey] : undefined;
     return normalizeItems(Array.isArray(entries) ? entries : entries ? [entries] : [], "atom");
   }
@@ -58,11 +72,10 @@ function extractItems(parsed: unknown): FeedItem[] {
 }
 
 // Look up a field from a parsed XML element by its local name, ignoring any
-// namespace prefix (e.g. "atom:link" matches localKey "link").
+// namespace prefix (e.g. "atom:link" matches localKey "link") and casing
+// (e.g. <Title> matches "title").
 function getLocal(obj: Record<string, unknown>, localKey: string): unknown {
-  if (localKey in obj) return obj[localKey];
-  const suffixed = `:${localKey}`;
-  const key = Object.keys(obj).find((k) => k === localKey || k.endsWith(suffixed));
+  const key = findLocalKey(obj, localKey);
   return key ? obj[key] : undefined;
 }
 
@@ -102,16 +115,21 @@ function normalizeItems(raw: unknown[], format: "rss" | "atom"): FeedItem[] {
         url = linkVal;
       } else if (Array.isArray(linkVal)) {
         const links = linkVal as Record<string, unknown>[];
+        const isSelf = (l: Record<string, unknown>): boolean => l["@rel"] === "self";
         const isAlternate = (l: Record<string, unknown>): boolean =>
           l["@rel"] === "alternate" || !l["@rel"];
         const isHtmlOrUnspecified = (l: Record<string, unknown>): boolean => {
           const t = typeof l["@type"] === "string" ? (l["@type"] as string).toLowerCase() : "";
           return t === "" || t.includes("html");
         };
+        // Filter out rel="self" feed pointers before ranking — they advertise
+        // the feed endpoint itself, not an article URL, and would route the
+        // downstream snapshot/fingerprint pipeline back to the feed.
+        const candidates = links.filter((l) => !isSelf(l));
         const chosen =
-          links.find((l) => isAlternate(l) && isHtmlOrUnspecified(l)) ??
-          links.find(isAlternate) ??
-          links[0];
+          candidates.find((l) => isAlternate(l) && isHtmlOrUnspecified(l)) ??
+          candidates.find(isAlternate) ??
+          candidates[0];
         if (chosen) url = str(chosen["@href"]);
       } else if (typeof linkVal === "object" && linkVal !== null) {
         url = str((linkVal as Record<string, unknown>)["@href"]);

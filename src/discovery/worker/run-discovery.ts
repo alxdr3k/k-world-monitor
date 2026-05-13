@@ -28,6 +28,36 @@ const DAILY_CANDIDATE_CAP = 20;
 // Load sources from seed YAML (v0: reads YAML directly; INFRA-1B.1+ reads SQLite)
 // ---------------------------------------------------------------------------
 
+// Extract the scalar value after `key:` on a single YAML line, stripping a
+// trailing comment, matching surrounding single/double quotes, and trimming
+// whitespace. Returns "" when only quotes / whitespace remain so the caller
+// can treat the field as absent.
+function parseScalarValue(line: string, key: string): string {
+  let v = line.slice(key.length).trim();
+  // Strip trailing # comment (not inside quotes — the simple parser assumes
+  // the seed file is hand-curated and does not contain `#` inside scalars).
+  const hashIdx = v.indexOf("#");
+  if (hashIdx >= 0) v = v.slice(0, hashIdx).trim();
+  // Strip matching surrounding single or double quotes.
+  if (v.length >= 2) {
+    const first = v[0];
+    const last = v[v.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      v = v.slice(1, -1);
+    }
+  }
+  return v;
+}
+
+function isValidHttpUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 function loadRssSources(filterSlug?: string): DiscoverySource[] {
   // Dynamically parse YAML without a dependency — the seed file uses a simple
   // flat structure that can be extracted with a lightweight manual parse.
@@ -54,6 +84,15 @@ function loadRssSources(filterSlug?: string): DiscoverySource[] {
       currentTier === 0 &&
       currentActiveV0
     ) {
+      // Drop malformed feed URLs at load time so the per-host pool, conditional-
+      // GET state machine, and safeFetch never receive non-URL strings (which
+      // would otherwise leak a per-host pool entry keyed by the raw garbage).
+      if (!isValidHttpUrl(currentRssUrl)) {
+        console.warn(
+          `[discovery] skip ${currentSlug}: rss_url is not a valid http(s) URL`
+        );
+        return;
+      }
       if (!filterSlug || filterSlug === currentSlug) {
         sources.push({
           source_id: currentSlug, // v0: use slug as source_id; INFRA-1B.1+ uses src_<ULID>
@@ -67,26 +106,26 @@ function loadRssSources(filterSlug?: string): DiscoverySource[] {
     const trimmed = line.trim();
     if (trimmed.startsWith("- slug:")) {
       flush();
-      currentSlug = trimmed.replace("- slug:", "").trim();
+      currentSlug = parseScalarValue(trimmed, "- slug:");
       currentRssUrl = "";
       currentMethod = "";
       currentTier = 1;
       currentActiveV0 = true;
     } else if (trimmed.startsWith("slug:")) {
       flush();
-      currentSlug = trimmed.replace("slug:", "").trim();
+      currentSlug = parseScalarValue(trimmed, "slug:");
       currentRssUrl = "";
       currentMethod = "";
       currentTier = 1;
       currentActiveV0 = true;
     } else if (trimmed.startsWith("rss_url:")) {
-      currentRssUrl = trimmed.replace("rss_url:", "").trim();
+      currentRssUrl = parseScalarValue(trimmed, "rss_url:");
     } else if (trimmed.startsWith("access_method:")) {
-      currentMethod = trimmed.replace("access_method:", "").trim();
+      currentMethod = parseScalarValue(trimmed, "access_method:");
     } else if (trimmed.startsWith("reliability_tier:")) {
-      currentTier = parseInt(trimmed.replace("reliability_tier:", "").trim(), 10);
+      currentTier = parseInt(parseScalarValue(trimmed, "reliability_tier:"), 10);
     } else if (trimmed.startsWith("active_v0:")) {
-      const v = trimmed.replace("active_v0:", "").trim().toLowerCase();
+      const v = parseScalarValue(trimmed, "active_v0:").toLowerCase();
       currentActiveV0 = v !== "false" && v !== "no" && v !== "0";
     }
   }
@@ -200,7 +239,17 @@ async function main(): Promise<void> {
       let charset = "utf-8";
       const charsetMatch = ct.match(/charset=([^\s;]+)/i);
       if (charsetMatch) {
-        charset = charsetMatch[1]!.toLowerCase().replace(/^"(.*)"$/, "$1");
+        // Tolerate single or double quotes surrounding the charset value
+        // (e.g. charset='utf-8' or charset="utf-8"), then strip any
+        // trailing/leading non-charset characters (stray punctuation, residual
+        // quote). TextDecoder labels are ASCII alphanumeric + '-' / '_'; reject
+        // everything else from the edges so a typo like `utf-8"` does not
+        // force the whole source into backoff for legitimate UTF-8 content.
+        charset = charsetMatch[1]!
+          .toLowerCase()
+          .replace(/^["'](.*)["']$/, "$1")
+          .replace(/^[^a-z0-9_-]+|[^a-z0-9_-]+$/g, "");
+        if (!charset) charset = "utf-8";
       } else {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -40,7 +40,11 @@ export function getEligibleSources(sourceIds: string[]): CrawlState[] {
 
   // Chunk IN queries to stay within SQLite's ~999 variable limit (use 900 for headroom).
   const CHUNK_SIZE = 900;
-  const existing: CrawlState[] = [];
+  // Single pass: pull ALL rows for the requested source IDs, then partition in
+  // TypeScript. The previous two-pass implementation issued an eligible-only
+  // SELECT and a separate known-id SELECT for the same set; merging into one
+  // SELECT halves the round-trips and the prepare/execute overhead.
+  const allRows: CrawlState[] = [];
   for (let i = 0; i < uniqueSourceIds.length; i += CHUNK_SIZE) {
     const chunk = uniqueSourceIds.slice(i, i + CHUNK_SIZE);
     const placeholders = chunk.map(() => "?").join(",");
@@ -50,27 +54,18 @@ export function getEligibleSources(sourceIds: string[]): CrawlState[] {
                 last_status, consecutive_failures, next_eligible_at
          FROM crawl_state
          WHERE source_id IN (${placeholders})
-           AND (next_eligible_at IS NULL OR next_eligible_at <= ?)
          ORDER BY last_polled_at ASC NULLS FIRST`
       )
-      .all(...chunk, now) as CrawlState[];
-    existing.push(...rows);
+      .all(...chunk) as CrawlState[];
+    allRows.push(...rows);
   }
 
-  // Find source IDs that have ANY row in crawl_state (eligible or in backoff).
-  // We must distinguish "has a row but is in backoff" from "has no row at all"
-  // to avoid promoting backed-off sources as new.
-  const knownIds = new Set<string>();
-  for (let i = 0; i < uniqueSourceIds.length; i += CHUNK_SIZE) {
-    const chunk = uniqueSourceIds.slice(i, i + CHUNK_SIZE);
-    const placeholders = chunk.map(() => "?").join(",");
-    const rows = db
-      .prepare(
-        `SELECT source_id FROM crawl_state WHERE source_id IN (${placeholders})`
-      )
-      .all(...chunk) as Array<{ source_id: string }>;
-    for (const r of rows) knownIds.add(r.source_id);
-  }
+  // Eligible = rows whose next_eligible_at is NULL or <= now.
+  const existing = allRows.filter(
+    (r) => r.next_eligible_at === null || r.next_eligible_at <= now
+  );
+  // Known = every source_id that returned ANY row (eligible OR in backoff).
+  const knownIds = new Set(allRows.map((r) => r.source_id));
 
   // Brand-new sources (no row at all in crawl_state) are eligible by default.
   // Synthesise a CrawlState with null values so callers have uniform records.

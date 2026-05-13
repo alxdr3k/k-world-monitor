@@ -13,6 +13,14 @@ const neo4jRuns: Array<{ query: string; params: Record<string, unknown> }> = [];
 let neo4jShouldThrow = false;
 // When true, the Snapshot guard query returns 0 rows (simulates missing Snapshot).
 let neo4jSnapshotMissing = false;
+// Track tx.commit / tx.rollback invocations so we can verify the P1
+// no-double-rollback contract (commit-attempted path MUST NOT call rollback).
+// One increment per call; tests reset to 0 before exercising a path.
+let neo4jCommitCount = 0;
+let neo4jRollbackCount = 0;
+// When set, the next tx.commit() invocation rejects with this error so we
+// can drive the "commit fails → rollback must still not be called twice" path.
+let neo4jCommitError: Error | null = null;
 
 mock.module("../../src/storage/neo4j/connection", () => ({
   withSession: async <T>(fn: (session: unknown) => Promise<T>): Promise<T> => {
@@ -51,8 +59,17 @@ mock.module("../../src/storage/neo4j/connection", () => ({
         }
         return { records: [] };
       },
-      commit: async () => {},
-      rollback: async () => {},
+      commit: async () => {
+        neo4jCommitCount++;
+        if (neo4jCommitError) {
+          const err = neo4jCommitError;
+          neo4jCommitError = null;
+          throw err;
+        }
+      },
+      rollback: async () => {
+        neo4jRollbackCount++;
+      },
     };
     const session = { beginTransaction: () => tx };
     return fn(session);
@@ -316,45 +333,45 @@ describe("chunkSnapshot", () => {
     expect(cleanupQueries[0]!.params["snapId"]).toBe("snap_STALE01");
   });
 
-  it("does not rollback after commit is attempted (P1 no-double-rollback)", async () => {
-    // Verify that rollback() is NOT called on the happy path where commit()
-    // succeeds — the commitAttempted guard must prevent double-rollback.
-    let rollbackCalled = false;
-
-    // Override the module mock temporarily with a version that tracks rollback.
-    // We use a module-level flag (neo4jTrackRollback) so the existing mock can
-    // set it, then reset after the assertion.
-    const origModule = await import("../../src/storage/neo4j/connection");
-    // Directly exercise the chunker path via the existing mock infrastructure:
-    // the shared tx.rollback mock is a no-op; replace it to track calls.
-    // Since the mock is declared inline, instrument at the neo4jRuns level by
-    // checking that the happy path (commit succeeds, no error) completes
-    // without the mock tx.rollback being invoked.
-    // We do this by overriding the tx.rollback spy in the test fixture:
-    const origRollback = Object.getOwnPropertyDescriptor(
-      (origModule as unknown as { _tx?: { rollback: () => Promise<void> } })._tx ?? {},
-      "rollback"
-    );
-
-    // Simpler approach: monkey-patch the module-level withSession to track rollback.
-    let rollbackCallCount = 0;
-    const { withSession: realWithSession } = await import("../../src/storage/neo4j/connection");
-    // The mock already intercepts withSession — use the existing tx.rollback spy
-    // by relying on the fact that a successful chunkSnapshot run should NOT call
-    // rollback at all. We cannot easily intercept the inline mock tx, so we
-    // verify the contract at the chunker source level: confirm the function
-    // returns successfully (rollback was not called in a way that throws or
-    // disrupts the result), and confirm the flag exists in source via the
-    // passing result.
+  it("does not rollback after commit succeeds (P1 no-double-rollback)", async () => {
+    // Happy path: when commit() resolves, the catch handler must NEVER call
+    // rollback. The mock now tracks both calls via module-level counters, so
+    // this assertion is grounded in observable behavior (no tautology).
     neo4jRuns.length = 0;
+    neo4jCommitCount = 0;
+    neo4jRollbackCount = 0;
+    neo4jCommitError = null;
+
     const result = await chunkSnapshot({ snapId: "snap_COMMIT01", text: "commit test" });
+
     expect(result.chunkCount).toBe(1);
-    // rollbackCalled must remain false — the mock tx.rollback is a no-op and
-    // never throws, so if rollback were called erroneously the result would
-    // still succeed, but the MERGE queries confirm the correct happy-path flow.
-    expect(rollbackCalled).toBe(false);
-    // Verify commit ran (MERGE Chunk present, no error thrown).
+    expect(neo4jCommitCount).toBe(1);
+    expect(neo4jRollbackCount).toBe(0);
     const mergeQ = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
     expect(mergeQ.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not call rollback when commit throws (P1 commitAttempted guard)", async () => {
+    // Failure path: commit() rejects after the writes have been issued.
+    // The chunker sets commitAttempted = true BEFORE awaiting tx.commit(),
+    // so the catch handler MUST NOT invoke rollback (which would error from
+    // the Neo4j driver). Verify rollback count stays 0 even though commit
+    // rejected and the call rethrew.
+    neo4jRuns.length = 0;
+    neo4jCommitCount = 0;
+    neo4jRollbackCount = 0;
+    neo4jCommitError = new Error("simulated commit failure");
+
+    let caught: unknown;
+    try {
+      await chunkSnapshot({ snapId: "snap_COMMITFAIL", text: "commit fail test" });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("simulated commit failure");
+    expect(neo4jCommitCount).toBe(1);
+    expect(neo4jRollbackCount).toBe(0);
   });
 });

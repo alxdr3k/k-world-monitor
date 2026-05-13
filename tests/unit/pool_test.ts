@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { runWithPool, globalPool, perHostPools, resetPools } from "../../src/discovery/scheduler/pool";
+import { runWithPool, getGlobalPool, getGlobalLimit, perHostPools, resetPools } from "../../src/discovery/scheduler/pool";
 
 // Reset per-host pool map between tests so that accumulated entries from one
 // test do not bleed into the next. Without this, tests that fill the map
@@ -23,10 +23,11 @@ beforeEach(() => {
 // The module-level singletons share state across tests, so we verify
 // each test leaves the pool with its full capacity.
 function assertPoolsIdle() {
-  // global pool should be fully available after each test
-  expect(globalPool.available).toBe(
-    parseInt(process.env["DISCOVERY_MAX_CONCURRENCY"] ?? "8")
-  );
+  // global pool should be fully available after each test.
+  // Read the env-derived limit through the same accessor the production code
+  // uses (lazy-init), not directly from process.env, so this assertion stays
+  // consistent with module-internal state if resetPools has been called.
+  expect(getGlobalPool().available).toBe(getGlobalLimit());
 }
 
 describe("runWithPool — basic behavior", () => {
