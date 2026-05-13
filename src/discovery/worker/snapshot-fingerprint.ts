@@ -357,6 +357,25 @@ export type QueueErrorCode =
   | "empty_body"
   | "runtime_error";
 
+// TypedQueueError carries a discrete QueueErrorCode through a throw so the
+// per-row recovery catch block can record the SPECIFIC failure mode rather
+// than clobbering it with a generic "runtime_error" bucket.
+//
+// Pattern: helpers in createSnapshotFingerprint (dedup prohibited, missing
+// Source linkage, etc.) throw a TypedQueueError with the right code. The
+// catch block in processOneRow inspects err.errorCode (falling back to
+// "runtime_error" for any non-typed exception) and is the SINGLE call site
+// for markQueueItemError on the per-row path. This removes the previous
+// "inner mark then throw, outer mark would clobber but is no-op due to
+// WHERE status='processing'" implicit-safety pattern that was correct but
+// fragile to readers.
+export class TypedQueueError extends Error {
+  constructor(public readonly errorCode: QueueErrorCode, message: string) {
+    super(message);
+    this.name = "TypedQueueError";
+  }
+}
+
 // Single UPDATE writes status + snap_id + content_hash atomically. snap_id
 // now has its own column; error_code/error_detail are cleared so a re-run
 // of a previously errored row (after stale-reclaim or operator retry) does
@@ -417,27 +436,21 @@ export async function createSnapshotFingerprint(
     // the prohibited source with a cloud-backed raw artifact through dedup
     // reuse. Mark the row error and throw so this is counted as a real failure.
     if (existing.r2Key !== null && input.rawCloudPolicy === "always_prohibited") {
-      markQueueItemError(
-        input.queueId,
+      throw new TypedQueueError(
         "dedup_prohibited_source",
-        `prohibited source cannot link to r2-backed snapshot: ${input.sourceId}`
-      );
-      throw new Error(
         `dedup: prohibited source cannot link to r2-backed snapshot: ${input.sourceId}`
       );
     }
 
     // P1-6: Ensure Source→Document→Snapshot edges for current source_id even on dedup.
-    // If the Source node is missing, mark the queue row error and throw so the
-    // caller's metrics count this as a real failure (not a successful dedup).
+    // If the Source node is missing, throw a typed error so the per-row catch
+    // records the SPECIFIC error_code (not a generic runtime_error).
     const linked = await ensureSourceLinkage(input, contentHash);
     if (!linked) {
-      markQueueItemError(
-        input.queueId,
+      throw new TypedQueueError(
         "source_not_found_in_graph",
         `dedup: source not found in graph: ${input.sourceId}`
       );
-      throw new Error(`dedup: source not found in graph: ${input.sourceId}`);
     }
 
     // Back-fill R2 upload if a previous attempt left r2_key=null for a permitted artifact.
@@ -792,11 +805,15 @@ async function processOneRow(
 
     return result.deduplicated ? "deduplicated" : "processed";
   } catch (err) {
-    markQueueItemError(
-      row.queue_id,
-      "runtime_error",
-      err instanceof Error ? err.message : String(err)
-    );
+    // Single marker call site for the per-row path. TypedQueueError carries
+    // a specific QueueErrorCode through the throw; any other exception is
+    // bucketed as "runtime_error". The marker's WHERE status='processing'
+    // would have preserved an inner mark in the prior pattern too, but
+    // making the call site singular removes that implicit-safety reliance.
+    const errorCode: QueueErrorCode =
+      err instanceof TypedQueueError ? err.errorCode : "runtime_error";
+    const message = err instanceof Error ? err.message : String(err);
+    markQueueItemError(row.queue_id, errorCode, message);
     return "error";
   }
 }
