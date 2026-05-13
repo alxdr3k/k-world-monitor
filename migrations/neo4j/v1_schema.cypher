@@ -15,8 +15,47 @@ FOR (n:Source) REQUIRE n.source_id IS UNIQUE;
 CREATE CONSTRAINT document_unique IF NOT EXISTS
 FOR (n:Document) REQUIRE n.doc_id IS UNIQUE;
 
+// INFRA-1B.3: Pre-clean duplicate (url, source_id) Document pairs before adding the
+// composite uniqueness constraint. No-op on fresh databases. Steps:
+// (1) redirect HAS_SNAPSHOT edges from extras to survivor so Snapshots are not orphaned,
+// (2) redirect incoming HAS_DOCUMENT edges to survivor,
+// (3) delete now-disconnected extras.
+// ORDER BY d.doc_id makes survivor selection deterministic across all three statements
+// so each independently recomputed collect() picks the same dups[0].
+MATCH (d:Document) WITH d.url AS url, d.source_id AS source_id, d ORDER BY d.doc_id WITH url, source_id, collect(d) AS dups WHERE size(dups) > 1 WITH dups[0] AS survivor, dups[1..] AS extras UNWIND extras AS dup MATCH (dup)-[r:HAS_SNAPSHOT]->(sn:Snapshot) MERGE (survivor)-[:HAS_SNAPSHOT]->(sn) DELETE r;
+
+MATCH (d:Document) WITH d.url AS url, d.source_id AS source_id, d ORDER BY d.doc_id WITH url, source_id, collect(d) AS dups WHERE size(dups) > 1 WITH dups[0] AS survivor, dups[1..] AS extras UNWIND extras AS dup MATCH (src)-[r:HAS_DOCUMENT]->(dup) MERGE (src)-[:HAS_DOCUMENT]->(survivor) DELETE r;
+
+MATCH (d:Document) WITH d.url AS url, d.source_id AS source_id, d ORDER BY d.doc_id WITH url, source_id, collect(d) AS dups WHERE size(dups) > 1 UNWIND dups[1..] AS dup DETACH DELETE dup;
+
+// INFRA-1B.3: composite uniqueness on (url, source_id) prevents duplicate Document nodes
+// from concurrent workers. MERGE (d:Document {url, source_id}) in createDocumentAndSnapshot
+// and ensureSourceLinkage relies on this constraint for idempotency.
+CREATE CONSTRAINT document_url_source_unique IF NOT EXISTS
+FOR (n:Document) REQUIRE (n.url, n.source_id) IS UNIQUE;
+
 CREATE CONSTRAINT snapshot_unique IF NOT EXISTS
 FOR (n:Snapshot) REQUIRE n.snap_id IS UNIQUE;
+
+// INFRA-1B.3: Drop legacy snapshot_content_hash_idx standalone index before adding the
+// uniqueness constraint. Neo4j 5 backs a uniqueness constraint with a range index; a
+// pre-existing standalone index on the same label/property can conflict and prevent
+// constraint creation. IF EXISTS makes this a no-op on fresh databases.
+DROP INDEX snapshot_content_hash_idx IF EXISTS;
+
+// INFRA-1B.3: Pre-clean duplicate content_hash Snapshot nodes before adding uniqueness
+// constraint. No-op on fresh databases. Redirects incoming HAS_SNAPSHOT edges from
+// extras to survivor so Documents retain their snapshot chain, then deletes extras.
+// ORDER BY s.snap_id makes survivor selection deterministic across both statements.
+MATCH (s:Snapshot) WITH s.content_hash AS ch, s ORDER BY s.snap_id WITH ch, collect(s) AS dups WHERE size(dups) > 1 WITH dups[0] AS survivor, dups[1..] AS extras UNWIND extras AS dup MATCH (d:Document)-[r:HAS_SNAPSHOT]->(dup) MERGE (d)-[:HAS_SNAPSHOT]->(survivor) DELETE r;
+
+MATCH (s:Snapshot) WITH s.content_hash AS ch, s ORDER BY s.snap_id WITH ch, collect(s) AS dups WHERE size(dups) > 1 UNWIND dups[1..] AS dup DETACH DELETE dup;
+
+// INFRA-1B.3: content_hash uniqueness prevents duplicate Snapshot nodes from
+// concurrent workers. MERGE on content_hash in createDocumentAndSnapshot relies
+// on this constraint for idempotency.
+CREATE CONSTRAINT snapshot_content_hash_unique IF NOT EXISTS
+FOR (n:Snapshot) REQUIRE n.content_hash IS UNIQUE;
 
 CREATE CONSTRAINT claim_unique IF NOT EXISTS
 FOR (n:Claim) REQUIRE n.claim_id IS UNIQUE;
@@ -97,7 +136,7 @@ CREATE INDEX document_source_fk_idx IF NOT EXISTS FOR (n:Document) ON (n.source_
 CREATE INDEX document_published_at_idx IF NOT EXISTS FOR (n:Document) ON (n.published_at);
 
 CREATE INDEX snapshot_url_idx IF NOT EXISTS FOR (n:Snapshot) ON (n.url);
-CREATE INDEX snapshot_content_hash_idx IF NOT EXISTS FOR (n:Snapshot) ON (n.content_hash);
+// snapshot_content_hash_idx removed: snapshot_content_hash_unique constraint provides the backing index.
 CREATE INDEX snapshot_accessed_at_idx IF NOT EXISTS FOR (n:Snapshot) ON (n.accessed_at);
 
 CREATE INDEX claim_lifecycle_state_idx IF NOT EXISTS FOR (n:Claim) ON (n.lifecycle_state);
