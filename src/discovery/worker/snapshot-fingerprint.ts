@@ -345,30 +345,55 @@ async function ensureSourceLinkage(
 // discovery_queue status update (serial SQLite, INV-0030-2).
 // ---------------------------------------------------------------------------
 
-// P2-8: Pass computed contentHash directly — the old code was a self-copy no-op
-//        (SELECT content_hash FROM discovery_queue WHERE queue_id = ?).
-// Single UPDATE to ensure status, content_hash, and error_detail are written atomically.
-// error_detail stores snap_id as result metadata; a dedicated snap_id column will be
-// added in a later migration if needed.
+// Discrete failure-mode enum. Must match the CHECK constraint on
+// discovery_queue.error_code in migrations/sqlite/v6_discovery_queue.sql.
+// Splitting from the free-form error_detail lets operator dashboards bucket
+// failures via GROUP BY error_code without parsing English strings.
+export type QueueErrorCode =
+  | "source_not_found_in_graph"
+  | "dedup_prohibited_source"
+  | "policy_do_not_collect"
+  | "http_status"
+  | "empty_body"
+  | "runtime_error";
 
+// Single UPDATE writes status + snap_id + content_hash atomically. snap_id
+// now has its own column; error_code/error_detail are cleared so a re-run
+// of a previously errored row (after stale-reclaim or operator retry) does
+// not retain stale failure metadata next to the success.
 function markQueueItemDone(queueId: string, snapId: string, contentHash: string): void {
   getDb()
     .prepare(
       `UPDATE discovery_queue
-       SET status = 'done', content_hash = ?, error_detail = ?${SET_UPDATED_AT}
+       SET status = 'done',
+           snap_id = ?,
+           content_hash = ?,
+           error_code = NULL,
+           error_detail = NULL${SET_UPDATED_AT}
        WHERE queue_id = ? AND status = 'processing'`
     )
-    .run(contentHash, `snap_id:${snapId}`, queueId);
+    .run(snapId, contentHash, queueId);
 }
 
-function markQueueItemError(queueId: string, detail: string): void {
+// errorCode is a discrete enum; detail is optional free-form supplementary
+// text (truncated to 500 chars). On error, snap_id is explicitly NULLed so
+// a row that previously succeeded then was re-queued and failed does not
+// retain a misleading snap_id.
+function markQueueItemError(
+  queueId: string,
+  errorCode: QueueErrorCode,
+  detail?: string
+): void {
   getDb()
     .prepare(
       `UPDATE discovery_queue
-       SET status = 'error', error_detail = ?${SET_UPDATED_AT}
+       SET status = 'error',
+           snap_id = NULL,
+           error_code = ?,
+           error_detail = ?${SET_UPDATED_AT}
        WHERE queue_id = ? AND status = 'processing'`
     )
-    .run(detail.slice(0, 500), queueId);
+    .run(errorCode, detail ? detail.slice(0, 500) : null, queueId);
 }
 
 // ---------------------------------------------------------------------------
@@ -394,7 +419,8 @@ export async function createSnapshotFingerprint(
     if (existing.r2Key !== null && input.rawCloudPolicy === "always_prohibited") {
       markQueueItemError(
         input.queueId,
-        `dedup: prohibited source cannot link to r2-backed snapshot: ${input.sourceId}`
+        "dedup_prohibited_source",
+        `prohibited source cannot link to r2-backed snapshot: ${input.sourceId}`
       );
       throw new Error(
         `dedup: prohibited source cannot link to r2-backed snapshot: ${input.sourceId}`
@@ -408,6 +434,7 @@ export async function createSnapshotFingerprint(
     if (!linked) {
       markQueueItemError(
         input.queueId,
+        "source_not_found_in_graph",
         `dedup: source not found in graph: ${input.sourceId}`
       );
       throw new Error(`dedup: source not found in graph: ${input.sourceId}`);
@@ -721,7 +748,7 @@ async function processOneRow(
 
     // P1-7: Enforce do_not_collect before any outbound fetch.
     if (archivePolicy === "do_not_collect") {
-      markQueueItemError(row.queue_id, "skipped: do_not_collect policy");
+      markQueueItemError(row.queue_id, "policy_do_not_collect");
       return "error";
     }
 
@@ -739,7 +766,8 @@ async function processOneRow(
     ) {
       markQueueItemError(
         row.queue_id,
-        empty2xx ? `HTTP ${res.status} empty body` : `HTTP ${res.status}`
+        empty2xx ? "empty_body" : "http_status",
+        `HTTP ${res.status}`
       );
       return "error";
     }
@@ -764,7 +792,11 @@ async function processOneRow(
 
     return result.deduplicated ? "deduplicated" : "processed";
   } catch (err) {
-    markQueueItemError(row.queue_id, err instanceof Error ? err.message : String(err));
+    markQueueItemError(
+      row.queue_id,
+      "runtime_error",
+      err instanceof Error ? err.message : String(err)
+    );
     return "error";
   }
 }
