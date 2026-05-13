@@ -42,14 +42,22 @@ store 에서 관리. local dev / GitHub Actions cron / production cron host
 1. Doppler 가입 + project 생성 (`k-world-monitor` 이름 권장)
 2. config branch: `dev` (local) / `stg` (staging — 본 repo 는 v0 미사용) /
    `prd` (production cron host).
-3. secret 등록 (`dev` config 기준 — `prd` 도 동일 key 명):
+3. secret 등록 (`dev` config 기준 — `prd` 도 동일 key 명).
+   변수명은 runtime 코드 (`src/storage/r2/client.ts`,
+   `src/storage/neo4j/connection.ts`) 가 읽는 이름과 정확히 일치해야 함
+   — mismatch 시 runtime 초기화 실패 (PR #32 Codex P1 review,
+   2026-05-13):
    - `OPENAI_API_KEY`
    - `ANTHROPIC_API_KEY`
    - `GOOGLE_AI_API_KEY`
-   - `CLOUDFLARE_R2_ACCESS_KEY_ID`
-   - `CLOUDFLARE_R2_SECRET_ACCESS_KEY`
-   - `CLOUDFLARE_R2_ENDPOINT` (S3 endpoint URL)
+   - `S3_ACCOUNT_ID` (Cloudflare account ID — endpoint URL 자동 구성)
+   - `S3_ACCESS_KEY` (R2 access key ID)
+   - `S3_SECRET_KEY` (R2 secret access key)
+   - `S3_BUCKET` (R2 bucket name)
+   - `NEO4J_URI` (예: bolt://localhost:7687)
+   - `NEO4J_USER` (driver username — code reads `NEO4J_USER`, not `NEO4J_USERNAME`)
    - `NEO4J_PASSWORD` (self-host bolt)
+   - 선택: `NEO4J_DATABASE` / `NEO4J_MAX_POOL_SIZE` / `NEO4J_ACQ_TIMEOUT_MS`
 4. service token 발급 (`prd` 용 → cron host 에 등록).
 
 **Local dev**:
