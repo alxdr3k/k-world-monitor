@@ -72,16 +72,16 @@ Workflow files (활성):
 
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
-| `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes | Ruby doc lint |
-| `.github/workflows/ci.yml` | PR + push | advisory (본 PR 활성 시점) — Q-048 resolution 후 required 승격 후보 | bun install + bun test + bun run typecheck |
-| `.github/workflows/invariant-check.yml` | PR + push | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:check + invariant:regen |
+| `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
+| `.github/workflows/ci.yml` | PR + push | **required** (DEC-020 Q-048 resolution — branch protection admin task) | bun install + typecheck + bun test (490 cases) + migrate dry-run |
+| `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
+| `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
 비활성 (rename 대기):
 
 | File | Reason |
 |---|---|
 | `.github/workflows/cd.yml.example` | publishing pipeline 도입 시점 활성 (P0-M6) |
-| `.github/workflows/doc-freshness.yml.example` | thin doc SHA pinning 자동 검증 도입 시점 활성 |
 
 ## CI notes
 

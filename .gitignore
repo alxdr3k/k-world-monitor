@@ -13,6 +13,13 @@ research.db-wal
 # TypeScript build output
 dist/
 
+# Secret files — DEC-020 Q-047 (Doppler primary, .env fallback only).
+# .env contains API keys and must never be committed. .env.example is the
+# documented reference template with variable names but no values.
+.env
+.env.local
+.env.*.local
+
 # Claude Code internal worktree state
 .claude/worktrees/
 
