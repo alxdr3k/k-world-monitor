@@ -53,61 +53,18 @@ function sha256HexBytes(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
 }
 
-// ---------------------------------------------------------------------------
-// Source id normalization: discovery producer v0 enqueues slug-form source_id
-// (e.g. "ft-asia"), but the graph and source_material_policy use canonical
-// src_<ULID> identifiers. Look up the canonical id via source_registry_slug_map
-// (v3 migration); fall back to the raw value if the table is absent or the
-// slug has no mapping yet (lets src_<ULID> rows pass through untouched).
-// ---------------------------------------------------------------------------
-
-function normalizeSourceId(rawSourceId: string): string {
-  if (rawSourceId.startsWith("src_")) return rawSourceId;
-  try {
-    const row = getDb()
-      .prepare("SELECT source_id FROM source_registry_slug_map WHERE slug = ?")
-      .get(rawSourceId) as { source_id: string } | undefined;
-    return row?.source_id ?? rawSourceId;
-  } catch (err) {
-    // Only fall back when the slug_map table genuinely does not exist
-    // (pre-v3 schema). Other failures (SQLITE_BUSY, corrupted DB) must
-    // propagate so a transient lock during normalization does not silently
-    // ship a slug-form id to Neo4j and surface as a misleading "Source not
-    // found in graph".
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/no such table:\s*source_registry_slug_map/i.test(msg)) return rawSourceId;
-    throw err;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// discovery_queue schema detection — v6 has no `updated_at` column; v7+ does.
-// Cache the probe so we run it once per process.
-// ---------------------------------------------------------------------------
-
-let _hasUpdatedAt: boolean | undefined;
-function hasUpdatedAtColumn(): boolean {
-  // Only cache true: once the column exists it cannot disappear, so we skip
-  // the probe forever. Never cache false — in long-lived processes that run
-  // migrations and workers in the same runtime, v7 may be applied after the
-  // first probe, and a stale false would permanently disable stale-row reclaim
-  // and heartbeats until restart.
-  if (_hasUpdatedAt === true) return true;
-  try {
-    getDb().prepare("SELECT updated_at FROM discovery_queue LIMIT 0").run();
-    _hasUpdatedAt = true;
-    return true;
-  } catch (err) {
-    // Only treat "no such column: updated_at" as the pre-v7 schema marker.
-    // Transient SQLite errors (SQLITE_BUSY, "database is locked") and other
-    // setup-time failures (missing table during early init) must propagate so
-    // they are not silently misread as "column absent" — which would otherwise
-    // permanently disable updated_at writes for the duration of the process.
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/no such column:\s*updated_at/i.test(msg)) return false;
-    throw err;
-  }
-}
+// discovery_queue.source_id is now canonical src_<ULID> at the producer
+// (rss-worker.enqueueDiscoveredItems resolves slug→canonical before INSERT,
+// enforced by the FK to source_material_policy(source_id)). Consumer-side
+// normalization is no longer needed and the previous slug-fallback resolver
+// has been removed — the column is trusted to already be canonical.
+//
+// discovery_queue.updated_at is part of the base v6 schema. The previous
+// probe-and-branch triplet (hasUpdatedAtColumn / tryHasUpdatedAtColumn /
+// tryUpdatedAtClause) defended against a pre-v7 schema that no longer
+// exists; every UPDATE statement now sets updated_at unconditionally via
+// SET_UPDATED_AT.
+const SET_UPDATED_AT = ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')";
 
 // ---------------------------------------------------------------------------
 // Deduplication: check Neo4j for existing Snapshot with same content_hash.
@@ -393,46 +350,22 @@ async function ensureSourceLinkage(
 // Single UPDATE to ensure status, content_hash, and error_detail are written atomically.
 // error_detail stores snap_id as result metadata; a dedicated snap_id column will be
 // added in a later migration if needed.
-// updated_at clause is included only when v7 column is present (pre-v7 DBs would throw).
-// hasUpdatedAtColumn() rethrows non-"no such column" errors (iter-1 F-03),
-// which is the desired behavior at the module boundary but dangerous at any
-// call site that runs OUTSIDE the per-row error-handling try/catch (codex
-// review iter-3 #2). Wrap the probe with a swallow-on-error variant for
-// use in row-claim, heartbeat, and marker paths so a transient SQLite
-// failure during the probe degrades to "skip updated_at" instead of
-// aborting the entire worker run.
-function tryHasUpdatedAtColumn(): boolean {
-  try {
-    return hasUpdatedAtColumn();
-  } catch {
-    return false;
-  }
-}
-
-// Marker helpers always want the SQL fragment form ("" or ", updated_at = ...").
-function tryUpdatedAtClause(): string {
-  return tryHasUpdatedAtColumn()
-    ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
-    : "";
-}
 
 function markQueueItemDone(queueId: string, snapId: string, contentHash: string): void {
-  const u = tryUpdatedAtClause();
   getDb()
     .prepare(
       `UPDATE discovery_queue
-       SET status = 'done', content_hash = ?, error_detail = ?${u}
+       SET status = 'done', content_hash = ?, error_detail = ?${SET_UPDATED_AT}
        WHERE queue_id = ? AND status = 'processing'`
     )
     .run(contentHash, `snap_id:${snapId}`, queueId);
 }
 
 function markQueueItemError(queueId: string, detail: string): void {
-  const u = tryUpdatedAtClause();
   getDb()
     .prepare(
       `UPDATE discovery_queue
-       SET status = 'error', error_detail = ?${u}
+       SET status = 'error', error_detail = ?${SET_UPDATED_AT}
        WHERE queue_id = ? AND status = 'processing'`
     )
     .run(detail.slice(0, 500), queueId);
@@ -669,24 +602,16 @@ export async function processDiscoveryQueue(
   const db = getDb();
 
   // P2-10: Reset stale processing rows from crashed workers (older than 1 hour).
-  // Uses updated_at column (added in v7 migration). Gracefully skips on pre-v7 schemas.
-  try {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
-      .toISOString()
-      .replace(/\.\d{3}Z$/, "Z");
-    db.prepare(
-      `UPDATE discovery_queue
-       SET status = 'pending', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-       WHERE status = 'processing' AND updated_at < ?`
-    ).run(oneHourAgo);
-  } catch (err) {
-    // Only suppress the specific "no such column: updated_at" case (pre-v7 schema).
-    // Any other missing column or unrelated error must propagate so operational
-    // regressions (e.g. queue-recovery bugs) fail fast instead of silently disabling.
-    const msg = err instanceof Error ? err.message : String(err);
-    if (!/no such column:\s*updated_at/i.test(msg)) throw err;
-    // updated_at column absent (pre-v7 schema) — stale reclaim skipped.
-  }
+  // updated_at is part of the base v6 schema — strftime no-millis format
+  // matches every writer in this module so lexicographic comparison is sound.
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "Z");
+  db.prepare(
+    `UPDATE discovery_queue
+     SET status = 'pending', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+     WHERE status = 'processing' AND updated_at < ?`
+  ).run(oneHourAgo);
 
   // P1-5: Atomic row claiming using an IMMEDIATE SQLite transaction so two concurrent
   // workers cannot claim the same rows. bun:sqlite defaults to DEFERRED, which allows
@@ -736,14 +661,9 @@ export async function processDiscoveryQueue(
 
       if (pending.length > 0) {
         const ids = pending.map((r) => r.queue_id);
-        // tryUpdatedAtClause swallows probe failures so a transient SQLITE_BUSY
-        // during the column check degrades to a no-updated_at UPDATE rather
-        // than aborting the entire row-claim transaction and rolling back the
-        // batch (codex review iter-3 #2).
-        const u = tryUpdatedAtClause();
         db.prepare(
           `UPDATE discovery_queue
-           SET status = 'processing'${u}
+           SET status = 'processing'${SET_UPDATED_AT}
            WHERE queue_id IN (${ids.map(() => "?").join(",")})`
         ).run(...ids);
       }
@@ -778,27 +698,16 @@ export async function processDiscoveryQueue(
     // Heartbeat: touch updated_at before processing so the 1h stale-reclaim
     // does not requeue a still-active row mid-batch (long fetch/Neo4j writes
     // can exceed the threshold for batches of large items).
-    // tryHasUpdatedAtColumn swallows probe failures so a transient SQLITE_BUSY
-    // during the probe does not abort the entire worker run (codex review
-    // iter-3 #2): the heartbeat is skipped for this row only, and the next
-    // iteration re-probes.
-    if (tryHasUpdatedAtColumn()) {
-      db.prepare(
-        `UPDATE discovery_queue SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE queue_id = ?`
-      ).run(row.queue_id);
-    }
+    db.prepare(
+      `UPDATE discovery_queue SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE queue_id = ?`
+    ).run(row.queue_id);
 
     try {
-      // Normalize slug→canonical src_<ULID> INSIDE the row try/catch (codex
-      // review iter-3 #1). normalizeSourceId rethrows non-"no such table"
-      // SQLite errors so a transient lock / corruption during the slug
-      // lookup must be surfaced as a per-row error, not as a worker-wide
-      // abort that leaves already-claimed rows stuck in 'processing' until
-      // stale-reclaim. The v0 discovery producer enqueues slug-form ids
-      // while source_material_policy / Source nodes are keyed by canonical
-      // src_<ULID> ids.
-      const canonicalSourceId = normalizeSourceId(row.source_id);
-      const { archivePolicy, rawCloudPolicy } = await archivePolicyFn(canonicalSourceId);
+      // row.source_id is canonical src_<ULID> (producer-side normalization in
+      // rss-worker.enqueueDiscoveredItems is now the only path that writes
+      // discovery_queue.source_id, and the FK to source_material_policy
+      // would reject anything else).
+      const { archivePolicy, rawCloudPolicy } = await archivePolicyFn(row.source_id);
 
       // P1-7: Enforce do_not_collect before any outbound fetch.
       if (archivePolicy === "do_not_collect") {
@@ -835,7 +744,7 @@ export async function processDiscoveryQueue(
 
       // P2-11: Use finalUrl (after redirects) as the canonical URL for snapshot identity.
       const result = await createSnapshotFingerprint({
-        sourceId: canonicalSourceId,
+        sourceId: row.source_id,
         queueId: row.queue_id,
         url: res.finalUrl,
         title: row.title ?? undefined,

@@ -230,58 +230,61 @@ describe("parseRssFeed — edge cases", () => {
 // ---------------------------------------------------------------------------
 
 describe("enqueueDiscoveredItems", () => {
-  it("inserts new items, resolves slug → canonical src_<ULID>, and returns counts", () => {
+  // Slug→canonical resolution moved to run-discovery.ts loadRssSources at the
+  // entry point. enqueueDiscoveredItems now requires canonical src_<ULID>
+  // input directly; the FK on source_material_policy enforces the contract.
+  // Tests pre-seed canonical ids via seedSlug() and pass the returned id.
+
+  it("inserts new items with canonical src_<ULID> and returns counts", () => {
     const canonical = seedSlug("src-test");
     const items: FeedItem[] = [
       { url: "https://example.com/1", title: "One" },
       { url: "https://example.com/2", title: "Two" },
     ];
-    const result = enqueueDiscoveredItems("src-test", items);
+    const result = enqueueDiscoveredItems(canonical, items);
     expect(result.inserted).toBe(2);
     expect(result.skipped).toBe(0);
 
     const { getDb } = require("../../src/storage/sqlite/connection");
     const rows = getDb().prepare("SELECT * FROM discovery_queue ORDER BY url").all();
     expect(rows).toHaveLength(2);
-    // Production schema enforces FK on source_material_policy(source_id); the
-    // inserted row must carry the canonical src_<ULID>, not the input slug.
     expect((rows[0] as Record<string,unknown>)["source_id"]).toBe(canonical);
     expect((rows[0] as Record<string,unknown>)["status"]).toBe("pending");
     expect((rows[0] as Record<string,unknown>)["content_hash"]).toBeTruthy();
   });
 
   it("skips duplicate URLs (same source, pending status)", () => {
-    seedSlug("src-dupe");
+    const canonical = seedSlug("src-dupe");
     const items: FeedItem[] = [{ url: "https://example.com/dupe", title: "Dupe" }];
-    enqueueDiscoveredItems("src-dupe", items);
-    const result = enqueueDiscoveredItems("src-dupe", items);
+    enqueueDiscoveredItems(canonical, items);
+    const result = enqueueDiscoveredItems(canonical, items);
     expect(result.inserted).toBe(0);
     expect(result.skipped).toBe(1);
   });
 
-  it("returns zero counts for empty items (no slug lookup needed)", () => {
-    // Empty items short-circuits before slug resolution — no seed required.
-    const result = enqueueDiscoveredItems("src-empty", []);
+  it("returns zero counts for empty items (no FK touched)", () => {
+    // Empty items short-circuits before any INSERT, so no seed required.
+    const result = enqueueDiscoveredItems("src_NONEXISTENT", []);
     expect(result.inserted).toBe(0);
     expect(result.skipped).toBe(0);
   });
 
   it("allows same URL from different source IDs", () => {
-    seedSlug("source-a");
-    seedSlug("source-b");
+    const a = seedSlug("source-a");
+    const b = seedSlug("source-b");
     const items: FeedItem[] = [{ url: "https://shared.example.com/article" }];
-    const r1 = enqueueDiscoveredItems("source-a", items);
-    const r2 = enqueueDiscoveredItems("source-b", items);
+    const r1 = enqueueDiscoveredItems(a, items);
+    const r2 = enqueueDiscoveredItems(b, items);
     expect(r1.inserted).toBe(1);
     expect(r2.inserted).toBe(1);
   });
 
   it("stores publishedAt correctly", () => {
-    seedSlug("src-dated");
+    const canonical = seedSlug("src-dated");
     const items: FeedItem[] = [
       { url: "https://example.com/dated", publishedAt: "2026-05-01T10:00:00.000Z" },
     ];
-    enqueueDiscoveredItems("src-dated", items);
+    enqueueDiscoveredItems(canonical, items);
     const { getDb } = require("../../src/storage/sqlite/connection");
     const row = getDb()
       .prepare("SELECT published_at FROM discovery_queue WHERE url = ?")
@@ -289,17 +292,18 @@ describe("enqueueDiscoveredItems", () => {
     expect(row?.published_at).toBe("2026-05-01T10:00:00.000Z");
   });
 
-  it("throws when slug has no mapping (FK would reject in production)", () => {
-    // F-01: production schema enforces FK to source_material_policy. A slug
-    // with no slug_map entry must surface as a clear application error rather
-    // than letting the INSERT trip a confusing "FOREIGN KEY constraint failed".
+  it("FK rejects an unmapped source_id (caller must pre-canonicalise)", () => {
+    // Slug → canonical resolution is now the caller's responsibility
+    // (run-discovery.ts loadRssSources). If the caller fails to do it, the
+    // production FK to source_material_policy(source_id) surfaces the bug
+    // loudly. The error message comes from SQLite, not from this module.
     const items: FeedItem[] = [{ url: "https://example.com/orphan" }];
     expect(() => enqueueDiscoveredItems("orphan-slug", items)).toThrow(
-      /cannot resolve source_id='orphan-slug'/
+      /FOREIGN KEY constraint failed/
     );
   });
 
-  it("accepts a pre-canonicalised src_<ULID> input without slug map lookup", () => {
+  it("accepts a pre-canonicalised src_<ULID> input", () => {
     const { getDb } = require("../../src/storage/sqlite/connection");
     getDb().prepare(
       `INSERT INTO source_material_policy
