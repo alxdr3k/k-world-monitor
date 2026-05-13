@@ -1,99 +1,72 @@
 /**
  * Unit tests for createSnapshotFingerprint (INFRA-1B.3).
  *
- * Neo4j and R2 are mocked so no network I/O occurs.
- * SQLite runs in-memory for discovery_queue state.
+ * Neo4j is mocked via the shared test-helpers/neo4j-mock builder.
+ * R2 is mocked inline (single function). SQLite runs in-memory.
  */
 
 import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { createNeo4jMock, ok } from "../test-helpers/neo4j-mock";
 
 process.env["SQLITE_PATH"] = ":memory:";
 
 // ---------------------------------------------------------------------------
-// Mock Neo4j withSession before importing the module under test.
+// Shared Neo4j mock + closure-driven behavior flags.
 // ---------------------------------------------------------------------------
-
-type SessionFn<T> = (session: unknown) => Promise<T>;
-
-// Records of Neo4j runs in the current test
-const neo4jRuns: Array<{ query: string; params: Record<string, unknown> }> = [];
 
 interface FindExistingConfig {
   snapId: string;
   r2Key: string | null;
-  docId?: string; // R5 P2: optional override; falls back to `doc_dedup_<snapId>` in mock
+  docId?: string;
 }
-let findExistingResult: FindExistingConfig | null = null; // what MATCH returns for dedup check
+let findExistingResult: FindExistingConfig | null = null;
 // When true, the Source-existence guard query returns count=0 — used to
 // exercise ensureSourceLinkage's missing-Source rollback path on dedup.
 let sourceMissingOnGuard = false;
 // When set, MERGE Document's RETURN d.doc_id ignores the input params.docId
 // and returns this value — simulating Neo4j's ON MATCH branch where the
-// stored docId differs from the freshly generated candidate (the production
-// guarantee F-10 depends on). Default null → echo input (ON CREATE behavior).
+// stored docId differs from the candidate (F-10 contract).
 let mergeDocIdOverride: string | null = null;
+// When true, allLinkedSourcesAllowRawCloud returns a prohibited source after
+// the r2Put has already succeeded — exercises the TOCTOU close branch.
+let policyRevertsAfterR2Put = false;
+let allLinkedSourcesCallCount = 0;
 
-mock.module("../../src/storage/neo4j/connection", () => ({
-  withSession: async <T>(fn: SessionFn<T>): Promise<T> => {
-    const tx = {
-      run: async (query: string, params: Record<string, unknown>) => {
-        neo4jRuns.push({ query, params });
-        // P1-3 source guard: return count=1 by default; flip to 0 when the
-        // test toggles sourceMissingOnGuard so we can verify ensureSourceLinkage
-        // returns null and the caller marks the queue row error.
-        if (query.includes("MATCH (src:Source") && query.includes("count(src)")) {
-          return { records: [{ get: (_: string) => (sourceMissingOnGuard ? 0 : 1) }] };
-        }
-        // P1-1 MERGE Document RETURN: by default echo the pre-generated docId
-        // (ON CREATE branch). When mergeDocIdOverride is set, return that
-        // value instead so tests can exercise the ON MATCH branch where the
-        // stored docId differs from the candidate.
-        if (query.includes("MERGE (d:Document") && query.includes("RETURN d.doc_id")) {
-          const ret = mergeDocIdOverride ?? (params["docId"] as string);
-          return { records: [{ get: (_: string) => ret }] };
-        }
-        return { records: [] };
-      },
-      commit: async () => {},
-      rollback: async () => {},
-    };
-    const session = {
-      run: async (query: string, params: Record<string, unknown>) => {
-        neo4jRuns.push({ query, params });
-        // allLinkedSourcesAllowRawCloud query: return the same source_id used in
-        // baseInput so the policy lookup in SQLite finds a row.
-        if (query.includes("collect(DISTINCT src.source_id)")) {
-          return {
-            records: [{
-              get: (field: string) =>
-                field === "source_ids" ? ["src-1"] : null,
-            }],
-          };
-        }
-        // Deduplication MATCH query returns existing snap_id + doc_id + r2_key.
-        // doc_id is included so the dedup return path can satisfy the
-        // SnapshotResult contract with a real document identifier (R5 P2 fix).
-        if (query.includes("MATCH (s:Snapshot") && findExistingResult) {
-          const cfg = findExistingResult;
-          return {
-            records: [{
-              get: (field: string) =>
-                field === "snap_id"
-                  ? cfg.snapId
-                  : field === "doc_id"
-                    ? cfg.docId ?? `doc_dedup_${cfg.snapId}`
-                    : cfg.r2Key,
-            }],
-          };
-        }
-        return { records: [] };
-      },
-      beginTransaction: () => tx,
-      close: async () => {},
-    };
-    return fn(session);
-  },
-}));
+const neo4j = createNeo4jMock();
+function registerHandlers() {
+  neo4j.tx.on(/MATCH \(src:Source.*count\(src\)/s, () =>
+    ok({ matched: sourceMissingOnGuard ? 0 : 1 })
+  );
+  neo4j.tx.on(/MERGE \(d:Document[\s\S]*RETURN d\.doc_id/, ({ params }) =>
+    ok({ doc_id: mergeDocIdOverride ?? (params["docId"] as string) })
+  );
+
+  neo4j.session.on(/collect\(DISTINCT src\.source_id\)/, () => {
+    allLinkedSourcesCallCount++;
+    // First call = pre-r2Put check (always allowed). Subsequent calls =
+    // post-r2Put recheck. policyRevertsAfterR2Put flips the recheck result
+    // to "prohibited" so the SET back-patch is skipped per the TOCTOU close.
+    if (policyRevertsAfterR2Put && allLinkedSourcesCallCount > 1) {
+      return ok({ source_ids: ["src-prohibited"] });
+    }
+    return ok({ source_ids: ["src-1"] });
+  });
+  neo4j.session.on(/MATCH \(s:Snapshot/, () => {
+    if (!findExistingResult) return { records: [] };
+    const cfg = findExistingResult;
+    return ok({
+      snap_id: cfg.snapId,
+      doc_id: cfg.docId ?? `doc_dedup_${cfg.snapId}`,
+      r2_key: cfg.r2Key,
+    });
+  });
+}
+registerHandlers();
+
+mock.module("../../src/storage/neo4j/connection", () => neo4j.module);
+
+// Back-compat alias so existing test bodies need minimal edits.
+const neo4jRuns = neo4j.runs as ReadonlyArray<{ query: string; params: Record<string, unknown> }>;
 
 // ---------------------------------------------------------------------------
 // Mock R2 r2Put.
@@ -189,11 +162,14 @@ function baseInput(queueId: string): SnapshotInput {
 }
 
 beforeEach(() => {
-  neo4jRuns.length = 0;
+  neo4j.reset();
+  registerHandlers();
   r2Puts.length = 0;
   findExistingResult = null;
   sourceMissingOnGuard = false;
   mergeDocIdOverride = null;
+  policyRevertsAfterR2Put = false;
+  allLinkedSourcesCallCount = 0;
   setupDb();
 });
 
@@ -459,7 +435,7 @@ describe("createSnapshotFingerprint — content hash", () => {
 
     // Reset dedup so second call doesn't short-circuit on the existing hash.
     findExistingResult = null;
-    neo4jRuns.length = 0;
+    neo4j.reset(); registerHandlers();
     r2Puts.length = 0;
     db.prepare(`INSERT INTO discovery_queue (queue_id, source_id, url, status)
       VALUES (?, 'src-1', 'https://example.com/article', 'processing')`).run(queueId2);
@@ -478,7 +454,7 @@ describe("createSnapshotFingerprint — content hash", () => {
     const r1 = await createSnapshotFingerprint(baseInput(queueId1));
 
     findExistingResult = null;
-    neo4jRuns.length = 0;
+    neo4j.reset(); registerHandlers();
     r2Puts.length = 0;
     db.prepare(`INSERT INTO discovery_queue (queue_id, source_id, url, status)
       VALUES (?, 'src-1', 'https://example.com/other', 'processing')`).run(queueId2);
@@ -490,5 +466,79 @@ describe("createSnapshotFingerprint — content hash", () => {
       url: "https://example.com/other",
     });
     expect(r1.contentHash).toBe(r2.contentHash);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r2-orphan recovery — verifies the claim in the PR #25 commit message that
+// "the next eligible retry dedup-matches and r2Put's idempotent overwrite
+// restores consistency" when a SET r2_key Neo4j write fails after a
+// successful r2Put. The dedup back-fill path must re-upload (same key,
+// idempotent overwrite) and patch r2_key on the next attempt.
+// ---------------------------------------------------------------------------
+
+describe("createSnapshotFingerprint — r2 orphan back-fill", () => {
+  it("dedup retry back-fills r2_key when prior attempt left r2_key=null", async () => {
+    // Simulate the state left after a prior worker that:
+    //   1. created Snapshot in Neo4j with r2_key=null,
+    //   2. successfully uploaded to r2,
+    //   3. then crashed BEFORE the SET r2_key back-patch landed.
+    // The graph has snap_id=snap_ORPHAN, r2_key=null. The r2 object exists
+    // at permitted_artifact/derived/snapshot/snap_ORPHAN (mocked r2Put will
+    // overwrite it idempotently).
+    findExistingResult = { snapId: "snap_ORPHAN", r2Key: null };
+
+    const db = setupDb();
+    const queueId = "dq_orphan_recover";
+    seedQueue(db, queueId);
+
+    const result = await createSnapshotFingerprint(baseInput(queueId));
+
+    // Verify dedup matched.
+    expect(result.deduplicated).toBe(true);
+    expect(result.snapId).toBe("snap_ORPHAN");
+    // r2 object was re-uploaded (back-fill path triggered).
+    expect(r2Puts).toHaveLength(1);
+    expect(r2Puts[0]!.key).toBe("permitted_artifact/derived/snapshot/snap_ORPHAN");
+    // The graph SET r2_key write was issued — this is the back-patch that
+    // closes the orphan.
+    const setPatch = neo4j.runs.find(
+      (r) => r.via === "session" && /SET s\.r2_key/.test(r.query) &&
+             r.params["snapId"] === "snap_ORPHAN"
+    );
+    expect(setPatch).toBeDefined();
+    expect(result.r2Key).toBe("permitted_artifact/derived/snapshot/snap_ORPHAN");
+    // Queue row marked done — no inflated failure count for the orphan.
+    const row = db
+      .prepare("SELECT status FROM discovery_queue WHERE queue_id = ?")
+      .get(queueId) as { status: string };
+    expect(row.status).toBe("done");
+  });
+
+  it("dedup back-fill skips SET r2_key when policy reverts after r2Put (INV-0012-3 TOCTOU close)", async () => {
+    // The pre-r2Put policy check passes (first allLinkedSourcesAllowRawCloud
+    // call returns allowed); a concurrent linker then attaches a prohibited
+    // source, so the post-r2Put recheck returns prohibited. The SET r2_key
+    // must NOT be issued — r2_key stays null in the graph so the prohibited
+    // source never observes an r2 reference.
+    findExistingResult = { snapId: "snap_TOCTOU", r2Key: null };
+    policyRevertsAfterR2Put = true;
+
+    const db = setupDb();
+    const queueId = "dq_toctou";
+    seedQueue(db, queueId);
+
+    const result = await createSnapshotFingerprint(baseInput(queueId));
+
+    expect(result.deduplicated).toBe(true);
+    // r2Put DID run (we got that far before the revert was visible).
+    expect(r2Puts).toHaveLength(1);
+    // But the SET r2_key back-patch was NOT issued — fail-safe.
+    const setPatch = neo4j.runs.find(
+      (r) => r.via === "session" && /SET s\.r2_key/.test(r.query)
+    );
+    expect(setPatch).toBeUndefined();
+    // Result reflects no r2 association from the caller's perspective.
+    expect(result.r2Key).toBeNull();
   });
 });
