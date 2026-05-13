@@ -35,6 +35,19 @@ invariants:
   - id: INV-0012-3
     statement: Snapshot은 fingerprint record(URL, accessed_at, content_hash, locator)다. R2 binary 보관은 예외로만 허용한다 — open-license dataset, 공식 허용 API 응답, 자체 산출물(차트/export)만. 일반 article/report raw text의 R2 업로드는 영구 금지 (R8/Q3, R14/Q9-4)
     status: active
+    enforcement:
+      # INFRA-1B.3 snapshot-fingerprint 구현에서 cross-source dedup이 INV-0012-3을
+      # 우회할 수 있는 두 TOCTOU window가 식별되어 다음 방어책을 적용한다 (PR #25).
+      - layer: pre-r2Put policy gate
+        check: createSnapshotFingerprint는 input.archivePolicy === full_snapshot_allowed && input.rawCloudPolicy === allowed_public_data_only를 만족할 때만 r2Put을 호출한다
+      - layer: dedup back-fill cross-source guard
+        check: allLinkedSourcesAllowRawCloud(snap_id) — Snapshot에 이미 linked된 모든 Source의 raw_cloud_policy가 allowed_public_data_only인 경우에만 r2Put + SET r2_key를 진행한다. 이 함수는 미등록 source / always_prohibited source를 모두 거부한다
+      - layer: post-r2Put TOCTOU recheck
+        check: r2Put 완료 후 SET r2_key 직전에 allLinkedSourcesAllowRawCloud를 다시 호출한다. 한 번이라도 prohibited source가 도착해 있으면 SET을 skip — r2_key=null로 남기고 r2 object는 orphan으로 둔다 (다음 retry에서 dedup-match → idempotent overwrite로 복구; r2Delete는 race window가 더 크기 때문에 미사용)
+      - layer: recheck-failure fail-safe
+        check: 위 recheck 호출 자체가 throw하면(transient Neo4j blip 등) 결과를 stillAllowed=false로 처리한다. 즉 검증 실패 시 보수적으로 SET을 skip하여 prohibited source가 절대 r2 reference를 관측하지 못하게 한다
+      - layer: orphan recovery contract
+        check: 위 fail-safe 또는 SET 실패로 r2_key=null이 남은 Snapshot은 다음 createSnapshotFingerprint 호출(같은 content_hash)에서 dedup-match → r2Put이 idempotent overwrite로 객체를 재생성하고 SET r2_key를 재시도한다. 이 retry 경로는 tests/unit/snapshot_fingerprint_test.ts "r2 orphan back-fill" describe 블록에서 검증된다
   - id: INV-0012-4
     statement: R2는 "permitted artifact store"다 (raw archive가 아님). raw_cloud_policy는 always_prohibited (default)이며 allowed_public_data_only는 source_material_policy 명시 후에만 적용 가능
     status: active
