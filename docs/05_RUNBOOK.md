@@ -256,6 +256,59 @@ RETENTION_PROTECTED_KINDS 항목은 tombstone 생성 단계에서 batch job이 r
 
 연 1회, 임의 Publication 1건 선택 후 5+1 trace (Claim × N → Snapshot → Source; Dossier; Scenario × revision; Thesis; EditorialIntent) 전부 reachable 검증. fail → retention batch 정책 재검토 + DEC-007 supersede 검토.
 
+## Pre-deploy schema migration contract (v0)
+
+본 repo 는 P0-M6 turn-key MVP gate 이전 까지 다음 운영 contract 를 따른다
+(DEC-019 / Q-040 lock, 2026-05-13):
+
+### Scope
+
+- 적용 시점: P0-M6(MVP gate) accept 이전, 또는 P1-MVP-prep milestone
+  (DEPLOY-1A.1 슬라이스) 안정화 이전 — 즉 production deploy 직전 까지.
+- 적용 대상: SQLite (`migrations/sqlite/`), Neo4j (`migrations/neo4j/`)
+  모든 schema 파일.
+
+### Contract
+
+- **base schema 파일 (v1, v2, ... v6) 은 in-place 재작성 가능**. forward
+  ALTER migration 추가 의무 없음.
+- **`research.db` 는 schema 변경마다 wipe 후 재생성 가정**. 운영자가
+  `bun run migrate:sqlite` 전 `rm research.db` 실행하는 것이 default
+  upgrade path.
+- **production data 가 존재하지 않는다는 전제**: 회고 / 검토 단계에서 모든
+  `discovery_queue`, `crawl_state`, `raw_cache_items` row 는 drop
+  acceptable.
+- **Codex 등 자동 리뷰어가 "preexisting v6 DB 업그레이드", "in-place ALTER",
+  "backfill scripts", "ADD COLUMN migration 누락" 등을 지적할 경우** — 본
+  contract 를 인용한 PR comment 로 응답하고 코드 수정 없이 진행한다 (PR
+  #26 / #28 / #30 의 실제 사례 참조).
+
+### Trigger to switch contracts
+
+다음 중 하나라도 만족하면 본 contract 종료, `P1-MVP-prep` /
+`DEPLOY-1A.1` 슬라이스로 전환:
+
+1. P0-M6 (PUB-1A.5) turn-key MVP gate accept
+2. 첫 production deploy candidate 빌드
+3. 운영자가 명시적으로 contract 종료 선언 (예: 본 RUNBOOK 의 Change Log
+   에 "schema freeze date" 기록)
+
+### Post-deploy contract (참고 — DEPLOY-1A.1 슬라이스에서 implement)
+
+- 마지막 wipe-and-reseed 시점 stamp (`schema_migrations` 에 freeze 마커
+  row 추가)
+- 이후 모든 schema 변경은 forward ALTER migration 으로만
+- backfill scripts 위치: `migrations/sqlite/backfill/<NN>_<purpose>.sql`
+  네이밍 컨벤션 (DEC-019)
+- migration runner rollback 지원 (BEGIN/ROLLBACK envelope 은 이미 적용됨)
+- schema drift CI check
+
+### Reference
+
+- DEC-019 — 본 contract 채택 결정
+- Q-040 — 후속 framework 슬라이스 trigger
+- PR #25 retro / PR #26 codex review — 본 contract 가 정당화한 변경 이력
+
 ## Rotations / On-call
 
 - 담당: 단일 운영자(user)
@@ -268,4 +321,5 @@ RETENTION_PROTECTED_KINDS 항목은 tombstone 생성 단계에서 batch job이 r
 |---|---|---|
 | 2026-05-11 | Initial runbook scaffold (대부분 TBD, P0-M1 진입 직전) | user / Claude |
 | 2026-05-12 | Data Operations 섹션 전면 업데이트 — backup schedule (Neo4j 30d / SQLite 90d / JSONL audit monthly), R2 lifecycle rules (expire 3 + transition 6), retention batch jobs (daily/weekly/monthly), RETENTION_PROTECTED_KINDS 상수, soft-delete 2단계 패턴, 복구 절차, 연간 retention drill (INFRA-1A.8 / DEC-007 / AC-032) | Claude |
+| 2026-05-13 | "Pre-deploy schema migration contract" 섹션 추가 — v0 단계 base-schema in-place 재작성 + wipe-and-reseed default upgrade path 명문화. Codex auto-review 가 반복 지적해 온 in-place ALTER / forward migration 요구를 본 contract 로 일괄 처리 (DEC-019 / Q-040 lock) | Claude |
 | 2026-05-11 | Publishing Site Deployment 섹션 추가 (ADR-0022 + DEC-006 Build watch paths precondition) + Roll Back 섹션 publishing 우선 명시 (자체 사이트 + data backup) | user / Claude |
