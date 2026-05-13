@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: a581e72 (2026-05-12) — INFRA-1A.2 schema commit
+> Last verified against code: 13d61af (2026-05-13) — comprehensive review backfill (18 test files / 200+ cases landed)
 
 ## Testing policy
 
@@ -14,21 +14,20 @@
 
 ## Install
 
-> **현재 상태 (2026-05-12 INFRA-1A.2 commit 이후)**: `package.json` / Bun runtime /
-> `scripts/validate_invariants.ts` 및 `migrations/` 파일 모두 commit됨.
-> 아래 `bun run ...` 명령 전체 실행 가능.
->
-> Ruby lint (pre-INFRA-1A.2 기존):
-> ```bash
-> ruby scripts/check-doc-governance.rb           # default mode (CI에서 실행)
-> ruby scripts/check-doc-governance.rb --strict  # placeholder remnant 검출 (옵션)
-> ```
-
 ```bash
 bun install
 ```
 
-## Invariant validator (primary check)
+bun + TypeScript + native bun:sqlite + neo4j-driver + Bun.S3Client.
+
+Ruby lint (pre-INFRA-1A.2 doc governance — 별도):
+
+```bash
+ruby scripts/check-doc-governance.rb           # default mode (CI에서 실행)
+ruby scripts/check-doc-governance.rb --strict  # placeholder remnant 검출 (옵션)
+```
+
+## Invariant validator (primary doc check)
 
 ```bash
 # Read-only validation — exits 0 by design (warning level only)
@@ -38,7 +37,7 @@ bun run invariant:check
 bun run invariant:fixture:scope-creep
 bun run invariant:fixture:glossary-drift
 
-# Regenerate docs/_generated/ artifacts (--ci is read-only; --regenerate writes)
+# Regenerate docs/_generated/ artifacts (writes scope_tree.yaml / term_usage.yaml / effective_invariant_policy.yaml)
 bun run invariant:regen
 ```
 
@@ -50,44 +49,56 @@ bun run invariant:regen
 bun run invariant:write
 ```
 
-## Code tests
+## Code tests (landed, M1~M2)
 
 | Check | Local command | CI workflow / job | Required? | Notes |
 |---|---|---|---|---|
-| install | `bun install` | invariant-check job | yes | bun is mandatory runtime |
-| invariant validation | `bun run invariant:check` | invariant-check job | no (warning only) | INV-0002-1: never hard-fails |
+| install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
+| typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 18 file / 200+ cases — Bun native runner |
+| migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v6 schema files parse |
+| invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
 | fixture regression | `bun run invariant:fixture:glossary-drift` | (manual / pre-PR) | recommended | Case 2 detection |
-| regenerate artifacts | `bun run invariant:regen` | invariant-check job (post-validate) | yes | writes docs/_generated/ |
-| typecheck | `bun run typecheck` | (manual / pre-PR) | recommended | tsc --noEmit --pretty false |
-| unit tests | `bun test` | (planned, INFRA-1A.3+) | yes (after more code lands) | TEST-005 passing now |
-| migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies schema files parse |
+| regenerate artifacts | `bun run invariant:regen` | invariant-check.yml (post-validate) | yes | writes docs/_generated/ |
 | Neo4j FTS bench | `bun run bench:neo4j` | (manual, SPIKE-001) | spike only | needs Neo4j running; AC-002 p95 < 1s |
+| Discovery dry-run | `bun run discovery:dry-run` | (manual) | recommended | RSS parse + queue enqueue dry-run |
+| seed sources dry-run | `bun run seed-sources:dry-run` | (manual) | recommended | validates data/sources_seed.yaml |
 | reproducibility manual | n/a (manual) | n/a | yes (P0-M5 gate) | AC-017 NFR-002 |
 
 ## CI / required checks
 
-| Check | Local command | CI workflow / job | Required? | Notes |
-|---|---|---|---|---|
-| install | `bun install` | invariant-check job | yes | bun is mandatory runtime |
-| invariant validation | `bun run invariant:check` | invariant-check job | no (warning only) | ADR-0002 INV-0002-1 |
-| fixture regression | `bun run invariant:fixture:*` | (manual / pre-PR) | recommended | |
-| regenerate artifacts | `bun run invariant:regen` | invariant-check job | yes | uploads docs/_generated/ as PR artifact |
+Workflow files (활성):
+
+| File | Trigger | Required? | Notes |
+|---|---|---|---|
+| `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes | Ruby doc lint |
+| `.github/workflows/ci.yml` | PR + push | advisory (본 PR 활성 시점) — Q-048 resolution 후 required 승격 후보 | bun install + bun test + bun run typecheck |
+| `.github/workflows/invariant-check.yml` | PR + push | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:check + invariant:regen |
+
+비활성 (rename 대기):
+
+| File | Reason |
+|---|---|
+| `.github/workflows/cd.yml.example` | publishing pipeline 도입 시점 활성 (P0-M6) |
+| `.github/workflows/doc-freshness.yml.example` | thin doc SHA pinning 자동 검증 도입 시점 활성 |
 
 ## CI notes
 
-- Workflow files: `.github/workflows/invariant-check.yml.example` (rename to `.yml` to activate)
-- Required branch protection checks: none — validator는 warning-level by contract
-- Non-blocking / advisory checks: invariant-check (annotations only, exit 0)
-- 코드 테스트(`bun test`)는 INFRA-1A.2 slice 도입과 함께 required check 후보
+- 본 PR (`claude/comprehensive-code-review-FE0w3`) 가 `ci.yml.example` →
+  `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
+  으로 advisory 활성.
+- branch protection required check 등록은 Q-048 사용자 결정 대기.
+- 코드 테스트 (`bun test`) 는 18 file / 200+ 케이스 — Bun native runner
+  1 분 이내 expected.
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR
 
-- run typecheck if available (`bun run typecheck` — INFRA-1A.2 이후)
-- run tests if available (`bun test` — INFRA-1A.2 이후)
-- run lint if available (`bun run lint` — INFRA-1A.2 이후)
-- update relevant docs if behavior/schema/runtime changed
+- `bun run typecheck`
+- `bun test`
+- `bun run invariant:check`
+- update relevant docs if behavior/schema/runtime changed (AGENTS.md L46-60)
 
 ---
 

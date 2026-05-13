@@ -153,7 +153,7 @@ ADR-0019).
 |---|---|---|---|---|---|---|
 | NFR-001 | performance | graph object 1만 건 시점에서 단일 검색 < 1초 (p95) | bench script: Neo4j Community + native FTS cold cache 검색, 1만 graph object fixture (SPIKE-001 갱신 — SQLite+FTS5에서 Neo4j로 대상 변경) | AC-002 | (rubric) | ADR-0012, ADR-0014 |
 | NFR-002 | reproducibility | 동일 source set + scenario revision + **EditorialIntent** 로 다른 운영자가 같은 thesis + draft 결론 도달 가능. (ADR-0024 Data Science Module 의 derived_metric reproducibility 3-tuple + ADR-0025 EditorialIntent anchor 보강) | scenario evidence + edge ledger + EditorialIntent + derived_metric_ledger reproducibility test (수동 + diff) | AC-017 | (rubric) R3 A4 + ADR-0024 + ADR-0025 | ADR-0009, ADR-0024, ADR-0025 |
-| NFR-003 | traceability | 콘텐츠 한 문장 → 원 source까지 5단계 이내 (Publication → ContentDraft → Thesis → Scenario → Claim → Snapshot → Source) — 9-stage 안에서 5단계 이내 유지(선택적 단계 skip) | cite check report에서 trace depth 측정 | AC-018 | (rubric) | ADR-0011 |
+| NFR-003 | traceability | 콘텐츠 한 문장 → 원 source까지 단계 제한 trace (Publication → ContentDraft → Thesis → EditorialIntent → Scenario → Claim → Snapshot → Source). 정확한 hop 수 reflow 결정 대기 — Q-042 참조 (10-stage 도입 이후 5-hop 표현 supersede 정합성). 선택적 단계 skip 허용 (manual_claim_entry path 는 Snapshot 미포함, ADR-0018) | cite check report에서 trace depth 측정 | AC-018 | (rubric) | ADR-0025 (supersedes ADR-0011) |
 | NFR-004 | cost | 일일 LLM 비용 상한 soft $5/hard $7.5 + 주간 $25 + Tier 0 호출 일일 cap 5회 + backfill 별도 budget bucket (DEC-010). 초과 시 큐 backoff + 알람 | `run_` 단위 비용 ledger (vendor + tier + cross_vendor_review_of + domain_override_reason 필드 포함) + threshold alert + cross_vendor_review_coverage ≥ 0.95 KPI | AC-019 | R3 A1 + DEC-010 reflow | ADR-0023 (supersedes ADR-0006), DEC-010 |
 | NFR-005 | safety | 외부 인용 시 `quote ≤ 200자` 강제 + quote_reason 명시 필수 + storage_level=excerpt_evidence | extract pipeline assertion + cite check | AC-007 | R3, R10 | ADR-0015 |
 | NFR-006 | durability | snapshot은 fingerprint(URL+content_hash+locator)로 변경 감지 가능. 원문 변경 후 재검증 시 새 fetch 필요 (raw bytes 미보관) | content_hash diff 검출 + R2 round-trip은 permitted artifact만 | AC-020 | R8 | ADR-0012 |
@@ -215,8 +215,9 @@ Q-<NNN>.md`로 이동.
 - Q-001: scenario horizon enum 정의 (1Q / 1Y / 5Y / generational?)
 - Q-002: Dossier `stale_after` 기본값 (주제별로 다른가?)
 - Q-003: Publication 정정(correction) ledger의 트리거
-- Q-004: SQLite relational metadata와 vault `_System/Indexes/*.jsonl`의 책임
-  분담
+- ~~Q-004~~: **resolved (INFRA-1A.2)** — k-world-monitor repo는 SQLite
+  (research.db) 만 보유; vault-wide index 는 second-brain vault jsonl 책임.
+  promoted artifact export 시 변환 (INFRA-1B+).
 - Q-008: Thesis ID 체계 (`ths_<sha256[0:10]>` vs draft 내부 thesis_text)
 - Q-012: graph DB 도입 후 SQLite ↔ Neo4j sync 정책 (CDC vs batch)
 - Q-020: Neo4j Community GPL v3 boundary (1인 internal use vs 배포)

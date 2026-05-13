@@ -2,10 +2,14 @@
 
 ## Overview
 
-`k-world-monitor`는 시간 무관 수집 → 구조화된 **9-stage 파이프라인**을 통해
+`k-world-monitor`는 시간 무관 수집 → 구조화된 **10-stage 파이프라인**
+(Source → Document → Snapshot → Claim → Dossier → Scenario → EditorialIntent
+→ Thesis → ContentDraft → Publication, ADR-0025 supersedes ADR-0011) 을 통해
 **위험·기회·회복탄력성·비대칭 영향 4축을 병렬로** 추적하고 콘텐츠를 발행하는,
-**모든 인용을 5단계 trace로 역추적 가능하게 보장하는 1인 운영 환경의 LLM 기반
-시나리오 인텔리전스 시스템**이다 (ADR-0011, ADR-0019).
+**모든 인용을 source 까지 단계 제한 trace 로 역추적 가능하게 보장하는 1인
+운영 환경의 LLM 기반 시나리오 인텔리전스 시스템**이다 (ADR-0011 →
+superseded by ADR-0025, ADR-0019). NFR-003 의 정확한 hop 제한은 ADR-0025
+도입 후 reflow 결정 대기 — Q-042 참조.
 
 canonical store는 **Neo4j Community Edition(graph objects)** + **SQLite + FTS5
 (relational metadata)** + **R2(permitted artifacts only — open license dataset
@@ -223,8 +227,9 @@ SQLite migration).
   - 소스별 RSS / API client (Discovery, Tier A)
   - v1+ Substack / YouTube Data / X API (auto cross-post — Q-033)
   - v1+ TTS provider API (ElevenLabs / OpenAI TTS / Coqui self-host — Q-031)
-- Neo4j 접속: bolt://localhost:7687 (self-host Docker / binary) + APOC + GDS
-  plugin
+- Neo4j 접속: bolt://localhost:7687 (self-host Docker / binary) + APOC
+  standard (v0); GDS Community 는 v1+ (Q-024 resolution, INFRA-1A.2). Enterprise
+  feature 사용은 별도 ADR 의무.
 
 ## Cross-cutting
 
@@ -316,8 +321,8 @@ SQLite migration).
   schema (ADR-0005, ADR-0016)
 - REQ-007 (evidence nullable + quote_reason) → Extractor + Cite Check (ADR-0015)
 - REQ-008 (Neo4j typed relationships) → Edge Ledger (ADR-0013)
-- REQ-009 (extractor 분리) → 3종 Extractor (ADR-0006)
-- REQ-010 (LLM routing) → Routing 로직 (ADR-0006)
+- REQ-009 (extractor 분리) → 3종 Extractor (ADR-0023 supersedes ADR-0006, + ADR-0024 Data Science Module)
+- REQ-010 (LLM routing) → Routing 로직 (ADR-0023 supersedes ADR-0006, + DEC-010 cost ceiling lock)
 - REQ-011 (구현 순서) → Roadmap (`04_IMPLEMENTATION_PLAN.md`)
 - REQ-012 (scenario validate + counterclaim polarity-symmetric) → Scenario
   Validator (ADR-0009, ADR-0019)
@@ -343,12 +348,12 @@ SQLite migration).
   cite anchor canonical) → Publishing Site 컴포넌트 (ADR-0022)
 - NFR-001 (1만건 < 1s p95) → Neo4j native FTS + index 정책 (SPIKE-001로 검증)
 - NFR-002 (reproducibility) → scenario_revisions + edge ledger (ADR-0009)
-- NFR-003 (5단계 trace) → 9-stage object model + ID propagation (ADR-0011)
-- NFR-004 (cost 상한) → Run Ledger + throttling (ADR-0006)
+- NFR-003 (5단계 trace) → 10-stage object model + ID propagation (ADR-0025 supersedes ADR-0011). NFR-003 의 hop 표현 reflow 결정 대기 — Q-042 참조.
+- NFR-004 (cost 상한) → Run Ledger + throttling (ADR-0023 supersedes ADR-0006, + DEC-010 cost ceiling lock + Q-046 Tier 0 cap enforcement 결정 대기)
 - NFR-005 (quote ≤ 200자 + quote_reason) → Extractor assertion + Cite Check
   (ADR-0015)
 - NFR-006 (snapshot durability via fingerprint) → content_hash (ADR-0012)
-- NFR-007 (extractor 확장) → Extractor interface (ADR-0006)
+- NFR-007 (extractor 확장) → Extractor interface (ADR-0023 supersedes ADR-0006, + ADR-0024 Data Science Module)
 - NFR-008 (legal safety, raw 0건 cloud) → Policy Gate + Fetcher (ADR-0012,
   ADR-0017)
 - NFR-009 (bidirectional balance) → Metrics Framework + Cite Check warning

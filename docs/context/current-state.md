@@ -28,10 +28,10 @@ ADR-0011~0021로 supersede됐다.
 
 ## Current roadmap position
 
-- current milestone: `P0-M2` (Source Registry & Collection Queue) — INFRA-1B.1 시작으로 M2 진입. P0-M1 게이트는 별도로 통과 필요.
-- active tracks: `INFRA` (primary — INFRA-1B collection pipeline), `OPS` (cross-cutting — OPS-1A.1 run ledger, P0-M3 slice landing opportunistically while M2 in-flight)
-- active phase: `INFRA-1B` (primary); `OPS-1A` (cross-cutting)
-- active slice: **INFRA-1B.2a/2b/2/3/4/6 in-flight** + **OPS-1A.1 in-flight** — In-flight PRs (pending review/merge): #16 (INFRA-1B.2a safe-fetch), #17 (INFRA-1B.2b scheduler), #18 (INFRA-1B.2 discovery worker), #19 (INFRA-1B.3 snapshot fingerprint), #20 (INFRA-1B.4 chunker), #22 (INFRA-1B.6 feedback CLI — base retargeted to main after PR #21 merged), #23 (OPS-1A.1 run ledger — cross-milestone, P0-M3 scope). Previously landed: `INFRA-1B.5` — PR #21 merged 2026-05-12 (c3b19c4): access-intervention recorder + severity + batch-report (26 tests). `INFRA-1B.1.x` — Hotfix shipped in c51b2ce (PR #15).
+- current milestone: `P0-M2` (Source Registry & Collection Queue) — M2 슬라이스 일괄 landed, 게이트 검증 단계 진입. P0-M1 게이트도 별도 통과 필요 (SPIKE-001 미실시 + AC-032 audit ledger 미구현 — Q-044 결정 필요).
+- active tracks: `INFRA` (primary — INFRA-1B collection pipeline 슬라이스 일괄 landed), `OPS` (cross-cutting — OPS-1A.1 run ledger landed)
+- active phase: `INFRA-1B` (게이트 검증 단계); `OPS-1A` (게이트 검증 단계)
+- active slice: **INFRA-1B.2a/2b/2/3/4/6 landed** + **OPS-1A.1 landed** (2026-05-12). Landed PR 목록: #16 (INFRA-1B.2a safe-fetch, ed09aa5), #17 (INFRA-1B.2b scheduler, 0eec962), #18 (INFRA-1B.2 discovery worker, 896ddf2), #19 (INFRA-1B.3 snapshot fingerprint, 4dfa94f), #20 (INFRA-1B.4 chunker, 06c49d7), #21 (INFRA-1B.5 access-intervention, c3b19c4), #22 (INFRA-1B.6 feedback CLI, 7f4e980), #23 (OPS-1A.1 run ledger, 23de14c). 추가 후속: `INFRA-1B.1.x` Hotfix c51b2ce (PR #15) — busy_timeout / slug-map migration / URL 파싱 / Neo4j pool env. M2 게이트 검증 미실시 evidence: SPIKE-001 (NFR-001 1만 graph object < 1s p95), AC-022/023/024 evidence 확정. 2026-05-13 comprehensive review 가 식별한 doc-code drift 일괄 backfill 됨 (본 retro entry 참조).
   `INFRA-1A.3` landed (PR #14 merged 2026-05-12): R2 permitted-artifact prefix policy + sha256 round-trip tests.
   `INFRA-1A.6` landed (PR #12 merged 2026-05-12): Tier A source seed 72 sources + TEST-027.
   `INFRA-1A.8` landed (PR #10 merged 2026-05-12): Backup runbook docs-only (AC-032).
@@ -214,17 +214,20 @@ ADR-0011~0021로 supersede됐다.
 
 ## Needs audit
 
-- `docs/05_RUNBOOK.md`: 배포 파이프라인이 아직 정의되지 않음 — "No deployment
-  pipeline currently defined." 상태로 유지
-- `docs/current/CODE_MAP.md`, `DATA_MODEL.md`, `RUNTIME.md`, `OPERATIONS.md`,
-  `TESTING.md`: 코드 미존재. Neo4j Cypher schema + SQLite relational schema 합의
-  후 갱신 필요
-- `docs/06_ACCEPTANCE_TESTS.md`: Round 25 canonical 반영 완료 (AC-022~AC-033 +
-  TEST-022~TEST-033 신규, DEC-003). 코드 도입 시 TEST 위치 `(planned)` →
-  실제 경로 갱신 필요
-- `docs/09_TRACEABILITY_MATRIX.md`: Round 25 canonical 반영 완료 (TRACE-001~020
-  supersede 표시 + TRACE-021~033 신규). gate evidence는 코드 / SPIKE 결과
-  누적 후 갱신
+- `docs/05_RUNBOOK.md`: Pre-deploy schema migration contract 섹션 (DEC-019) +
+  Backup/Retention 섹션 (INFRA-1A.8) landed. publish pipeline (PUB-1A.*) 은
+  P0-M6 진입 시 추가.
+- `docs/current/{CODE_MAP,DATA_MODEL,TESTING}.md`: 2026-05-13 comprehensive
+  review backfill 로 13d61af 기준 갱신 완료 — phantom SHA / 누락 파일
+  drift closure. RUNTIME.md, OPERATIONS.md 는 다음 thin-doc 갱신 사이클
+  (P0-M2 게이트 검증 후) 에 대상.
+- `docs/06_ACCEPTANCE_TESTS.md`: 본 review 시점에 TEST-005/008/019/020/022/024/
+  025/026/027 위치 갱신 (planned → 실제 경로). 미구현 TEST-### 는 여전히
+  (planned) 유지 (P0-M3+ 슬라이스 진입 시 갱신).
+- `docs/09_TRACEABILITY_MATRIX.md`: 본 review 시점 미갱신. P0-M2 게이트
+  검증 시점에 TEST 위치 + landed slice evidence 일괄 backfill 예정.
+- AC-043 (ADR-0027 evidence_role schema) row 가 `06_ACCEPTANCE_TESTS.md` 에
+  부재 (Q-043 결정 대기). AC-044 row 는 존재하나 (planned).
 
 ## Links
 

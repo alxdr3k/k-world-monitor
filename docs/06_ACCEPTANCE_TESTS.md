@@ -82,9 +82,9 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 |---|---|---|---|
 | TEST-001 | **10-stage object trace anchor** + EditorialIntent stage 존재 + `:HAS_INTENT` / `:USES_INTENT` relationship + `decided_by_operator = true` flag (ADR-0025) | `tests/pipeline/object_model_test.ts` (planned) | AC-001 |
 | TEST-002 | Neo4j native FTS 1만 graph object 검색 bench | `tests/bench/neo4j_fts_search_bench.ts` (planned) | AC-002 |
-| TEST-003 | R2 sha256 round-trip | `tests/storage/r2_integrity_test.ts` (planned) | AC-003 |
+| TEST-003 | R2 sha256 round-trip | `tests/unit/r2_policy_test.ts` ✓ 32 tests pass (INFRA-1A.3, sha256 round-trip + permitted prefix) | AC-003 |
 | TEST-004 | promoted only markdown | `tests/storage/markdown_promoted_only_test.ts` (planned) | AC-004 |
-| TEST-005 | ID prefix lint | `tests/lint/id_prefix_test.ts` (planned) | AC-005 |
+| TEST-005 | ID prefix lint | `tests/lint/id_prefix_test.ts` ✓ 28 tests pass (INFRA-1A.2) | AC-005 |
 | TEST-006 | confidence 분해 lint | `tests/lint/no_single_confidence_test.ts` (planned) | AC-006 |
 | TEST-007 | evidence quote 200자 + 3-tuple | `tests/extraction/evidence_test.ts` (planned) | AC-007 |
 | TEST-008 | frontmatter 관계 배열 lint | `tests/lint/no_frontmatter_relation_array_test.ts` ✓ 9 tests pass | AC-008 |
@@ -96,15 +96,15 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-015 | review queue throttling | `tests/review/throttling_test.ts` (planned) | AC-015 |
 | TEST-016 | stale 트리거 3종 | `tests/stale/triggers_test.ts` (planned) | AC-016 |
 | TEST-018 | 9-stage 5-step trace (Publication → Source) | `tests/pipeline/trace_test.ts` (planned) | AC-018 |
-| TEST-019 | run ledger cost throttling | `tests/cost/ledger_test.ts` (planned) | AC-019 |
-| TEST-020 | Snapshot fingerprint durability + content_hash diff + permitted artifact R2 round-trip | `tests/storage/snapshot_fingerprint_test.ts` (planned) | AC-020 |
+| TEST-019 | run ledger cost throttling | `tests/unit/run_ledger_test.ts` ✓ 29 tests pass (OPS-1A.1, cost throttling worker는 OPS-1A.2 슬라이스에서 추가) | AC-019 |
+| TEST-020 | Snapshot fingerprint durability + content_hash diff + permitted artifact R2 round-trip | `tests/unit/snapshot_fingerprint_test.ts` ✓ tests pass (INFRA-1B.3) + `tests/unit/r2_policy_test.ts` ✓ 32 tests (INFRA-1A.3) | AC-020 |
 | TEST-021 | extractor interface dry-run | `tests/extraction/interface_test.ts` (planned) | AC-021 |
-| TEST-022 | Source registry Tier + collectability + perspective | `tests/source/registry_test.ts` (planned) | AC-022 |
+| TEST-022 | Source registry Tier + collectability + perspective | `tests/unit/source_registry_test.ts` ✓ 22 tests pass (INFRA-1B.1, seed dry-run + enum validation + YAML structure) | AC-022 |
 | TEST-023 | policy gate mode-aware + 8 위험 행동 | `tests/policy/gate_test.ts` (planned) | AC-023 |
-| TEST-024 | access_intervention batch report + severity | `tests/intervention/batch_test.ts` (planned) | AC-024 |
-| TEST-025 | manual_claim_entry 3-way 분리 CLI | `tests/feedback/cli_test.ts` (planned) | AC-025 |
-| TEST-026 | Scenario impact_targets + Thesis stance/market_stance + **Thesis↔EditorialIntent linkage + intent.bidirectional_weight_intent ↔ thesis.stance align + EditorialIntent.decided_by_operator = true** (ADR-0025 INV-0025-2/-4/-6) | `tests/scenario/bidirectional_test.ts` (planned) | AC-026 |
-| TEST-027 | Tier A seed source_perspective 분포 | `tests/source/perspective_distribution_test.ts` (planned) | AC-027 |
+| TEST-024 | access_intervention batch report + severity | `tests/unit/access_intervention_test.ts` ✓ 26 tests pass (INFRA-1B.5) | AC-024 |
+| TEST-025 | manual_claim_entry 3-way 분리 CLI | `tests/unit/feedback_test.ts` ✓ tests pass (INFRA-1B.6) | AC-025 |
+| TEST-026 | Scenario impact_targets + Thesis stance/market_stance + **Thesis↔EditorialIntent linkage + intent.bidirectional_weight_intent ↔ thesis.stance align + EditorialIntent.decided_by_operator = true** (ADR-0025 INV-0025-2/-4/-6) | `tests/unit/bidirectional_schema_test.ts` ✓ 27 tests pass (INFRA-1A.7, schema 부분 — ADR-0025 linkage/align/operator_lock 측면 추가 검증은 AGG-1A.4/1A.5 슬라이스에서 보강) | AC-026 |
+| TEST-027 | Tier A seed source_perspective 분포 | `tests/unit/perspective_distribution_test.ts` ✓ 5 assertions pass (INFRA-1A.6, risk 19% / opportunity 29% / neutral 42% / mixed 10%) | AC-027 |
 | TEST-028 | EvidencePack v0 4-section + LLM mode prompt | `tests/rag/evidence_pack_test.ts` (planned) | AC-028 |
 | TEST-029 | metrics 6 카테고리 + v0 9+ metrics 측정 | `tests/metrics/v0_metrics_test.ts` (planned) | AC-029 |
 | TEST-030 | policy learning Pattern 1 rule_candidate | `tests/policy_learning/pattern_1_test.ts` (planned) | AC-030 |
