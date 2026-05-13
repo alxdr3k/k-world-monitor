@@ -88,6 +88,7 @@ mock.module("../../src/storage/r2/client", () => ({
 import { closeDb } from "../../src/storage/sqlite/connection";
 import {
   createSnapshotFingerprint,
+  TypedQueueError,
   type SnapshotInput,
 } from "../../src/discovery/worker/snapshot-fingerprint";
 
@@ -115,6 +116,19 @@ function setupDb() {
       content_hash  TEXT,
       status        TEXT NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','processing','done','error')),
+      snap_id       TEXT,
+      error_code    TEXT
+                    CHECK (
+                      error_code IS NULL OR
+                      error_code IN (
+                        'source_not_found_in_graph',
+                        'dedup_prohibited_source',
+                        'policy_do_not_collect',
+                        'http_status',
+                        'empty_body',
+                        'runtime_error'
+                      )
+                    ),
       error_detail  TEXT,
       updated_at    TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z'
     );
@@ -257,7 +271,7 @@ describe("createSnapshotFingerprint — new snapshot", () => {
     expect(queries.some((q) => q.includes("HAS_SNAPSHOT"))).toBe(true);
   });
 
-  it("marks discovery_queue row as done with snap_id in error_detail", async () => {
+  it("marks discovery_queue row as done with snap_id in its own column", async () => {
     const db = setupDb();
     const queueId = "dq_test006";
     seedQueue(db, queueId);
@@ -265,10 +279,12 @@ describe("createSnapshotFingerprint — new snapshot", () => {
     const result = await createSnapshotFingerprint(baseInput(queueId));
 
     const row = db
-      .prepare("SELECT status, error_detail FROM discovery_queue WHERE queue_id = ?")
-      .get(queueId) as { status: string; error_detail: string } | null;
+      .prepare("SELECT status, snap_id, error_code, error_detail FROM discovery_queue WHERE queue_id = ?")
+      .get(queueId) as { status: string; snap_id: string | null; error_code: string | null; error_detail: string | null } | null;
     expect(row?.status).toBe("done");
-    expect(row?.error_detail).toBe(`snap_id:${result.snapId}`);
+    expect(row?.snap_id).toBe(result.snapId);
+    expect(row?.error_code).toBeNull();
+    expect(row?.error_detail).toBeNull();
   });
 });
 
@@ -327,10 +343,11 @@ describe("createSnapshotFingerprint — deduplication", () => {
     await createSnapshotFingerprint(baseInput(queueId));
 
     const row = db
-      .prepare("SELECT status, error_detail FROM discovery_queue WHERE queue_id = ?")
-      .get(queueId) as { status: string; error_detail: string } | null;
+      .prepare("SELECT status, snap_id, error_code FROM discovery_queue WHERE queue_id = ?")
+      .get(queueId) as { status: string; snap_id: string | null; error_code: string | null } | null;
     expect(row?.status).toBe("done");
-    expect(row?.error_detail).toBe("snap_id:snap_EXISTING");
+    expect(row?.snap_id).toBe("snap_EXISTING");
+    expect(row?.error_code).toBeNull();
   });
 
   it("back-fills R2 upload on dedup path when existing r2_key is null (retry after prior R2 failure)", async () => {
@@ -398,7 +415,7 @@ describe("createSnapshotFingerprint — deduplication", () => {
   // (not silently return success). This exercises lines 310-313 +
   // 442-449 of snapshot-fingerprint.ts, which the previous mock could not
   // reach because count(src) always returned 1.
-  it("marks queue error and throws when dedup linkage finds no Source node", async () => {
+  it("throws TypedQueueError(source_not_found_in_graph) when dedup linkage finds no Source node", async () => {
     findExistingResult = { snapId: "snap_EXISTING", r2Key: null };
     sourceMissingOnGuard = true;
 
@@ -406,16 +423,21 @@ describe("createSnapshotFingerprint — deduplication", () => {
     const queueId = "dq_dedup_no_source";
     seedQueue(db, queueId);
 
-    await expect(createSnapshotFingerprint(baseInput(queueId))).rejects.toThrow(
-      /dedup: source not found in graph/
-    );
-
-    const row = db
-      .prepare("SELECT status, error_detail FROM discovery_queue WHERE queue_id = ?")
-      .get(queueId) as { status: string; error_detail: string } | null;
-    expect(row?.status).toBe("error");
-    expect(row?.error_detail).toMatch(/dedup: source not found in graph/);
-    // No R2 upload should occur when linkage fails.
+    // Contract: createSnapshotFingerprint throws TypedQueueError with the
+    // specific errorCode. Marker-call ownership lives in processOneRow's
+    // catch (PR-ε codex P2 fix), so the row stays in 'processing' until the
+    // outer recovery scope handles the throw. Tests that invoke
+    // createSnapshotFingerprint directly verify the throw contract only.
+    let caught: unknown;
+    try {
+      await createSnapshotFingerprint(baseInput(queueId));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(TypedQueueError);
+    expect((caught as TypedQueueError).errorCode).toBe("source_not_found_in_graph");
+    expect((caught as Error).message).toMatch(/dedup: source not found in graph/);
+    // No R2 upload occurs when linkage fails (early throw before r2Put).
     expect(r2Puts).toHaveLength(0);
   });
 });

@@ -19,7 +19,27 @@ CREATE TABLE IF NOT EXISTS discovery_queue (
   content_hash    TEXT,                         -- sha256 of url — stored for future change-detection (not used for dedup)
   status          TEXT NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('pending','processing','done','error')),
-  error_detail    TEXT,
+  -- Result metadata: snap_id is the Snapshot id this row produced (status='done'),
+  -- error_code is a discrete enum classifying the failure mode (status='error'),
+  -- and error_detail is free-form supplementary text (e.g. exception message).
+  -- Previously snap_id was packed into error_detail as "snap_id:<id>" and every
+  -- error reason was a free-form string — operator dashboards / metrics had to
+  -- parse English strings to bucket failures. Splitting these makes the failure
+  -- taxonomy queryable without parsing.
+  snap_id         TEXT,                         -- on done: the produced/dedup'd Snapshot id; NULL otherwise
+  error_code      TEXT                          -- on error: one of the enum values; NULL otherwise
+                  CHECK (
+                    error_code IS NULL OR
+                    error_code IN (
+                      'source_not_found_in_graph',
+                      'dedup_prohibited_source',
+                      'policy_do_not_collect',
+                      'http_status',
+                      'empty_body',
+                      'runtime_error'
+                    )
+                  ),
+  error_detail    TEXT,                         -- free-form supplementary text (<= 500 chars)
   -- Stale-row reclaim: processDiscoveryQueue resets rows where
   -- status='processing' AND updated_at < NOW-1h back to 'pending' to
   -- recover them from crashed workers. Application code (claim UPDATE,
