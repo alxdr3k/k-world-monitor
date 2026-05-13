@@ -115,7 +115,18 @@ jobs:
           fi
 
       - name: Comment on PR if docs may be stale
-        if: steps.detect.outputs.missing != ''
+        # Skip on forked PRs and Dependabot — GITHUB_TOKEN is read-only on
+        # those events, so issues.createComment/updateComment raises
+        # "Resource not accessible by integration" and turns this advisory
+        # step into a failing job (Codex P2 review on PR #32, 2026-05-13).
+        # Additionally use continue-on-error as defense-in-depth: even if a
+        # future workflow change re-enables this on fork events, a comment
+        # failure must never block merge for a soft-warning workflow.
+        if: >
+          steps.detect.outputs.missing != '' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.user.login != 'dependabot[bot]'
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           MISSING: ${{ steps.detect.outputs.missing }}
