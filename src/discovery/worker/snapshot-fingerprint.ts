@@ -362,6 +362,7 @@ async function ensureSourceLinkage(
       // and chunker.ts to avoid rollback-after-commit Neo4j driver error.
       committed = true;
       await tx.commit();
+      return linkedDocId;
     } catch (err) {
       if (!committed) await tx.rollback();
       throw err;
