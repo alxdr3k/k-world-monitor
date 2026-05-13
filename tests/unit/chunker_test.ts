@@ -1,80 +1,68 @@
 /**
  * Unit tests for chunker (INFRA-1B.4).
- * Neo4j is mocked; no network I/O.
+ * Neo4j is mocked via the shared test-helpers/neo4j-mock builder.
  */
 
 import { describe, it, expect, mock } from "bun:test";
+import { createNeo4jMock, ok } from "../test-helpers/neo4j-mock";
 
 // ---------------------------------------------------------------------------
-// Mock Neo4j withSession.
+// Shared Neo4j mock — one controller for the whole file, reset between tests
+// where the test sets up new handlers. `chunker_test` exercises only the tx
+// path (no session.run), so we only register tx handlers.
 // ---------------------------------------------------------------------------
 
-const neo4jRuns: Array<{ query: string; params: Record<string, unknown> }> = [];
-let neo4jShouldThrow = false;
-// When true, the Snapshot guard query returns 0 rows (simulates missing Snapshot).
-let neo4jSnapshotMissing = false;
-// Track tx.commit / tx.rollback invocations so we can verify the P1
-// no-double-rollback contract (commit-attempted path MUST NOT call rollback).
-// One increment per call; tests reset to 0 before exercising a path.
-let neo4jCommitCount = 0;
-let neo4jRollbackCount = 0;
-// When set, the next tx.commit() invocation rejects with this error so we
-// can drive the "commit fails → rollback must still not be called twice" path.
-let neo4jCommitError: Error | null = null;
+const neo4j = createNeo4jMock();
+let snapshotMissing = false;
+let txShouldThrow = false;
 
-mock.module("../../src/storage/neo4j/connection", () => ({
-  withSession: async <T>(fn: (session: unknown) => Promise<T>): Promise<T> => {
-    const tx = {
-      run: async (query: string, params: Record<string, unknown>) => {
-        if (neo4jShouldThrow) throw new Error("Neo4j write failed");
-        neo4jRuns.push({ query, params });
-        // Guard query: MATCH (s:Snapshot ...) RETURN count(s) AS matched
-        if (query.includes("RETURN count(s) AS matched")) {
-          const matchedValue = neo4jSnapshotMissing ? 0 : 1;
-          return {
-            records: [
-              {
-                get: (key: string) => (key === "matched" ? matchedValue : null),
-              },
-            ],
-          };
-        }
-        // MERGE Chunk query: return resolvedId so caller gets the correct chunk_id.
-        if (query.includes("MERGE (c:Chunk") && query.includes("resolvedId")) {
-          const chunkIdParam = params["chunkId"] as string;
-          return {
-            records: [
-              {
-                get: (key: string) =>
-                  key === "resolvedId" ? chunkIdParam : null,
-              },
-            ],
-          };
-        }
-        // HAS_CHUNK link query: MATCH ... MERGE ... RETURN count(s) AS linked
-        if (query.includes("RETURN count(s) AS linked")) {
-          return {
-            records: [{ get: (key: string) => (key === "linked" ? 1 : null) }],
-          };
-        }
-        return { records: [] };
-      },
-      commit: async () => {
-        neo4jCommitCount++;
-        if (neo4jCommitError) {
-          const err = neo4jCommitError;
-          neo4jCommitError = null;
-          throw err;
-        }
-      },
-      rollback: async () => {
-        neo4jRollbackCount++;
-      },
-    };
-    const session = { beginTransaction: () => tx };
-    return fn(session);
-  },
-}));
+// Source-of-truth handlers. Tests can toggle the closures above to alter
+// behavior without re-registering handlers.
+neo4j.tx.on(/RETURN count\(s\) AS matched/, () => {
+  if (txShouldThrow) throw new Error("Neo4j write failed");
+  return ok({ matched: snapshotMissing ? 0 : 1 });
+});
+neo4j.tx.on(/MERGE \(c:Chunk/, ({ params }) => {
+  if (txShouldThrow) throw new Error("Neo4j write failed");
+  return ok({ resolvedId: params["chunkId"] });
+});
+neo4j.tx.on(/RETURN count\(s\) AS linked/, () => {
+  if (txShouldThrow) throw new Error("Neo4j write failed");
+  return ok({ linked: 1 });
+});
+// Catch-all that records the query (via dispatch returning none()) while
+// honoring the global throw flag.
+neo4j.tx.on(/.*/, () => {
+  if (txShouldThrow) throw new Error("Neo4j write failed");
+  return { records: [] };
+});
+
+mock.module("../../src/storage/neo4j/connection", () => neo4j.module);
+
+// Backwards-compatible aliases so the existing test bodies need minimal edits.
+const neo4jRuns = neo4j.runs as ReadonlyArray<{ query: string; params: Record<string, unknown> }>;
+function resetNeo4jState() {
+  neo4j.reset();
+  snapshotMissing = false;
+  txShouldThrow = false;
+  // Re-register handlers since reset() cleared them.
+  neo4j.tx.on(/RETURN count\(s\) AS matched/, () => {
+    if (txShouldThrow) throw new Error("Neo4j write failed");
+    return ok({ matched: snapshotMissing ? 0 : 1 });
+  });
+  neo4j.tx.on(/MERGE \(c:Chunk/, ({ params }) => {
+    if (txShouldThrow) throw new Error("Neo4j write failed");
+    return ok({ resolvedId: params["chunkId"] });
+  });
+  neo4j.tx.on(/RETURN count\(s\) AS linked/, () => {
+    if (txShouldThrow) throw new Error("Neo4j write failed");
+    return ok({ linked: 1 });
+  });
+  neo4j.tx.on(/.*/, () => {
+    if (txShouldThrow) throw new Error("Neo4j write failed");
+    return { records: [] };
+  });
+}
 
 import {
   splitIntoChunks,
@@ -187,7 +175,7 @@ describe("splitIntoChunks — basic splitting", () => {
 
 describe("chunkSnapshot", () => {
   it("returns chunkCount=0 and empty chunkIds for empty text, but still runs guard + stale cleanup", async () => {
-    neo4jRuns.length = 0;
+    resetNeo4jState();
     const result = await chunkSnapshot({ snapId: "snap_TEST001", text: "" });
     expect(result.chunkCount).toBe(0);
     expect(result.chunkIds).toHaveLength(0);
@@ -206,19 +194,19 @@ describe("chunkSnapshot", () => {
   });
 
   it("throws when Snapshot not found even for empty text (orphan guard not bypassed)", async () => {
-    neo4jRuns.length = 0;
-    neo4jSnapshotMissing = true;
+    resetNeo4jState();
+    snapshotMissing = true;
     try {
       await expect(
         chunkSnapshot({ snapId: "snap_EMPTYNOTEXIST", text: "" })
       ).rejects.toThrow("Snapshot not found: snap_EMPTYNOTEXIST");
     } finally {
-      neo4jSnapshotMissing = false;
+      snapshotMissing = false;
     }
   });
 
   it("writes CREATE Chunk + HAS_CHUNK for each chunk", async () => {
-    neo4jRuns.length = 0;
+    resetNeo4jState();
     const words = Array.from({ length: 10 }, (_, i) => `word${i}`);
     const result = await chunkSnapshot({
       snapId: "snap_TEST002",
@@ -236,7 +224,7 @@ describe("chunkSnapshot", () => {
   });
 
   it("stores correct snap_id and chunk_index in the Chunk node params", async () => {
-    neo4jRuns.length = 0;
+    resetNeo4jState();
     const words = Array.from({ length: 600 }, (_, i) => `w${i}`);
     const result = await chunkSnapshot({
       snapId: "snap_TEST003",
@@ -254,7 +242,7 @@ describe("chunkSnapshot", () => {
   });
 
   it("returns snapId matching the input", async () => {
-    neo4jRuns.length = 0;
+    resetNeo4jState();
     const result = await chunkSnapshot({
       snapId: "snap_MYSNAP",
       text: "some text to chunk",
@@ -263,19 +251,19 @@ describe("chunkSnapshot", () => {
   });
 
   it("propagates Neo4j errors", async () => {
-    neo4jShouldThrow = true;
+    txShouldThrow = true;
     try {
       await expect(
         chunkSnapshot({ snapId: "snap_ERR001", text: "some text" })
       ).rejects.toThrow("Neo4j write failed");
     } finally {
-      neo4jShouldThrow = false;
+      txShouldThrow = false;
     }
   });
 
   it("throws when Snapshot node does not exist (orphan guard)", async () => {
-    neo4jRuns.length = 0;
-    neo4jSnapshotMissing = true;
+    resetNeo4jState();
+    snapshotMissing = true;
     try {
       await expect(
         chunkSnapshot({ snapId: "snap_NOTEXIST", text: "some text to chunk" })
@@ -284,12 +272,12 @@ describe("chunkSnapshot", () => {
       const chunkCreates = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
       expect(chunkCreates).toHaveLength(0);
     } finally {
-      neo4jSnapshotMissing = false;
+      snapshotMissing = false;
     }
   });
 
   it("uses MERGE (not CREATE) for Chunk nodes to support idempotent re-runs", async () => {
-    neo4jRuns.length = 0;
+    resetNeo4jState();
     await chunkSnapshot({
       snapId: "snap_IDEM001",
       text: "idempotent text check",
@@ -304,7 +292,7 @@ describe("chunkSnapshot", () => {
   });
 
   it("uses MERGE for HAS_CHUNK relationship to avoid duplicates on re-run", async () => {
-    neo4jRuns.length = 0;
+    resetNeo4jState();
     await chunkSnapshot({
       snapId: "snap_IDEM002",
       text: "some text for relationship test",
@@ -321,7 +309,7 @@ describe("chunkSnapshot", () => {
   });
 
   it("runs stale-chunk cleanup in same transaction (P2 stale chunks)", async () => {
-    neo4jRuns.length = 0;
+    resetNeo4jState();
     const words = Array.from({ length: 10 }, (_, i) => `w${i}`);
     await chunkSnapshot({ snapId: "snap_STALE01", text: words.join(" ") });
     // The cleanup query uses DETACH DELETE with chunk_index >= chunkCount.
@@ -335,18 +323,15 @@ describe("chunkSnapshot", () => {
 
   it("does not rollback after commit succeeds (P1 no-double-rollback)", async () => {
     // Happy path: when commit() resolves, the catch handler must NEVER call
-    // rollback. The mock now tracks both calls via module-level counters, so
-    // this assertion is grounded in observable behavior (no tautology).
-    neo4jRuns.length = 0;
-    neo4jCommitCount = 0;
-    neo4jRollbackCount = 0;
-    neo4jCommitError = null;
+    // rollback. The mock tracks both calls so this assertion is grounded in
+    // observable behavior (no tautology).
+    resetNeo4jState();
 
     const result = await chunkSnapshot({ snapId: "snap_COMMIT01", text: "commit test" });
 
     expect(result.chunkCount).toBe(1);
-    expect(neo4jCommitCount).toBe(1);
-    expect(neo4jRollbackCount).toBe(0);
+    expect(neo4j.tx.commitCount).toBe(1);
+    expect(neo4j.tx.rollbackCount).toBe(0);
     const mergeQ = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
     expect(mergeQ.length).toBeGreaterThanOrEqual(1);
   });
@@ -357,10 +342,8 @@ describe("chunkSnapshot", () => {
     // so the catch handler MUST NOT invoke rollback (which would error from
     // the Neo4j driver). Verify rollback count stays 0 even though commit
     // rejected and the call rethrew.
-    neo4jRuns.length = 0;
-    neo4jCommitCount = 0;
-    neo4jRollbackCount = 0;
-    neo4jCommitError = new Error("simulated commit failure");
+    resetNeo4jState();
+    neo4j.tx.failNextCommit(new Error("simulated commit failure"));
 
     let caught: unknown;
     try {
@@ -371,7 +354,7 @@ describe("chunkSnapshot", () => {
 
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toBe("simulated commit failure");
-    expect(neo4jCommitCount).toBe(1);
-    expect(neo4jRollbackCount).toBe(0);
+    expect(neo4j.tx.commitCount).toBe(1);
+    expect(neo4j.tx.rollbackCount).toBe(0);
   });
 });
