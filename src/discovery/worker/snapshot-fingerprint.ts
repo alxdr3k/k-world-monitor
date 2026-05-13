@@ -593,48 +593,58 @@ export async function createSnapshotFingerprint(
   return { snapId: actualSnapId, docId: actualDocId, contentHash, r2Key, deduplicated: actualSnapId !== snapId };
 }
 
-export async function processDiscoveryQueue(
-  archivePolicyFn: (sourceId: string) => Promise<{
-    archivePolicy: ArchivePolicy;
-    rawCloudPolicy: RawCloudPolicy;
-  }>
-): Promise<{ processed: number; deduplicated: number; errors: number }> {
-  const db = getDb();
+// ---------------------------------------------------------------------------
+// processDiscoveryQueue decomposition (PR #25 retro item D).
+// The orchestrator was a 300-line monolith doing reclaim + claim + busy-retry
+// + per-row heartbeat + fetch + fingerprint. Split into three named helpers
+// so each piece is independently readable and its recovery scope is obvious.
+// ---------------------------------------------------------------------------
 
-  // P2-10: Reset stale processing rows from crashed workers (older than 1 hour).
-  // updated_at is part of the base v6 schema — strftime no-millis format
-  // matches every writer in this module so lexicographic comparison is sound.
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+type QueueRow = {
+  queue_id: string;
+  source_id: string;
+  url: string;
+  title: string | null;
+  published_at: string | null;
+};
+
+const STALE_RECLAIM_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
+const BATCH_SIZE = 100;
+const MAX_BUSY_RETRIES = 5;
+const BUSY_BACKOFF_MS = 50;
+
+// RFC 9110: 204 No Content and 205 Reset Content MUST NOT include a message body.
+const NO_BODY_2XX = new Set([204, 205]);
+
+// P2-10: Reset stale processing rows from crashed workers.
+// updated_at is part of the base v6 schema — strftime no-millis format matches
+// every writer in this module so lexicographic comparison is sound.
+function reclaimStaleRows(db: ReturnType<typeof getDb>): void {
+  const threshold = new Date(Date.now() - STALE_RECLAIM_THRESHOLD_MS)
     .toISOString()
     .replace(/\.\d{3}Z$/, "Z");
   db.prepare(
     `UPDATE discovery_queue
      SET status = 'pending', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
      WHERE status = 'processing' AND updated_at < ?`
-  ).run(oneHourAgo);
+  ).run(threshold);
+}
 
-  // P1-5: Atomic row claiming using an IMMEDIATE SQLite transaction so two concurrent
-  // workers cannot claim the same rows. bun:sqlite defaults to DEFERRED, which allows
-  // another reader to interleave between our SELECT and UPDATE; IMMEDIATE acquires a
-  // write lock at BEGIN so the SELECT+UPDATE block is exclusive.
-  const batchSize = 100;
-  let pending: Array<{
-    queue_id: string;
-    source_id: string;
-    url: string;
-    title: string | null;
-    published_at: string | null;
-  }> = [];
-
-  // R5 P2 — Bounded retry on SQLITE_BUSY: BEGIN IMMEDIATE acquires a write lock
-  // up front, and SQLite allows only one writer per database. Another worker
-  // (or the discovery producer's enqueue path) holding a write transaction will
-  // cause BEGIN IMMEDIATE to throw `SQLITE_BUSY`. Without retry, an otherwise
-  // healthy worker run aborts and processes zero rows. We retry a small number
-  // of times with linear backoff; if contention persists the caller still sees
-  // the error after the budget.
-  const MAX_BUSY_RETRIES = 5;
-  const BUSY_BACKOFF_MS = 50;
+// P1-5: Atomic row claiming via IMMEDIATE SQLite transaction so two concurrent
+// workers cannot claim the same rows. bun:sqlite defaults to DEFERRED, which
+// allows another reader to interleave between SELECT and UPDATE; IMMEDIATE
+// acquires a write lock at BEGIN so the SELECT+UPDATE block is exclusive.
+//
+// R5 P2 — Bounded retry on SQLITE_BUSY: BEGIN IMMEDIATE waits for any other
+// writer to release first. Without retry, an otherwise healthy worker run
+// aborts and processes zero rows when the discovery producer or another
+// worker holds a write transaction. We retry a small number of times with
+// linear backoff; if contention persists the caller still sees the error
+// after the budget.
+async function claimBatchWithBusyRetry(
+  db: ReturnType<typeof getDb>,
+  batchSize: number
+): Promise<QueueRow[]> {
   for (let attempt = 0; ; attempt++) {
     try {
       db.prepare("BEGIN IMMEDIATE").run();
@@ -647,125 +657,138 @@ export async function processDiscoveryQueue(
       await new Promise((r) => setTimeout(r, BUSY_BACKOFF_MS * (attempt + 1)));
     }
   }
-  {
-    try {
-      pending = db
-        .prepare(
-          `SELECT queue_id, source_id, url, title, published_at
-           FROM discovery_queue
-           WHERE status = 'pending'
-           ORDER BY discovered_at ASC
-           LIMIT ?`
-        )
-        .all(batchSize) as typeof pending;
+  try {
+    const pending = db
+      .prepare(
+        `SELECT queue_id, source_id, url, title, published_at
+         FROM discovery_queue
+         WHERE status = 'pending'
+         ORDER BY discovered_at ASC
+         LIMIT ?`
+      )
+      .all(batchSize) as QueueRow[];
 
-      if (pending.length > 0) {
-        const ids = pending.map((r) => r.queue_id);
-        db.prepare(
-          `UPDATE discovery_queue
-           SET status = 'processing'${SET_UPDATED_AT}
-           WHERE queue_id IN (${ids.map(() => "?").join(",")})`
-        ).run(...ids);
-      }
-
-      db.prepare("COMMIT").run();
-    } catch (err) {
-      try { db.prepare("ROLLBACK").run(); } catch { /* ignore rollback errors */ }
-      throw err;
+    if (pending.length > 0) {
+      const ids = pending.map((r) => r.queue_id);
+      db.prepare(
+        `UPDATE discovery_queue
+         SET status = 'processing'${SET_UPDATED_AT}
+         WHERE queue_id IN (${ids.map(() => "?").join(",")})`
+      ).run(...ids);
     }
-  }
 
-  // RFC 9110: 204 No Content and 205 Reset Content MUST NOT include a message body.
-  const NO_BODY_2XX = new Set([204, 205]);
+    db.prepare("COMMIT").run();
+    return pending;
+  } catch (err) {
+    try { db.prepare("ROLLBACK").run(); } catch { /* ignore rollback errors */ }
+    throw err;
+  }
+}
+
+type RowOutcome = "processed" | "deduplicated" | "error" | "skipped";
+
+// Process one claimed row: re-verify ownership, heartbeat, policy lookup,
+// safeFetch, createSnapshotFingerprint. All error paths route through
+// markQueueItemError so a per-row failure never aborts the batch. Returns
+// the outcome counter the orchestrator should increment.
+async function processOneRow(
+  db: ReturnType<typeof getDb>,
+  row: QueueRow,
+  archivePolicyFn: (sourceId: string) => Promise<{
+    archivePolicy: ArchivePolicy;
+    rawCloudPolicy: RawCloudPolicy;
+  }>
+): Promise<RowOutcome> {
+  // P2-13: Verify the row is still in 'processing' state before doing any
+  // outbound work. The stale-reclaim step resets rows to 'pending' after 1h;
+  // if another worker claimed and completed the row in the interim, skip to
+  // avoid duplicate fetches and redundant graph writes.
+  const stillProcessing = db
+    .prepare(`SELECT 1 FROM discovery_queue WHERE queue_id = ? AND status = 'processing'`)
+    .get(row.queue_id);
+  if (!stillProcessing) return "skipped";
+
+  // Heartbeat: touch updated_at before processing so the 1h stale-reclaim
+  // does not requeue a still-active row mid-batch.
+  db.prepare(
+    `UPDATE discovery_queue SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE queue_id = ?`
+  ).run(row.queue_id);
+
+  try {
+    // row.source_id is canonical src_<ULID> (rss-worker.enqueueDiscoveredItems
+    // is the only writer; the FK to source_material_policy enforces it).
+    const { archivePolicy, rawCloudPolicy } = await archivePolicyFn(row.source_id);
+
+    // P1-7: Enforce do_not_collect before any outbound fetch.
+    if (archivePolicy === "do_not_collect") {
+      markQueueItemError(row.queue_id, "skipped: do_not_collect policy");
+      return "error";
+    }
+
+    const { safeFetch, MAX_BYTES } = await import("../fetch/safe-fetch");
+    // P1-2: Use MAX_BYTES.html for document URLs — larger cap than rss (10MB vs 5MB).
+    const res = await safeFetch(row.url, { maxBytes: MAX_BYTES.html });
+
+    // P2-12: Require 2xx with non-empty body. Empty payloads must not be
+    // fingerprinted (they would all share one hash and pollute dedup state).
+    const empty2xx = res.status >= 200 && res.status < 300 && res.body.byteLength === 0;
+    if (
+      !(res.status >= 200 && res.status < 300) ||
+      NO_BODY_2XX.has(res.status) ||
+      empty2xx
+    ) {
+      markQueueItemError(
+        row.queue_id,
+        empty2xx ? `HTTP ${res.status} empty body` : `HTTP ${res.status}`
+      );
+      return "error";
+    }
+
+    const mimeType =
+      res.headers.get("Content-Type")?.split(";")[0]?.trim() ?? "application/octet-stream";
+
+    // P2-11: Use finalUrl (after redirects) as the canonical URL for snapshot identity.
+    const result = await createSnapshotFingerprint({
+      sourceId: row.source_id,
+      queueId: row.queue_id,
+      url: res.finalUrl,
+      title: row.title ?? undefined,
+      publishedAt: row.published_at ?? undefined,
+      accessedAt: new Date().toISOString(),
+      body: res.body,
+      contentKind: res.contentKind,
+      mimeType,
+      archivePolicy,
+      rawCloudPolicy,
+    });
+
+    return result.deduplicated ? "deduplicated" : "processed";
+  } catch (err) {
+    markQueueItemError(row.queue_id, err instanceof Error ? err.message : String(err));
+    return "error";
+  }
+}
+
+export async function processDiscoveryQueue(
+  archivePolicyFn: (sourceId: string) => Promise<{
+    archivePolicy: ArchivePolicy;
+    rawCloudPolicy: RawCloudPolicy;
+  }>
+): Promise<{ processed: number; deduplicated: number; errors: number }> {
+  const db = getDb();
+
+  reclaimStaleRows(db);
+  const pending = await claimBatchWithBusyRetry(db, BATCH_SIZE);
 
   let processed = 0;
   let deduplicated = 0;
   let errors = 0;
-
   for (const row of pending) {
-    // P2-13: Verify the row is still in 'processing' state before doing any outbound
-    // work. The stale-reclaim step resets rows to 'pending' after 1h; if another worker
-    // claimed and completed the row in the interim, skip to avoid duplicate fetches and
-    // redundant graph writes. The heartbeat below then re-anchors ownership for rows
-    // we do process.
-    const stillProcessing = db
-      .prepare(
-        `SELECT 1 FROM discovery_queue WHERE queue_id = ? AND status = 'processing'`
-      )
-      .get(row.queue_id);
-    if (!stillProcessing) continue;
-
-    // Heartbeat: touch updated_at before processing so the 1h stale-reclaim
-    // does not requeue a still-active row mid-batch (long fetch/Neo4j writes
-    // can exceed the threshold for batches of large items).
-    db.prepare(
-      `UPDATE discovery_queue SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE queue_id = ?`
-    ).run(row.queue_id);
-
-    try {
-      // row.source_id is canonical src_<ULID> (producer-side normalization in
-      // rss-worker.enqueueDiscoveredItems is now the only path that writes
-      // discovery_queue.source_id, and the FK to source_material_policy
-      // would reject anything else).
-      const { archivePolicy, rawCloudPolicy } = await archivePolicyFn(row.source_id);
-
-      // P1-7: Enforce do_not_collect before any outbound fetch.
-      if (archivePolicy === "do_not_collect") {
-        markQueueItemError(row.queue_id, "skipped: do_not_collect policy");
-        errors++;
-        continue;
-      }
-
-      const { safeFetch, MAX_BYTES } = await import("../fetch/safe-fetch");
-
-      // P1-2: Use MAX_BYTES.html for document URLs — larger cap than rss (10MB vs 5MB).
-      const res = await safeFetch(row.url, { maxBytes: MAX_BYTES.html });
-
-      // P2-12: Require 2xx with non-empty body; treat no-body 2xx (204, 205),
-      // empty 200, 3xx, 4xx, 5xx as errors. Empty payloads must not be
-      // fingerprinted (they would all share one hash and pollute dedup state).
-      const empty2xx =
-        res.status >= 200 && res.status < 300 && res.body.byteLength === 0;
-      if (
-        !(res.status >= 200 && res.status < 300) ||
-        NO_BODY_2XX.has(res.status) ||
-        empty2xx
-      ) {
-        markQueueItemError(
-          row.queue_id,
-          empty2xx ? `HTTP ${res.status} empty body` : `HTTP ${res.status}`
-        );
-        errors++;
-        continue;
-      }
-
-      const mimeType =
-        res.headers.get("Content-Type")?.split(";")[0]?.trim() ?? "application/octet-stream";
-
-      // P2-11: Use finalUrl (after redirects) as the canonical URL for snapshot identity.
-      const result = await createSnapshotFingerprint({
-        sourceId: row.source_id,
-        queueId: row.queue_id,
-        url: res.finalUrl,
-        title: row.title ?? undefined,
-        publishedAt: row.published_at ?? undefined,
-        accessedAt: new Date().toISOString(),
-        body: res.body,
-        contentKind: res.contentKind,
-        mimeType,
-        archivePolicy,
-        rawCloudPolicy,
-      });
-
-      if (result.deduplicated) deduplicated++;
-      else processed++;
-    } catch (err) {
-      markQueueItemError(
-        row.queue_id,
-        err instanceof Error ? err.message : String(err)
-      );
-      errors++;
-    }
+    const outcome = await processOneRow(db, row, archivePolicyFn);
+    if (outcome === "processed") processed++;
+    else if (outcome === "deduplicated") deduplicated++;
+    else if (outcome === "error") errors++;
+    // "skipped" is intentionally uncounted — another worker handled it.
   }
 
   return { processed, deduplicated, errors };
