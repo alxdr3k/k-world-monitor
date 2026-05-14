@@ -138,6 +138,7 @@ P0-M6 "2주 목표 lock (DEC-005)" 는 **사용자 명시 지시로 fixed**. 일
 - 사용자 결정 불필요 fix 일괄 처리 (commit bbdd1c0 + 93d368c): thin docs SHA + 누락 파일 + AC TEST 위치 + IMPLEMENTATION_PLAN status + HLD/PRD supersede drift + closeDb/closeDriver finally hook + CI workflow rename (advisory) + `docs/_generated/` regen.
 - 사용자 결정 필요 항목: `docs/questions/Q-042 ~ Q-048` 신규 등록 (commit bbdd1c0).
 - **2026-05-13 사용자 응답**: 7개 Q 일괄 결정 + Q-049 신규 (재방문 / 캐싱 / 변경 감지) — DEC-020 일괄 resolution 으로 lock. AC-043 / TEST-043 / REQ-028 proposed → defined/planned/must promote, NFR-003 본문 reflow, main push 정책 해제 (PR-only), Doppler secret store, doc-freshness 활성, 후속 슬라이스 4개 등록 (INFRA-1A.9 / INFRA-1B.3.x-audit / OPS-1A.2 refined / PUB-1A.5 entry).
+- **2026-05-13 사용자 후속 메타 의문**: "GPT/Claude 도 web search 가능한데 본 repo 의 수집 기능이 뭐가 다른가?" → Q-050 신규 등록 (AI 검색 + repo crawler 통합 architecture, 시나리오 1/2 + a/b/c/d 분류 + 다중 라운드 context propagation). Q-049 와 cross-cutting (article-level conditional fetch + force-revalidate option). resolution 은 별도 PR 에서 처리.
 
 ### 7) Lesson candidates (외부 KB 승격 후보 식별만)
 
