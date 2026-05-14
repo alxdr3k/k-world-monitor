@@ -203,24 +203,34 @@ Public (CF Pages, no /ops prefix):
 
 ### 6.2 모바일 우선 페이지 (간소화)
 
-**P0-M6 phasing 주의 (RESEARCH-1A.0)**: P0-M6 안에서는 본 모바일 페이지
-**전부 read-only** — `/ops/` (홈) 와 `/ops/sessions` / `/ops/sessions/:id`
-/ `/ops/turns/:tid` 의 view-only 렌더만 P0 안에 포함. `/ops/ask` 풀스크린
-입력 / "Add round" / "Ask" 버튼 / 모든 mutation flow 는 P1+ (RESEARCH-1A.1
-이후) 로 미룬다. 아래 페이지 명세는 P1+ 완성 형태 기준이며, **P0 read-only
-스코프** 항목은 명시.
+**P0-M6 phasing 주의 (RESEARCH-1A.0 / RESEARCH-1A.API0)**: P0-M6 안에서는
+본 모바일 페이지 **전부 read-only** + API0 가 노출하는 endpoint 만 사용
+(`GET /api/sessions` / `GET /api/sessions/:id` / `GET /api/publications`,
+RESEARCH-1A.API0 lock — turn-detail / round-timeline endpoint 는 P0
+없음). 모든 mutation flow / round timeline / turn-detail page 는 P1+
+(RESEARCH-1A.1+) 로 미룬다. 아래 페이지 명세는 P1+ 완성 형태 기준이며,
+**P0 read-only 스코프 별로** 명시.
 
 - `/` 홈 — "Continue last session" CTA + "New session" + recent 5 sessions
-  *(P0 = recent 5 sessions read-only 만; CTA / "New session" 버튼 P1+)*
+  *(P0 = recent 5 sessions read-only 만 — `GET /api/sessions`; CTA /
+  "New session" 버튼 P1+)*
 - `/ask` — 풀스크린 text input + send button + voice icon *(P1+ 전용 —
-  P0 안에는 없음)*
+  P0 없음, API0 mutation endpoint 미존재)*
 - `/sessions` — list view (title + mode + last activity + active marker)
-  *(P0 read-only 포함; active marker 는 표시만, switch 액션은 P1+)*
+  *(P0 read-only — `GET /api/sessions`; active marker 표시만, switch 액션
+  은 P1+)*
 - `/sessions/:id` — vertical timeline (round → turn) + "Add round" / "Ask"
-  버튼 fixed bottom *(P0 read-only = vertical timeline 표시만; "Add round"
-  / "Ask" 버튼 / round 추가 / turn 추가 mutation 전부 P1+)*
+  버튼 fixed bottom *(P0 read-only = `GET /api/sessions/:id` 의 session
+  header + status + intent 만; **round timeline / turn list 는 P0 미포함**
+  — RESEARCH-1A.0 plan lock "round timeline 미포함, P0-M6 안에서는
+  single-shot research_session 만, ExplorationRound P1+" 와 일치. "Add
+  round" / "Ask" / mutation 전부 P1+)*
 - `/turns/:tid` — user message + AI answer (markdown render) + artifact
-  link list *(P0 read-only 포함)*
+  link list *(P1+ 전용 — P0 없음, API0 에 `GET /api/turns/:tid` 미정의 +
+  RESEARCH-1A.0 plan 의 round timeline P1+ 와 일치)*
+- `/posts/:slug` — public publication 검토 *(P0 read-only — `GET /api/
+  publications` / public artifact, RESEARCH-1A.0 plan 의 "`/posts/:slug`
+  public 검토" 와 일치)*
 
 ### 6.3 데스크탑 우선 페이지 (full UX)
 
@@ -443,7 +453,15 @@ Same repo / shared design:
 
 본 spec 의 다음 항목 사용자 결정 후 정식 ADR 작성:
 
-1. Stack: 옵션 A~F 중 선택. 기본 권고: E (bun + Hono + HTMX + Tailwind)
+1. Stack: 옵션 A~F 중 선택 — **사용자 결정 Q-051 #6 pending**. 기본 권고:
+   **A' (Astro + React island, §13 Deployment topology Option B 와 일치)**
+   — round 13 reframe + 사용자 피드백 ("내가 HTMX 모르는 게 문제가 아니라
+   네가 HTMX 충분히 아는가") 이후 §13 topology 의 `src/shared/ui/` 가
+   `Astro public + React /ops 공유` Tailwind primitives 로 lock 되어,
+   동일 spec 안에서 §13 (React island) 와 §14 #1 (HTMX 권고) 가 충돌하면
+   `/ops` 구현 방향이 갈라짐. 본 round 에서 권고를 A' 로 align.
+   기존 옵션 E (HTMX) 는 historical 비교 항목으로 강등 (사용자가 Q-051 #6
+   에서 E 를 명시 선택할 경우 §13 `src/shared/ui/` 본문도 동시 reflow 의무).
 2. Hosting: **lock — Topology B (CF Pages public anchor + Hetzner private
    /ops + /api, same-origin)**. GPT 31 review (2026-05-14) + 사용자 명시
    ("나 이미 다른 서비스들 운영중인 hetzner 서버 있어") 로 결정 lock —
