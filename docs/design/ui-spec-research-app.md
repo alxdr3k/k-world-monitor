@@ -475,9 +475,11 @@ Same repo / shared design (DEC-022 stack lock):
      island / 0 shadcn/ui dep / 0 TanStack Query). P1+ RESEARCH-1A.1+ =
      full stack adoption (React island + shadcn/ui CLI scaffold + TanStack
      Query + SSE binding).
-   - 신규 ADR 발급 의무: 가칭 ADR-0029 (Research App /ops Stack) 를
+   - 신규 ADR 발급 의무: 가칭 ADR-0031 (Research App /ops Stack) 를
      RESEARCH-1A.1 슬라이스 시작 직전까지 발급 — DEC-022 가 anchor (별도
-     PR). 본 §14 #1 의 ADR 작성 의무 (line 433) 흡수.
+     PR). ADR-0029 / ADR-0030 은 이미 main 에 점유됨 (LLM prompt
+     injection containment / discovery worker concurrency model) — 다음
+     사용 가능 번호 ADR-0031. 본 §14 #1 의 ADR 작성 의무 (line 433) 흡수.
 2. Hosting: **lock — Topology B (CF Pages public anchor + Hetzner private
    /ops + /api, same-origin)**. GPT 31 review (2026-05-14) + 사용자 명시
    ("나 이미 다른 서비스들 운영중인 hetzner 서버 있어") 로 결정 lock —
