@@ -253,7 +253,9 @@ budget acceptance gate) 를 본 PR 안에서 확정한다.
     "@radix-ui/react-popover": "^1.x",
     "@radix-ui/react-dropdown-menu": "^2.x",
     "@radix-ui/react-tooltip": "^1.x",
-    "@radix-ui/react-slot": "^1.x"
+    "@radix-ui/react-slot": "^1.x",
+
+    "vaul": "^1.x"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",
@@ -269,8 +271,9 @@ budget acceptance gate) 를 본 PR 안에서 확정한다.
   안에서 `bun.lock` 결과로 확정 (한 번 lock 되면 그 lock 이 본 ADR
   보완 anchor).
 - shadcn-ui CLI 가 추가 `@radix-ui/react-*` peer dep 을 자동 install
-  — 본 표는 v0 기준 최소집합. Sheet / Drawer 도입 시 `@radix-ui/
-  react-dialog` (Sheet 의 base) 그대로 사용 (vaul 추가 검토).
+  — 본 표는 v0 기준 최소집합. **Sheet** = `@radix-ui/react-dialog` 기반
+  (이미 포함). **Drawer** = `vaul ^1.x` (shadcn-ui v0.9 표준 base) lock —
+  Radix Dialog 기반 fallback 미사용.
 
 #### 3.2 astro.config.ops.ts shape (Hetzner build target)
 
@@ -410,7 +413,7 @@ src/shared/ui/
   ├── button.tsx                  (shadcn/ui — Radix Slot 기반)
   ├── dialog.tsx                  (Radix Dialog primitive)
   ├── sheet.tsx                   (Radix Dialog 기반, side="bottom/right")
-  ├── drawer.tsx                  (vaul or Radix — v0 시점 결정)
+  ├── drawer.tsx                  (vaul ^1.x — shadcn-ui v0.9 표준)
   ├── popover.tsx                 (Radix Popover)
   ├── dropdown-menu.tsx           (Radix DropdownMenu)
   ├── tooltip.tsx                 (Radix Tooltip)
@@ -431,10 +434,14 @@ src/shared/ui/
   디렉토리 안 파일은 repo 안 source 로 lock, vendor update risk 0
   (DEC-022 Critique 2 lock 일치).
 
-#### 3.5 `ops/lib/query/` TanStack Query 구조
+#### 3.5 `src/ops/lib/query/` TanStack Query 구조
+
+canonical 경로 = **`src/ops/lib/query/`** (UI-spec §7.4 / §13 anchor 와
+일치). top-level `ops/` tree 생성 금지 — Astro project root 의
+`src/ops/*` 안에서만 운영.
 
 ```
-ops/lib/query/
+src/ops/lib/query/
   ├── client.ts                   (queryClient 인스턴스 + defaults)
   ├── provider.tsx                (<QueryClientProvider> root island)
   ├── use-event-stream.ts         (SSE EventSource → setQueryData hook)
