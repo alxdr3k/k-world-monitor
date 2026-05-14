@@ -31,22 +31,28 @@ INV-0012-4).
         │ RSS / API / sitemap / manual_intake / `pipeline feedback`   │
         └────────────────────────┬────────────────────────────────────┘
                                  ▼
-                    ┌──────────────────────────────────┐
-                    │ Source Registry (2-store seam)   │
-                    │  Neo4j Source node               │
-                    │    (src_<ULID> PK, Tier 0-D,     │
-                    │     collectability_score,        │
-                    │     source_perspective,          │
-                    │     access_method)               │
-                    │  SQLite policy tables (FK src_id)│
-                    │    source_material_policy        │
-                    │    source_registry_slug_map      │
-                    │    source_policy_rules           │
-                    │    policy_decisions (audit)      │
-                    │  Seed: data/sources_seed.yaml    │
-                    │   (INFRA-1B.1 seeds SQLite;      │
-                    │    Neo4j Source ← INFRA-1B.2+)   │
-                    └───────────┬──────────────────────┘  (ADR-0016, 0017, 0019)
+                    ┌──────────────────────────────────────┐
+                    │ Source Registry (2-store seam)       │
+                    │  Neo4j Source node                   │
+                    │    (src_<ULID> PK, Tier 0-D,         │
+                    │     collectability_score,            │
+                    │     source_perspective,              │
+                    │     access_method)                   │
+                    │  SQLite tables (linked by src_id     │
+                    │   where present — not enforced FK):  │
+                    │    source_material_policy (src_id)   │
+                    │    source_registry_slug_map (src_id  │
+                    │     value, not constraint-FK)        │
+                    │    source_policy_rules (pattern-     │
+                    │     based, no source-id column)      │
+                    │    policy_decisions (src_id nullable │
+                    │     audit ledger)                    │
+                    │  Seed: data/sources_seed.yaml        │
+                    │   (INFRA-1B.1 seeds SQLite;          │
+                    │    Neo4j Source bootstrap = 후속     │
+                    │    슬라이스 미구현 — 운영자 manual   │
+                    │    Cypher 필요)                      │
+                    └───────────┬──────────────────────────┘  (ADR-0016, 0017, 0019, 0021)
                                 ▼
                     ┌────────────────────────────┐
                     │ Collection Queue (SQLite)  │
@@ -153,7 +159,7 @@ Storage seams:
 | 컴포넌트 | 책임 | 의존성 |
 |---|---|---|
 | Discovery | RSS / API / sitemap polling, manual intake CLI. **검색 grounding 보조 = Gemini 2.5 Flash 의 Google Search tool** (선택, Tier 3, 메인/리뷰 X — ADR-0023 INV-0023-5) | Source Registry, Google AI SDK (선택) |
-| Source Registry (Neo4j ↔ SQLite 2-store seam) | **Logical Source Registry** = Neo4j Source node (`src_<ULID>` PK, publisher_name, urls_root[], reliability_tier, collectability_score, source_perspective, access_method) **+** SQLite policy tables (`source_material_policy` archive_policy / raw_cloud_policy / external_llm_policy FK src_id, `source_registry_slug_map` slug→src_id stable mapping for idempotent seed re-run DEC-015, `source_policy_rules` auto-tighten propose/confirm ADR-0021, `policy_decisions` immutable audit ledger ADR-0017 INV-0017-3). Bootstrap input `data/sources_seed.yaml` → INFRA-1B.1 `seedSources()` populates SQLite tables first; Neo4j Source nodes follow in INFRA-1B.2+ discovery worker flow (see `docs/current/DATA_MODEL.md` "Source Registry — 2-store logical seam") | Neo4j Source 노드 + SQLite source_material_policy / source_registry_slug_map / source_policy_rules / policy_decisions |
+| Source Registry (Neo4j ↔ SQLite 2-store seam) | **Logical Source Registry** = Neo4j Source node (`src_<ULID>` PK, publisher_name, urls_root[], reliability_tier, collectability_score, source_perspective, access_method) **+** SQLite tables linked by `src_id` value (not constraint-FK): `source_material_policy` (archive_policy / raw_cloud_policy / external_llm_policy, src_id NOT NULL — ADR-0017), `source_registry_slug_map` (slug→src_id stable mapping for idempotent seed re-run, DEC-015), `policy_decisions` (immutable audit ledger, src_id nullable — ADR-0017 INV-0017-3). `source_policy_rules` (ADR-0021) 는 pattern-based rule template store 로 source_id 컬럼 자체가 없음 — seam 의 직접 참여자가 아니라 rule template store. Bootstrap: `data/sources_seed.yaml` → INFRA-1B.1 `seedSources()` 는 SQLite 만 채움. **Neo4j Source node bootstrap 은 현재 미구현** — `src/discovery/worker/snapshot-fingerprint.ts` P1-3 guard 가 Source 부재 시 `source_not_found_in_graph` throw, 후속 슬라이스 또는 운영자 manual Cypher 필요 (Codex round 1 P1 review, PR #38). 자세한 composition / FK seam contract / Why split 은 `docs/current/DATA_MODEL.md` "Source Registry — 2-store logical seam" 참조 | Neo4j Source 노드 + SQLite source_material_policy / source_registry_slug_map / policy_decisions (+ source_policy_rules rule template store, source-agnostic) |
 | Collection Queue | fetch 대상 큐 (priority, dedup, throttle) | SQLite queue 테이블 |
 | Policy Gate | mode-aware 검사 (inline_block / inline_warn / batch_report) — 8 위험 행동 트리거 inline_block | SQLite source_policy + policy_decisions ledger, Neo4j AccessIntervention 노드 |
 | Fetcher | URL → fingerprint Snapshot 노드 (R2 binary는 permitted artifact만) | Neo4j Snapshot + R2, SQLite policy_decisions |
