@@ -50,8 +50,10 @@ injection containment / discovery worker concurrency / research app stack)
   4-tier source layer + Neo4j graph store — ADR-0025 supersedes ADR-0011
   object model + ADR-0012 + ADR-0013); `AC-002` (Neo4j FTS p95 <1s,
   SPIKE-001 미실시 — INFRA-1A.2 소스 코드 위에서 검증 대기); `AC-005`
-  (ID prefix lint, TEST-005 통과 ✓); `AC-032` (R2 upload audit ledger,
-  Q-044 INFRA-1B.3.x-audit slice 미진입)
+  (ID prefix lint, TEST-005 통과 ✓); `AC-032` (R2 upload audit ledger
+  신규 slice 미진입 — slice ID TBD, 진입 직전 lock — TRACE-040 anchor,
+  Q-044 는 이미 DEC-020 으로 resolved. Implementation Plan 의 Risks
+  Q-042~Q-048 entry 와 일치)
 - next gate (P0-M2 portion): `AC-001`, `AC-020` (P0 fallback only —
   raw_body_hash diff; canonical_text_hash primary 는 P1+), `AC-022`,
   `AC-023`, `AC-024` (P0-M2 게이트 — INFRA-1B 슬라이스 일괄 landed 후
