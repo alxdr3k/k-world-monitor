@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: 5aa70ac (2026-05-14) — PR #37 doc-drift fix (CI required check 3-state separation + ci.yml policy/admin task distinction). 코드 변경 없음 (5aa70ac 까지 동일한 13d61af 코드 baseline) — verification 은 thin doc content vs current codebase 일치 확인.
+> Last verified against code: 13d61af (code baseline, 2026-05-13). Thin-doc edits since: 5aa70ac → ceaa17c → this commit (2026-05-14, PR #37 doc-drift fix — CI required check 3-state separation + ci.yml policy/admin task distinction). **코드 baseline (13d61af) 이후 코드 변경 없음** — 본 thin doc 의 verification subject 는 code baseline `13d61af`, doc edits 는 동일 baseline 위 docs-only 누적. 다음 코드 변경 시점에 verification baseline SHA 갱신.
 
 ## Testing policy
 
