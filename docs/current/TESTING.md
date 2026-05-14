@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: 13d61af (2026-05-13) — comprehensive review backfill (18 test files / 200+ cases landed)
+> Last verified against code: 5aa70ac (2026-05-14) — PR #37 doc-drift fix (CI required check 3-state separation + ci.yml policy/admin task distinction). 코드 변경 없음 (5aa70ac 까지 동일한 13d61af 코드 baseline) — verification 은 thin doc content vs current codebase 일치 확인.
 
 ## Testing policy
 

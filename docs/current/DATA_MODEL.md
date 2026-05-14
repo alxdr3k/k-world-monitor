@@ -1,6 +1,6 @@
 # Data Model
 
-> Last verified against code: 13d61af (2026-05-13) — comprehensive review backfill (v2~v6 마이그레이션 + crawl_state / discovery_queue 추가 반영)
+> Last verified against code: 5aa70ac (2026-05-14) — PR #37 doc-drift fix (discovery_queue current/planned column split: worker_id 가 P1-M2-hardening planned column 임을 명시). 코드 변경 없음 (5aa70ac 까지 동일한 13d61af 코드 baseline) — verification 은 thin doc content vs current codebase 일치 확인.
 
 ## Source of truth
 
