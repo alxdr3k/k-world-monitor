@@ -460,7 +460,7 @@ Same repo / shared design (DEC-022 stack lock):
                                primitive 기반 Dialog / Sheet / Drawer /
                                Popover / DropdownMenu. P1+ RESEARCH-1A.1
                                부터 도입, P0-M6 안에서는 plain Tailwind 만)
-  ops/lib/query/              (TanStack Query v5 provider + queryClient +
+  src/ops/lib/query/          (TanStack Query v5 provider + queryClient +
                                SSE binding hook — useEventStream + setQueryData
                                표준 패턴. P1+ RESEARCH-1A.1 부터 도입)
 ```
@@ -501,7 +501,7 @@ Same repo / shared design (DEC-022 stack lock):
      body 본격 작성 + `status: accepted` promote 완료. INV-0031-1~7
      (Critique 1~6 흡수 + bundle budget) + §3.1 package.json caret 범위
      + §3.2 astro.config.ops.ts shape + §3.3 client:* directive policy
-     페이지별 표 + §3.4 src/shared/ui layout + §3.5 ops/lib/query 구조
+     페이지별 표 + §3.4 src/shared/ui layout + §3.5 src/ops/lib/query 구조
      + §3.6 Lighthouse mobile bundle budget acceptance gate 모두 lock.
      ADR-0029 / ADR-0030 은 main 에 점유됨 (LLM prompt injection
      containment / discovery worker concurrency model) — 본 ADR 번호 =

@@ -165,7 +165,7 @@ accepted — 2026-05-14
 reservation 만 한 placeholder stub (`status: proposed`) 상태였고, 본 PR
 에서 6 layer stack lock + INV-0031-1~7 + 구체 implementation guide
 (package.json / astro.config.ops.ts / client:* directive policy /
-`src/shared/ui/` layout / `ops/lib/query/` 구조) + bundle budget
+`src/shared/ui/` layout / `src/ops/lib/query/` 구조) + bundle budget
 acceptance gate 까지 본문 확장하여 `status: accepted` 로 promote.
 
 ADR-0029 / ADR-0030 은 main 에 이미 점유 (각 LLM prompt injection
@@ -185,7 +185,7 @@ DEC-022 자체는 결정 본문 + 6 점 rationale + Critique 1~6 + canonical
 lock 문구를 보유 (`docs/decisions/DEC-022.md`). 본 ADR 는 그 lock 을
 ADR layer 에 reflect 하면서, DEC 가 일부러 deferred 한 구체 구현 anchor
 (package.json dep version / astro.config.ops.ts shape / client:*
-directive policy / src/shared/ui layout / ops/lib/query 구조 / bundle
+directive policy / src/shared/ui layout / src/ops/lib/query 구조 / bundle
 budget acceptance gate) 를 본 PR 안에서 확정한다.
 
 ### 본 ADR 와 DEC-022 의 분담
@@ -195,7 +195,7 @@ budget acceptance gate) 를 본 PR 안에서 확정한다.
 | 6 layer stack 결정 | **canonical** (Decision lock 표 + rationale 6 점) | mirror (INV-0031-1) |
 | Critique 1 (mobile LTE hydration) | mitigation 방침 lock | **enforce** — page-level directive policy 표 + INV-0031-2 + INV-0031-7 bundle budget |
 | Critique 2 (shadcn/ui copy-paste anchor) | `src/shared/ui/` 위치 lock | **enforce** — `components.json` aliases + 디렉토리 layout + INV-0031-3 |
-| Critique 3 (TanStack Query phasing) | P0-M6 0 dep / P1+ adoption lock | **enforce** — INV-0031-4 + `ops/lib/query/` 구조 정의 |
+| Critique 3 (TanStack Query phasing) | P0-M6 0 dep / P1+ adoption lock | **enforce** — INV-0031-4 + `src/ops/lib/query/` 구조 정의 |
 | Critique 4 (ADR-0031 발급 시점) | RESEARCH-1A.1 슬라이스 시작 직전까지 deferred | **본 ADR 발급으로 해소** |
 | Critique 5 (PWA service worker 호환) | RESEARCH-1A.4 슬라이스 spec 안 처리 의무 | **anchor** — INV-0031-5 (sync 의무) |
 | Critique 6 (Voice input UI 통합) | shadcn `<Button>` + MediaRecorder 자연 | **enforce** — INV-0031-6 (`client:only="react"` 의무) |
@@ -213,7 +213,7 @@ budget acceptance gate) 를 본 PR 안에서 확정한다.
 | Interactive layer | **React 18 island** | `@astrojs/react` integration. `client:*` directive 로 page-level hydration cost 제어 — §3.3 directive policy 표 |
 | Styling | **Tailwind CSS** | Astro public site 와 동일 design token (`tailwind.config.ts` 단일 source) |
 | Component primitives | **shadcn/ui + Radix UI** | shadcn/ui CLI 가 React component 를 `src/shared/ui/` 로 copy-paste — §3.4 layout |
-| Server state / cache | **TanStack Query v5** | `ops/lib/query/` provider + queryClient + SSE binding hook — §3.5 구조. P1+ RESEARCH-1A.1 도입 (INV-0031-4) |
+| Server state / cache | **TanStack Query v5** | `src/ops/lib/query/` provider + queryClient + SSE binding hook — §3.5 구조. P1+ RESEARCH-1A.1 도입 (INV-0031-4) |
 | Realtime transport | **SSE (Server-Sent Events)** | Q-050 turn_event durable log 와 binding. WebSocket 도입 X (DEC-022 §14 #6 일치) |
 
 ### 2. Phasing (DEC-022 일치, INV-0031-4 enforce)
