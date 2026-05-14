@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: __COMMIT_SHA__ (2026-05-14) — INFRA-1B.3.x-audit landed (R2 upload audit ledger, AC-032 / NFR-008 evidence, Q-044 → DEC-020 / TRACE-040). Previous code baseline = 13d61af (2026-05-13) — comprehensive review backfill.
+> Last verified against code: d414223b8990c2f88d1a3ef502964cfb0788d9ab (2026-05-14) — INFRA-1B.3.x-audit landed (R2 upload audit ledger, AC-032 / NFR-008 evidence, Q-044 → DEC-020 / TRACE-040). Previous code baseline = 13d61af (2026-05-13) — comprehensive review backfill.
 
 ## Runtime stack
 
