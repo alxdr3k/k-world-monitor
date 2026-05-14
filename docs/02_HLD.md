@@ -36,8 +36,9 @@ INV-0012-4).
                     │  Neo4j Source node                   │
                     │    (property `source_id` PK with     │
                     │     `src_<ULID>` value format,       │
-                    │     Tier 0-D, collectability_score,  │
-                    │     source_perspective, access_method)│
+                    │     name, url, reliability_tier      │
+                    │     (Tier 0-D), collectability_score,│
+                    │     source_perspective)              │
                     │  SQLite tables (linked by `source_id`│
                     │   value where present — not          │
                     │   enforced FK):                      │
