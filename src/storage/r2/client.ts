@@ -2,8 +2,10 @@
  * Cloudflare R2 client wrapper (INFRA-1A.3).
  * Enforces permitted-artifact prefix policy on every write (ADR-0012 INV-0012-4).
  *
- * Credentials from env (Doppler intelligence-pipeline/dev):
- *   S3_ACCOUNT_ID   — Cloudflare account ID
+ * Credentials from env (Doppler — see docs/05_RUNBOOK.md "Doppler integration"):
+ *   S3_ENDPOINT     — full S3 endpoint URL
+ *                     (e.g. https://<accountid>.r2.cloudflarestorage.com,
+ *                      custom domain, or S3-compatible mock)
  *   S3_ACCESS_KEY   — R2 access key ID
  *   S3_SECRET_KEY   — R2 secret access key
  *   S3_BUCKET       — R2 bucket name
@@ -25,9 +27,9 @@ export interface R2GetResult {
 }
 
 function buildEndpoint(): string {
-  const accountId = process.env["S3_ACCOUNT_ID"];
-  if (!accountId) throw new Error("S3_ACCOUNT_ID env var not set");
-  return `https://${accountId}.r2.cloudflarestorage.com`;
+  const endpoint = process.env["S3_ENDPOINT"];
+  if (!endpoint) throw new Error("S3_ENDPOINT env var not set");
+  return endpoint;
 }
 
 function buildClient(): InstanceType<typeof Bun.S3Client> {
@@ -94,7 +96,7 @@ export async function r2Delete(key: string): Promise<void> {
  */
 export function r2CredentialsAvailable(): boolean {
   return Boolean(
-    process.env["S3_ACCOUNT_ID"] &&
+    process.env["S3_ENDPOINT"] &&
       process.env["S3_ACCESS_KEY"] &&
       process.env["S3_SECRET_KEY"] &&
       process.env["S3_BUCKET"]

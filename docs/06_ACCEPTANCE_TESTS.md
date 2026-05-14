@@ -62,6 +62,7 @@ Then  <기대 결과>
 | AC-041 | DEC-012 (CQ-006) | Given publication preflight. When forecast language 검사. Then **과장 forecast 없음** — 단정적 prediction ("폭락한다") X, 확률 / 조건 / horizon 명시 ("X 조건 시 1~3년 내 가격 -30% 시나리오 가능성 ↑") O | TEST-041 (manual v0) | defined |
 | AC-042 | DEC-012 (CQ-007) | Given publication preflight. When 글 말미 / 별도 section 검사. Then **correction 가능성 / 불확실성 명시** — "본 thesis 의 retraction trigger" 또는 "이 글이 틀릴 수 있는 시나리오" section 존재 | TEST-042 (manual v0) | defined |
 | AC-044 | ADR-0027 / REQ-023 | Given Dossier 합성. When 각 thesis 후보별 evidence_role 분류 검사. Then (a) supporting_evidence ≥ 3 claim + opposing_evidence ≥ 2 claim + monitoring_signal ≥ 3 claim **minimum coverage 충족** (미달 시 Dossier reject → manual review queue), (b) 모든 `:EVIDENCE_FOR` relationship 의 `evidence_role` 필드 (6 enum 중 하나) + `assigned_by = operator_lock` (LLM-only 진입 차단, INV-0027-5), (c) EvidencePack v0 4-section 이 evidence_role grouping 기준으로 생성 (REQ-023 본문 + ADR-0027 INV-0027-3) | TEST-044 | defined |
+| AC-043 | ADR-0027 / REQ-028 | Given Claim → Thesis 후보 link. When `:EVIDENCE_FOR` relationship 생성. Then `evidence_role` 필드 (6 enum: supporting / opposing / mitigating / amplifying / monitoring / context) 가 항상 채워지고, NULL 또는 enum 외 값이면 schema 검증 fail. operator_lock (assigned_by = operator_lock, INV-0027-5) 강제 — LLM-only progression 차단. AGG-1A.1 (Dossier 합성) 슬라이스 안에서 자동 검증 (DEC-020 Q-043 resolution) | TEST-043 | defined |
 
 ## Status vocabulary
 
@@ -82,9 +83,9 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 |---|---|---|---|
 | TEST-001 | **10-stage object trace anchor** + EditorialIntent stage 존재 + `:HAS_INTENT` / `:USES_INTENT` relationship + `decided_by_operator = true` flag (ADR-0025) | `tests/pipeline/object_model_test.ts` (planned) | AC-001 |
 | TEST-002 | Neo4j native FTS 1만 graph object 검색 bench | `tests/bench/neo4j_fts_search_bench.ts` (planned) | AC-002 |
-| TEST-003 | R2 sha256 round-trip | `tests/storage/r2_integrity_test.ts` (planned) | AC-003 |
+| TEST-003 | R2 sha256 round-trip | `tests/unit/r2_policy_test.ts` ✓ 32 tests pass (INFRA-1A.3, sha256 round-trip + permitted prefix) | AC-003 |
 | TEST-004 | promoted only markdown | `tests/storage/markdown_promoted_only_test.ts` (planned) | AC-004 |
-| TEST-005 | ID prefix lint | `tests/lint/id_prefix_test.ts` (planned) | AC-005 |
+| TEST-005 | ID prefix lint | `tests/lint/id_prefix_test.ts` ✓ 28 tests pass (INFRA-1A.2) | AC-005 |
 | TEST-006 | confidence 분해 lint | `tests/lint/no_single_confidence_test.ts` (planned) | AC-006 |
 | TEST-007 | evidence quote 200자 + 3-tuple | `tests/extraction/evidence_test.ts` (planned) | AC-007 |
 | TEST-008 | frontmatter 관계 배열 lint | `tests/lint/no_frontmatter_relation_array_test.ts` ✓ 9 tests pass | AC-008 |
@@ -96,15 +97,15 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-015 | review queue throttling | `tests/review/throttling_test.ts` (planned) | AC-015 |
 | TEST-016 | stale 트리거 3종 | `tests/stale/triggers_test.ts` (planned) | AC-016 |
 | TEST-018 | 9-stage 5-step trace (Publication → Source) | `tests/pipeline/trace_test.ts` (planned) | AC-018 |
-| TEST-019 | run ledger cost throttling | `tests/cost/ledger_test.ts` (planned) | AC-019 |
-| TEST-020 | Snapshot fingerprint durability + content_hash diff + permitted artifact R2 round-trip | `tests/storage/snapshot_fingerprint_test.ts` (planned) | AC-020 |
+| TEST-019 | run ledger cost throttling | `tests/unit/run_ledger_test.ts` ✓ 29 tests pass (OPS-1A.1, cost throttling worker는 OPS-1A.2 슬라이스에서 추가) | AC-019 |
+| TEST-020 | Snapshot fingerprint durability + content_hash diff + permitted artifact R2 round-trip | `tests/unit/snapshot_fingerprint_test.ts` ✓ tests pass (INFRA-1B.3) + `tests/unit/r2_policy_test.ts` ✓ 32 tests (INFRA-1A.3) | AC-020 |
 | TEST-021 | extractor interface dry-run | `tests/extraction/interface_test.ts` (planned) | AC-021 |
-| TEST-022 | Source registry Tier + collectability + perspective | `tests/source/registry_test.ts` (planned) | AC-022 |
+| TEST-022 | Source registry Tier + collectability + perspective | `tests/unit/source_registry_test.ts` ✓ 22 tests pass (INFRA-1B.1, seed dry-run + enum validation + YAML structure) | AC-022 |
 | TEST-023 | policy gate mode-aware + 8 위험 행동 | `tests/policy/gate_test.ts` (planned) | AC-023 |
-| TEST-024 | access_intervention batch report + severity | `tests/intervention/batch_test.ts` (planned) | AC-024 |
-| TEST-025 | manual_claim_entry 3-way 분리 CLI | `tests/feedback/cli_test.ts` (planned) | AC-025 |
-| TEST-026 | Scenario impact_targets + Thesis stance/market_stance + **Thesis↔EditorialIntent linkage + intent.bidirectional_weight_intent ↔ thesis.stance align + EditorialIntent.decided_by_operator = true** (ADR-0025 INV-0025-2/-4/-6) | `tests/scenario/bidirectional_test.ts` (planned) | AC-026 |
-| TEST-027 | Tier A seed source_perspective 분포 | `tests/source/perspective_distribution_test.ts` (planned) | AC-027 |
+| TEST-024 | access_intervention batch report + severity | `tests/unit/access_intervention_test.ts` ✓ 26 tests pass (INFRA-1B.5) | AC-024 |
+| TEST-025 | manual_claim_entry 3-way 분리 CLI | `tests/unit/feedback_test.ts` ✓ tests pass (INFRA-1B.6) | AC-025 |
+| TEST-026 | Scenario impact_targets + Thesis stance/market_stance + **Thesis↔EditorialIntent linkage + intent.bidirectional_weight_intent ↔ thesis.stance align + EditorialIntent.decided_by_operator = true** (ADR-0025 INV-0025-2/-4/-6) | `tests/unit/bidirectional_schema_test.ts` ✓ 27 tests pass (INFRA-1A.7, schema 부분 — ADR-0025 linkage/align/operator_lock 측면 추가 검증은 AGG-1A.4/1A.5 슬라이스에서 보강) | AC-026 |
+| TEST-027 | Tier A seed source_perspective 분포 | `tests/unit/perspective_distribution_test.ts` ✓ 5 assertions pass (INFRA-1A.6, risk 19% / opportunity 29% / neutral 42% / mixed 10%) | AC-027 |
 | TEST-028 | EvidencePack v0 4-section + LLM mode prompt | `tests/rag/evidence_pack_test.ts` (planned) | AC-028 |
 | TEST-029 | metrics 6 카테고리 + v0 9+ metrics 측정 | `tests/metrics/v0_metrics_test.ts` (planned) | AC-029 |
 | TEST-030 | policy learning Pattern 1 rule_candidate | `tests/policy_learning/pattern_1_test.ts` (planned) | AC-030 |
@@ -121,6 +122,7 @@ staging / manual acceptance가 아직 실행되지 않은 상태인지 분리한
 | TEST-041 | Editorial Quality Rubric CQ-006 — 과장 forecast language 없음 manual verify | manual review (v0) / LLM judge (v1+) | AC-041 |
 | TEST-042 | Editorial Quality Rubric CQ-007 — correction 가능성 / 불확실성 section 존재 | `tests/publishing/editorial_rubric_cq7_test.ts` (planned, section heading lint) | AC-042 |
 | TEST-044 | Dossier evidence_role minimum coverage (supporting ≥3 / opposing ≥2 / monitoring ≥3) + operator_lock enforcement (LLM-only progression 차단) | `tests/aggregation/dossier_evidence_role_test.ts` (planned) | AC-044 |
+| TEST-043 | evidence_role schema lock — `:EVIDENCE_FOR` relationship 의 `evidence_role` enum (6 값) 검증 + NULL/enum 외 값 reject + operator_lock assignment 강제 (LLM-only 차단) | `tests/aggregation/evidence_role_schema_test.ts` (planned, AGG-1A.1 슬라이스에서 구현 — DEC-020) | AC-043 |
 
 ## CI/CD gates
 

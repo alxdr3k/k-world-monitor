@@ -1,0 +1,70 @@
+# CI — bun typecheck + bun test (advisory; branch-protection promotion is Q-048).
+#
+# Generated from .github/workflows/ci.yml.example (boilerplate skeleton) and
+# adapted to the bun + TypeScript + bun:sqlite + neo4j-driver stack used by
+# this repo. The skeleton's placeholder steps were replaced with the actual
+# commands in package.json. invariant-check is in a separate workflow.
+
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned per docs/current/TESTING.md install policy. Bump alongside
+          # fixture verification when upgrading Bun.
+          bun-version: '1.3'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit + lint tests
+        # Bun native runner. 18 file / 200+ cases as of 13d61af (2026-05-13).
+        # Some tests require Neo4j or R2 credentials at runtime; those are
+        # gated inside the test bodies (skipped when env vars are absent).
+        run: bun test
+
+      - name: Migration dry-run
+        # Verifies v1~v6 SQL + v1 Cypher migration files parse and are
+        # idempotent. Does not connect to Neo4j (skipped when NEO4J_PASSWORD
+        # unset).
+        run: bun run migrate --dry-run
+
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-debug-${{ github.run_id }}
+          path: |
+            logs/
+            coverage/
+            test-results/
+          if-no-files-found: ignore

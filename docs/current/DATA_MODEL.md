@@ -1,11 +1,26 @@
 # Data Model
 
-> Last verified against code: a581e72 (2026-05-12) — INFRA-1A.2 schema commit
+> Last verified against code: 13d61af (2026-05-13) — comprehensive review backfill (v2~v6 마이그레이션 + crawl_state / discovery_queue 추가 반영)
 
 ## Source of truth
 
-`migrations/neo4j/v1_schema.cypher` 와 `migrations/sqlite/v1_schema.sql` 이
-canonical 스키마다. 이 문서는 얇은 navigation layer다.
+`migrations/neo4j/v1_schema.cypher` (graph) + `migrations/sqlite/v{1..6}_*.sql`
+(relational) 가 canonical 스키마다. 이 문서는 얇은 navigation layer다.
+
+마이그레이션 순서 (모두 idempotent, `bun run migrate:sqlite` / `:neo4j`):
+
+| Version | File | Purpose |
+|---|---|---|
+| v1 | `migrations/sqlite/v1_schema.sql` | 17 tables core schema (INFRA-1A.2) |
+| v2 | `migrations/sqlite/v2_enum_constraints.sql` | enum-validating triggers (run_ledger, cross_vendor_review_ledger, INFRA-1A.5) |
+| v3 | `migrations/sqlite/v3_source_registry_slug_map.sql` | slug→source_id 안정 매핑 (INFRA-1B.1, DEC-015) |
+| v4 | `migrations/sqlite/v4_run_ledger_completed_at_idx.sql` | run_ledger(completed_at, vendor) composite index (OPS-1A.1) |
+| v5 | `migrations/sqlite/v5_crawl_state.sql` | crawl_state — etag/Last-Modified + backoff (INFRA-1B.2b, ADR-0030 INV-0030-5) |
+| v6 | `migrations/sqlite/v6_discovery_queue.sql` | discovery_queue — 발견 URL pending fingerprint (INFRA-1B.2) |
+
+Neo4j 단일 마이그레이션 v1 은 INFRA-1A.2 + INFRA-1A.7 갱신 포함 (13 node UNIQUE
++ 5 edge UNIQUE + 5 FTS + Scenario property schema + Thesis stance + Source
+perspective).
 
 ADR-0011(superseded by ADR-0025), ADR-0012, ADR-0013, ADR-0017, ADR-0018,
 ADR-0020, ADR-0021, ADR-0023, ADR-0024, ADR-0025 가 의도된 모델의 canonical 설계다.
@@ -67,6 +82,9 @@ FTS indexes (Lucene): claim_fts, source_fts, document_fts, scenario_fts, thesis_
 | `research_session` | ADR-0021 | interactive session scoping |
 | `raw_cache_items` | ADR-0021 | ephemeral URL 참조 (raw text 미저장, DEC-007 lifecycle) |
 | `schema_migrations` | — | applied migration version tracking |
+| `source_registry_slug_map` | DEC-015 | slug↔source_id 안정 매핑 (v3, INFRA-1B.1) |
+| `crawl_state` | ADR-0030 INV-0030-5 | discovery scheduler per-source state — last_polled_at / last_etag / last_modified_header / consecutive_failures / next_eligible_at (v5, INFRA-1B.2b) |
+| `discovery_queue` | INFRA-1B.2 / INFRA-1B.3 | 발견 URL pending Snapshot fingerprint — source_id / url / status / worker_id (P1-M2-hardening) / discovered_at / updated_at (v6, partial unique index `(source_id, url) WHERE status IN ('pending','processing')`) |
 
 ## Lifecycle states
 
@@ -85,5 +103,10 @@ All prefixes enforced at Neo4j (UNIQUE constraint) and in TEST-005 (`tests/lint/
 
 ## Pending
 
-- `docs/_generated/schema.md` — 마이그레이션 파일에서 자동 생성 (INFRA-1A.2 이후 단계)
+- `docs/_generated/schema.md` — 마이그레이션 파일에서 자동 생성 (`bun run invariant:regen` 안으로 흡수 검토)
 - SPIKE-001 결과 입력 후 Neo4j FTS 인덱스 tuning (AC-002 검증)
+- Q-041 / DEPLOY-1A.2 — millis-bearing ISO timestamp 통일 + CHECK constraint
+  적용 (현재 discovery_queue 는 strftime no-millis, crawl_state 는
+  millis-bearing — 통일 전 단계)
+- Q-044 — policy_decisions 의 R2 upload audit row INSERT 위치 결정 후
+  recordR2UploadDecision() 도입 시 본 표 갱신

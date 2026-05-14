@@ -146,6 +146,7 @@ ADR-0019).
 | REQ-025 | Policy learning은 rule-based, "auto-tighten allowed, auto-relax prohibited". v0 Pattern 1 (source policy refinement). 자동 적용 X — propose만, accept는 사용자. 잘못된 rule은 자동 demote | must | AC-030 | R15 | ADR-0021 |
 | REQ-026 | 도메인 카테고리는 v0에서 **4 메타 카테고리** (정책 / 경제 / 사회 / 대중문화) 로 lock한다 (DEC-004, Q-022 supersede). 기존 8 enum(macro_finance / geopolitics_security / health_biosecurity / energy_commodities / trade_supply_chain / climate_environment / technology_cyber_ai / digital_assets) + tag 5개는 4 메타 카테고리의 `subtopic_tags[]` 로 강등 보존 — v1+ 누적 dossier 기반 재승격(Q-032) | must | AC-031 | R22 | DEC-004 (supersedes Q-022) |
 | REQ-027 | Publishing primary 는 **자체 사이트 (Astro 5.0 + Cloudflare Pages)** 이고 vault `publications/` 디렉토리(4 subdirectory: blog_long / newsletter / youtube_long / shorts)가 single source 다 (ADR-0022). 외부 플랫폼(Substack / YouTube / X)은 cross-post target — 모든 외부 발행물의 cite footnote는 자체 사이트 URL을 canonical anchor 로 가리킨다 (ADR-0022 INV-0022-2). v0 turn-key 발행 scope 는 blog_long 1개 + 자체 사이트 + manual cross-post + manual correction approve (DEC-005). TTS / auto cross-post / 자동 retraction trigger 는 v1+ (Q-031 / Q-033 / Q-034). cite check 5+1(ADR-0015)의 일부는 Astro Content Collection + Zod schema 로 **build-time enforce** (dead-link cite_refs / invalid status / dead-link editorial_intent_id / editorial_quality_rubric_passed = false 는 build fail, ADR-0022 INV-0022-3 + ADR-0025 + DEC-012). **PUB-1A.5 accept 시 운영자 Editorial Quality Rubric (AC-036~042, DEC-012) manual verify 의무 — Editorial gate (DEC-012) vs Technical gate (ADR-0015 cite check 5+1) 분리** | must | AC-013, AC-018, AC-028, AC-034, AC-035, **AC-036, AC-037, AC-038, AC-039, AC-040, AC-041, AC-042** | (R25 + v0 turn-key + GPT meta-review) | ADR-0022, DEC-005, DEC-006, DEC-012 |
+| REQ-028 | Claim → Thesis 후보 link 의 `:EVIDENCE_FOR` relationship 에 `evidence_role` 필드 (6 enum: supporting / opposing / mitigating / amplifying / monitoring / context) + `assigned_by = operator_lock` 필수 — LLM-only progression 차단 (ADR-0027 INV-0027-5). Dossier 합성 시 minimum coverage (supporting ≥3 / opposing ≥2 / monitoring ≥3, AC-044) 검증 — 미달 시 Dossier reject → manual review queue. EvidencePack v0 4-section 이 evidence_role grouping 기준으로 생성 | must | AC-043, AC-044 | (Q-043 → DEC-020) | ADR-0027, DEC-020 |
 
 ### Non-functional (NFR-###)
 
@@ -153,7 +154,7 @@ ADR-0019).
 |---|---|---|---|---|---|---|
 | NFR-001 | performance | graph object 1만 건 시점에서 단일 검색 < 1초 (p95) | bench script: Neo4j Community + native FTS cold cache 검색, 1만 graph object fixture (SPIKE-001 갱신 — SQLite+FTS5에서 Neo4j로 대상 변경) | AC-002 | (rubric) | ADR-0012, ADR-0014 |
 | NFR-002 | reproducibility | 동일 source set + scenario revision + **EditorialIntent** 로 다른 운영자가 같은 thesis + draft 결론 도달 가능. (ADR-0024 Data Science Module 의 derived_metric reproducibility 3-tuple + ADR-0025 EditorialIntent anchor 보강) | scenario evidence + edge ledger + EditorialIntent + derived_metric_ledger reproducibility test (수동 + diff) | AC-017 | (rubric) R3 A4 + ADR-0024 + ADR-0025 | ADR-0009, ADR-0024, ADR-0025 |
-| NFR-003 | traceability | 콘텐츠 한 문장 → 원 source까지 5단계 이내 (Publication → ContentDraft → Thesis → Scenario → Claim → Snapshot → Source) — 9-stage 안에서 5단계 이내 유지(선택적 단계 skip) | cite check report에서 trace depth 측정 | AC-018 | (rubric) | ADR-0011 |
+| NFR-003 | traceability | 콘텐츠 한 문장 → Source 까지 **5-hop 이내 (단축 trace path: Publication → ContentDraft → Thesis → Scenario → Claim → Snapshot)** — 9-stage / 10-stage 양쪽에서 동일 (DEC-020 Q-042 resolution, ADR-0025 INV-0025-5 의도 surface). EditorialIntent (ADR-0025 신규 stage) 는 Thesis 의 anchor metadata 로 분류, trace 계산 시 선택적 skip 허용 (Thesis ↔ EditorialIntent 1:1 link 으로 reachable 보장). Source layer 의 Source / Document 는 Snapshot 의 metadata anchor — trace 종점은 Snapshot. manual_claim_entry path 는 Snapshot 미포함 (4-hop 으로 추가 단축, ADR-0018) | cite check report 의 trace depth 측정 | AC-018 | (rubric) + DEC-020 Q-042 | ADR-0025 (supersedes ADR-0011, INV-0025-5), DEC-020 |
 | NFR-004 | cost | 일일 LLM 비용 상한 soft $5/hard $7.5 + 주간 $25 + Tier 0 호출 일일 cap 5회 + backfill 별도 budget bucket (DEC-010). 초과 시 큐 backoff + 알람 | `run_` 단위 비용 ledger (vendor + tier + cross_vendor_review_of + domain_override_reason 필드 포함) + threshold alert + cross_vendor_review_coverage ≥ 0.95 KPI | AC-019 | R3 A1 + DEC-010 reflow | ADR-0023 (supersedes ADR-0006), DEC-010 |
 | NFR-005 | safety | 외부 인용 시 `quote ≤ 200자` 강제 + quote_reason 명시 필수 + storage_level=excerpt_evidence | extract pipeline assertion + cite check | AC-007 | R3, R10 | ADR-0015 |
 | NFR-006 | durability | snapshot은 fingerprint(URL+content_hash+locator)로 변경 감지 가능. 원문 변경 후 재검증 시 새 fetch 필요 (raw bytes 미보관) | content_hash diff 검출 + R2 round-trip은 permitted artifact만 | AC-020 | R8 | ADR-0012 |
@@ -204,8 +205,11 @@ ADR-0019).
   의 "Current Canonical Direction" 섹션을 따른다. 변경하려면 새 ADR 또는
   supersedes.
 - 코드/CI 채택 boilerplate는 `alxdr3k/boilerplate` (mode: greenfield).
-- main 브랜치 직접 push 허용(global policy의 actwyn/concluv/boilerplate/
-  my-skill/devdeck/k-world-monitor 군).
+- **main branch protection: PR-only** (DEC-020 Q-048 resolution, 2026-05-13).
+  required check = `.github/workflows/ci.yml` (bun typecheck + bun test +
+  migrate dry-run). 직접 push 차단 — admin / global policy bypass 도
+  본 repo 에 한해서는 적용 안 함. invariant-check 는 advisory 유지
+  (ADR-0002 INV-0002-1 warning-level by contract).
 
 ## Open Questions
 
@@ -215,8 +219,9 @@ Q-<NNN>.md`로 이동.
 - Q-001: scenario horizon enum 정의 (1Q / 1Y / 5Y / generational?)
 - Q-002: Dossier `stale_after` 기본값 (주제별로 다른가?)
 - Q-003: Publication 정정(correction) ledger의 트리거
-- Q-004: SQLite relational metadata와 vault `_System/Indexes/*.jsonl`의 책임
-  분담
+- ~~Q-004~~: **resolved (INFRA-1A.2)** — k-world-monitor repo는 SQLite
+  (research.db) 만 보유; vault-wide index 는 second-brain vault jsonl 책임.
+  promoted artifact export 시 변환 (INFRA-1B+).
 - Q-008: Thesis ID 체계 (`ths_<sha256[0:10]>` vs draft 내부 thesis_text)
 - Q-012: graph DB 도입 후 SQLite ↔ Neo4j sync 정책 (CDC vs batch)
 - Q-020: Neo4j Community GPL v3 boundary (1인 internal use vs 배포)

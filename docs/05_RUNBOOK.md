@@ -24,9 +24,77 @@
   - Cloudflare R2 (S3 compatible, permitted artifact 저장) — required
   - Cloudflare Pages project (자체 사이트 호스팅) — required
   - Neo4j credential (Community Edition self-host) — required
-  - Doppler 또는 환경 변수 자체 보관 — 1인 운영자 선택
+  - **Secret store: Doppler** (DEC-020 Q-047 resolution, 2026-05-13) — 4종
+    API key (OpenAI / Anthropic / Google / R2) 일괄 관리. 운영 절차는 본
+    문서 "Doppler integration" 섹션 참조.
   - 2026-05-11 status: OpenAI / Anthropic / Google AI Studio 모두 발급
-    완료 (current-state.md "External services / credentials" 섹션)
+    완료 (current-state.md "External services / credentials" 섹션).
+    Doppler 등록은 PUB-1A.5 entry condition.
+
+### Doppler integration (DEC-020 Q-047 resolution)
+
+운영 환경: Doppler CLI / SDK 가 4종 API key + R2 credential 을 단일 secret
+store 에서 관리. local dev / GitHub Actions cron / production cron host
+모두 동일 setup.
+
+**Project setup** (1회):
+
+1. Doppler 가입 + project 생성 (`k-world-monitor` 이름 권장)
+2. config branch: `dev` (local) / `stg` (staging — 본 repo 는 v0 미사용) /
+   `prd` (production cron host).
+3. secret 등록 (`dev` config 기준 — `prd` 도 동일 key 명).
+   변수명은 runtime 코드 (`src/storage/r2/client.ts`,
+   `src/storage/neo4j/connection.ts`) 가 읽는 이름과 정확히 일치해야 함
+   — mismatch 시 runtime 초기화 실패 (PR #32 Codex P1 review,
+   2026-05-13):
+   - `OPENAI_API_KEY`
+   - `ANTHROPIC_API_KEY`
+   - `GOOGLE_AI_API_KEY`
+   - `S3_ENDPOINT` (full S3 endpoint URL. 예: https://<accountid>.r2.cloudflarestorage.com, custom domain, 또는 S3-compatible mock)
+   - `S3_ACCESS_KEY` (R2 access key ID)
+   - `S3_SECRET_KEY` (R2 secret access key)
+   - `S3_BUCKET` (R2 bucket name)
+   - `NEO4J_URI` (예: bolt://localhost:7687)
+   - `NEO4J_USER` (driver username — code reads `NEO4J_USER`, not `NEO4J_USERNAME`)
+   - `NEO4J_PASSWORD` (self-host bolt)
+   - 선택: `NEO4J_DATABASE` / `NEO4J_MAX_POOL_SIZE` / `NEO4J_ACQ_TIMEOUT_MS`
+4. service token 발급 (`prd` 용 → cron host 에 등록).
+
+**Local dev**:
+
+```bash
+doppler login                          # one-time auth
+doppler setup --project k-world-monitor --config dev
+doppler run -- bun run discovery:run   # secret 자동 주입
+doppler run -- bun test
+```
+
+**GitHub Actions cron**:
+
+`DOPPLER_TOKEN` 을 repository secret 으로 등록 (Doppler `prd` config 의
+service token). Workflow 안에서:
+
+```yaml
+- name: Setup Doppler
+  uses: dopplerhq/cli-action@v3
+- name: Run discovery
+  run: doppler run -- bun run discovery:run
+  env:
+    DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+```
+
+**Token rotation**:
+
+- API key rotation: vendor console (OpenAI / Anthropic / Google / Cloudflare)
+  에서 새 key 발급 → Doppler `prd` config 에서 갱신 → cron host /
+  GitHub Actions 자동 picked up (next run).
+- Doppler service token rotation: 분기별 / leak 의심 시 rotate. repository
+  secret + cron host 모두 갱신.
+
+**`.env` fallback** (Doppler 미사용 환경 — debugging 또는 신규 운영자):
+
+`.env.example` 파일이 6개 변수명 reference. Doppler 가 없으면 `.env` 직접
+작성 후 `bun --env-file=.env run ...`. `.gitignore` 에 `.env` 포함 의무.
 
 - Deployment owner: 운영자(user)
 - Target environments: local (CLI + Neo4j self-host) + Cloudflare Pages

@@ -10,7 +10,7 @@ import { load as yamlLoad } from "js-yaml";
 import { pollEligibleSources, type DiscoverySource } from "../scheduler/scheduler";
 import { recordFetchOutcome } from "../scheduler/crawl-state";
 import { parseRssFeed, enqueueDiscoveredItems } from "./rss-worker";
-import { getDb } from "../../storage/sqlite/connection";
+import { getDb, closeDb } from "../../storage/sqlite/connection";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -291,7 +291,27 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Graceful shutdown: ensure SQLite WAL checkpoint + Neo4j driver close before
+// process exit. cron environments leave the process running across multiple
+// invocations only if the entry point re-imports the module, but explicit
+// teardown is still required to flush WAL pages and release the driver's
+// connection pool. Discovery worker v0 does not open a Neo4j session
+// (Snapshot fingerprint writes are in INFRA-1B.3 worker, not here), so only
+// closeDb() is required at this entry point.
+async function shutdown(): Promise<void> {
+  try {
+    closeDb();
+  } catch (err) {
+    console.error("[discovery] shutdown error (closeDb):", err);
+  }
+}
+
+main()
+  .then(async () => {
+    await shutdown();
+  })
+  .catch(async (err) => {
+    console.error(err);
+    await shutdown();
+    process.exit(1);
+  });
