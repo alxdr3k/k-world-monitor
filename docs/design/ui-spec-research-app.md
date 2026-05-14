@@ -429,10 +429,19 @@ Hetzner (private artifact + API, same-origin):
   v0: Tailscale Serve (HTTPS, tailnet only)
   v1+: Cloudflare Tunnel + Access (public URL + JWT 검증)
 
-Same repo / shared design:
-  src/shared/schema/          (Zod schemas — Astro Content Collection 과 Bun API 양쪽 import)
+Same repo / shared design (DEC-022 stack lock):
+  src/shared/schema/          (Zod schemas — Astro Content Collection + Bun API
+                               + React island 3 surface 에서 import)
   src/shared/research/        (RoundContextPack, types — no bun:sqlite / neo4j 의존)
-  src/shared/ui/              (Tailwind primitives — Astro public + React /ops 공유)
+  src/shared/ui/              (Tailwind primitives — Astro public site 와
+                               React island /ops 공유. shadcn/ui CLI 가 본
+                               디렉토리로 component copy-paste — Radix
+                               primitive 기반 Dialog / Sheet / Drawer /
+                               Popover / DropdownMenu. P1+ RESEARCH-1A.1
+                               부터 도입, P0-M6 안에서는 plain Tailwind 만)
+  ops/lib/query/              (TanStack Query v5 provider + queryClient +
+                               SSE binding hook — useEventStream + setQueryData
+                               표준 패턴. P1+ RESEARCH-1A.1 부터 도입)
 ```
 
 ### Auth phasing
@@ -455,15 +464,20 @@ Same repo / shared design:
 
 본 spec 의 다음 항목 사용자 결정 후 정식 ADR 작성:
 
-1. Stack: 옵션 A~F 중 선택 — **사용자 결정 Q-051 #6 pending**. 기본 권고:
-   **A' (Astro + React island, §13 Deployment topology Option B 와 일치)**
-   — round 13 reframe + 사용자 피드백 ("내가 HTMX 모르는 게 문제가 아니라
-   네가 HTMX 충분히 아는가") 이후 §13 topology 의 `src/shared/ui/` 가
-   `Astro public + React /ops 공유` Tailwind primitives 로 lock 되어,
-   동일 spec 안에서 §13 (React island) 와 §14 #1 (HTMX 권고) 가 충돌하면
-   `/ops` 구현 방향이 갈라짐. 본 round 에서 권고를 A' 로 align.
-   기존 옵션 E (HTMX) 는 historical 비교 항목으로 강등 (사용자가 Q-051 #6
-   에서 E 를 명시 선택할 경우 §13 `src/shared/ui/` 본문도 동시 reflow 의무).
+1. Stack: **lock — A' (Astro shell + React 18 island + Tailwind + shadcn/ui
+   + Radix UI + TanStack Query v5 + SSE)** (DEC-022, 2026-05-14). GPT 32
+   review + 사용자 동의로 6 layer 구체 stack lock. 이전 round 권고 E
+   (HTMX) 는 reject (SPA-grade interaction 부족, `/ops` 는 AI research
+   console). 옵션 B (Next.js) reject (Astro anchor build target 이중화).
+   옵션 A~F historical 비교만 남기며 결정은 DEC-022 본문 + §13 Topology B
+   본문이 canonical.
+   - Phasing: P0-M6 RESEARCH-1A.0 = Astro SSR + Tailwind only (0 React
+     island / 0 shadcn/ui dep / 0 TanStack Query). P1+ RESEARCH-1A.1+ =
+     full stack adoption (React island + shadcn/ui CLI scaffold + TanStack
+     Query + SSE binding).
+   - 신규 ADR 발급 의무: 가칭 ADR-0029 (Research App /ops Stack) 를
+     RESEARCH-1A.1 슬라이스 시작 직전까지 발급 — DEC-022 가 anchor (별도
+     PR). 본 §14 #1 의 ADR 작성 의무 (line 433) 흡수.
 2. Hosting: **lock — Topology B (CF Pages public anchor + Hetzner private
    /ops + /api, same-origin)**. GPT 31 review (2026-05-14) + 사용자 명시
    ("나 이미 다른 서비스들 운영중인 hetzner 서버 있어") 로 결정 lock —

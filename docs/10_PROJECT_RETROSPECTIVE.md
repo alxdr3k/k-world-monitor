@@ -165,6 +165,57 @@ P0-M6 "2주 목표 lock (DEC-005)" 는 **사용자 명시 지시로 fixed**. 일
 
 ---
 
+## DEC-022 lock — Q-051 #6 `/ops` UI stack (2026-05-14)
+
+### Context
+
+Q-051 (Research App UI surface) round 2 에서 CLI → Web (mobile-first)
+pivot + GPT 31 review 로 Topology B (CF Pages public + Hetzner private
+same-origin) lock 후, 구체 frontend stack 만 미결정 상태로 round 14/15
+까지 §14 #1 pending. round 16 P1 finding 처리 후 사용자가 GPT 32 review
+(2026-05-14) 를 전달하며 stack lock 의무 진행.
+
+### GPT 32 review 권고 요약
+
+- A' lock — Astro + React island + shadcn/ui + Radix + Tailwind + TanStack
+  Query + SSE.
+- 이유 6점: (1) Astro anchor 일관성 (ADR-0022) / (2) `/ops` = AI research
+  console (SPA-grade interaction 필요) / (3) LLM coding 안전성 (React 패턴
+  /예제 압도적) / (4) shadcn+Radix mobile drawer/sheet 표준 / (5) TanStack
+  Query 의 cache invalidation 표준 / (6) Solid/Svelte/Vue/HTMX reject.
+
+### Claude critical review (DEC-022 안에 흡수)
+
+GPT 권고 안에 명시되지 않은 6 개 critique 를 DEC-022 본문에 직접 추가:
+
+| Critique | 핵심 | DEC-022 lock |
+|----------|------|--------------|
+| 1. React island hydration cost | 모바일 LTE LCP 영향 ≈ 70KB gzip | `client:visible` directive 우선, scenario graph 만 `client:load` |
+| 2. shadcn/ui copy-paste 위치 | npm dep 가 아니라 CLI copy-paste | `src/shared/ui/` 디렉토리 lock — public + ops 공유 |
+| 3. TanStack Query phasing | P0 의무 여부 | **P0-M6 = Astro SSR + Tailwind only**, P1+ 부터 도입 |
+| 4. ADR-0029 발급 시점 | 본 PR 안 vs 후속 | RESEARCH-1A.1 슬라이스 시작 직전 (별도 PR) — DEC-022 anchor |
+| 5. PWA 호환성 (RESEARCH-1A.4) | service worker + IndexedDB + React island | Workbox + Astro adapter, TanStack Query optimistic update 와 sync |
+| 6. Voice input 통합 (RESEARCH-1A.5) | shadcn Button + MediaRecorder | 자연스럽게 동작 |
+
+### Decision
+
+DEC-022 lock — 6 layer stack (Astro shell + React 18 island + Tailwind +
+shadcn/ui + Radix + TanStack Query v5 + SSE) + phasing (P0-M6 = SSR only,
+P1+ = full stack) + 신규 ADR-0029 발급 의무.
+
+### Outcome 작업 (본 PR 안)
+
+| Action | 위치 | 상태 |
+|--------|------|------|
+| DEC-022 발급 | `docs/decisions/DEC-022.md` | **landed (본 PR)** |
+| Q-051 status: open → resolved + 결정 결과 표 | `docs/questions/Q-051.md` | **landed (본 PR)** |
+| UI-spec §14 #1 stack pending → lock | `docs/design/ui-spec-research-app.md` | **landed (본 PR)** |
+| UI-spec §13 Topology B 본문에 shadcn+Radix+TanStack Query 추가 | 동상 | **landed (본 PR)** |
+| 04 PLAN RESEARCH-1A.1/.2/.3/.4 artifacts 에 stack 명시 | `docs/04_IMPLEMENTATION_PLAN.md` | **landed (본 PR)** |
+| 신규 ADR-0029 (가칭 Research App /ops Stack) 발급 | `docs/adr/0029-*.md` | deferred — RESEARCH-1A.1 슬라이스 직전 (별도 PR) |
+
+---
+
 ## Milestone Retrospective — (none yet)
 
 > P0-M1 (Schema & Bulk Store Bootstrap) 종료 시점에 첫 milestone 회고를 추가
