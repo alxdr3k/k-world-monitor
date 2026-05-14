@@ -165,7 +165,7 @@ P0-M6 "2주 목표 lock (DEC-005)" 는 **사용자 명시 지시로 fixed**. 일
 
 ---
 
-## DEC-022 lock — Q-051 #6 `/ops` UI stack (2026-05-14)
+## Research App `/ops` UI stack lock (DEC-022 / Q-051 #6, 2026-05-14)
 
 ### Context
 
