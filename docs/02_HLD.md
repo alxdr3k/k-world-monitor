@@ -357,10 +357,14 @@ SQLite migration).
   supersedes ADR-0011) + DEC-020 Q-042 lock. 단축 trace path = Publication →
   ContentDraft → Thesis → Scenario → Claim → Snapshot (EditorialIntent /
   Source / Document 는 metadata anchor 로 선택적 skip)
-- NFR-004 (cost 상한) → Run Ledger + throttling (ADR-0023 supersedes
-  ADR-0006, + DEC-010 cost ceiling lock + DEC-020 Q-046 일반화 quota module
-  resolution — `src/ops/quota-enforcement.ts` + QuotaKind enum 으로 Tier 0
-  daily / soft / hard / weekly / backfill 일괄 enforce)
+- NFR-004 (cost 상한) → Run Ledger + throttling. **Current code state**:
+  OPS-1A.1 까지 landed (run ledger + `getDailyCostUsd` / `getDailyCostBreakdown`,
+  ADR-0023 INV-0023-7 — vendor / tier / cross_vendor_review_of /
+  domain_override_reason 필드 기록). **Planned (OPS-1A.2 슬라이스, P0-M3)**:
+  `src/ops/quota-enforcement.ts` 일반화 quota module + QuotaKind enum 으로
+  Tier 0 daily / soft / hard / weekly / backfill 일괄 enforce (DEC-010
+  cost ceiling lock + DEC-020 Q-046 resolution anchor). 본 module 미구현
+  상태 — AC-019 status defined, OPS-1A.2 진입 시 implement
 - NFR-005 (quote ≤ 200자 + quote_reason) → Extractor assertion + Cite Check
   (ADR-0015)
 - NFR-006 (snapshot durability via fingerprint) → canonical_text_hash diff

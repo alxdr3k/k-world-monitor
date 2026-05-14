@@ -46,13 +46,19 @@ injection containment / discovery worker concurrency / research app stack)
   schema fields + enum validators + indexes (AC-026, AC-027).
   `INFRA-1A.5` landed (PR #8 merged 2026-05-12): text normalization + sha256 + enum validators.
 - last accepted gate: none yet
-- next gate: `AC-001` (도메인 객체 **10-stage** 모델 + 4-tier source layer +
-  Neo4j graph store — ADR-0025 supersedes ADR-0011 object model + ADR-0012 +
-  ADR-0013); `AC-002` (Neo4j FTS p95 <1s, SPIKE-001 미실시 — INFRA-1A.2
-  소스 코드 위에서 검증 대기); `AC-005` (ID prefix lint, TEST-005 통과 ✓);
-  `AC-022/023/024` (P0-M2 게이트 — INFRA-1B 슬라이스 일괄 landed 후
-  evidence 확정 대기)
-- canonical ledger: `docs/04_IMPLEMENTATION_PLAN.md`
+- next gate (P0-M1 portion): `AC-001` (도메인 객체 **10-stage** 모델 +
+  4-tier source layer + Neo4j graph store — ADR-0025 supersedes ADR-0011
+  object model + ADR-0012 + ADR-0013); `AC-002` (Neo4j FTS p95 <1s,
+  SPIKE-001 미실시 — INFRA-1A.2 소스 코드 위에서 검증 대기); `AC-005`
+  (ID prefix lint, TEST-005 통과 ✓); `AC-032` (R2 upload audit ledger,
+  Q-044 INFRA-1B.3.x-audit slice 미진입)
+- next gate (P0-M2 portion): `AC-001`, `AC-020` (P0 fallback only —
+  raw_body_hash diff; canonical_text_hash primary 는 P1+), `AC-022`,
+  `AC-023`, `AC-024` (P0-M2 게이트 — INFRA-1B 슬라이스 일괄 landed 후
+  evidence 확정 대기). **AC-009 (extractor 분기) 는 P0-M3 gate** (EXTR-1A.*
+  미진입)
+- canonical ledger: `docs/04_IMPLEMENTATION_PLAN.md` (gate set source of
+  truth; current-state 는 mirror)
 
 ## External services / credentials
 
@@ -243,8 +249,12 @@ injection containment / discovery worker concurrency / research app stack)
   9-stage / ADR-0011 표현 유지. Gaps 섹션이 Q-020/021/024 등 이미
   resolved 된 Q 를 미해결로 설명 — 본 PR 에서 일괄 갱신.
 - AC-043 (ADR-0027 evidence_role schema) row 는 `06_ACCEPTANCE_TESTS.md`
-  line 65 에 존재 (DEC-020 Q-043 resolution 안에 AGG-1A.1 슬라이스 안에서
-  자동 검증으로 landed). AC-044 minimum coverage row 도 존재.
+  line 65 에 존재 — **acceptance criterion `defined` 상태** (ADR-0027 +
+  DEC-020 Q-043 resolution 으로 schema lock 완료). 자동 검증 (TEST-043)
+  은 AGG-1A.1 슬라이스 안에서 구현 예정 — 현재 AGG-1A.1 / TEST-043 /
+  evidence_role enforcement 는 **planned, not landed**. AC-044 (minimum
+  coverage) row 도 동일 — defined / planned (PUB-1A.5 운영자 manual
+  verify + AGG-1A.1 자동 검증 의존).
 
 ## Links
 
