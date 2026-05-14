@@ -344,21 +344,60 @@ source trace:
 - **Raw cloud 0건** (NFR-008) — server 가 R2 prefix policy 강제
 - **Source policy gate** (ADR-0017) — server 가 매 외부 fetch 시 적용
 
-## 13. 배포
+## 13. 배포 (GPT 31 기술 리뷰 reflect — Topology B 채택)
 
-### Cloudflare Workers + Pages
+### 핵심 lock 결정 5
+
+1. **Public artifact 분리** — Cloudflare Pages 에 `/ops` artifact 포함 금지.
+   CF Pages = public anchor only. /ops + /api = Hetzner.
+2. **`/ops` 와 `/api` 는 same-origin** — cross-origin CORS / cookie / SSE
+   복잡성 회피. v0 둘 다 Hetzner.
+3. **SSE = transport, turn_event = truth** — SSE 만 의존 X. turn_event
+   table 에 durable event log 저장 → 모바일 reconnect / catch-up.
+4. **SQLite transaction 은 짧게** — LLM / fetch / Neo4j await 중 SQLite
+   transaction 점유 금지. saga / operation_ledger 패턴.
+5. **Agent loop = orchestrator in-process** — LLM 이 HTTP tool URL 직접
+   호출 금지. Bun orchestrator 가 in-process function 실행 + quota / audit /
+   prompt-injection 방어 enforce.
+
+### Deployment topology (Option B)
 
 ```
-research.<domain>            (Cloudflare Workers + Hono)
-  → /api/* (server routes, Doppler env)
-  → /* (HTMX HTML + static asset)
+Cloudflare Pages (public artifact only):
+  <domain>/
+    /posts/*                  (Astro Content Collection build, public)
+    /citations/*              (cite anchor, public)
+    /corrections/*            (correction ledger, public)
+  v0: Tailscale-only Hetzner backend 와 분리
 
-<domain>                     (Cloudflare Pages, Astro publication site)
-  → public publication (ADR-0022)
+Hetzner (private artifact + API, same-origin):
+  ops.<tailnet-or-private>/
+    /ops/*                    (CSR-first SPA shell)
+    /api/*                    (Bun + Hono, SQLite + Neo4j local access)
+  v0: Tailscale Serve (HTTPS, tailnet only)
+  v1+: Cloudflare Tunnel + Access (public URL + JWT 검증)
+
+Same repo / shared design:
+  src/shared/schema/          (Zod schemas — Astro Content Collection 과 Bun API 양쪽 import)
+  src/shared/research/        (RoundContextPack, types — no bun:sqlite / neo4j 의존)
+  src/shared/ui/              (Tailwind primitives — Astro public + React /ops 공유)
 ```
 
-- Cloudflare Access 가 `research.<domain>` 만 protect
-- public publication site 는 익명 접근
+### Auth phasing
+
+- **v0 (Tailscale-only)**: 폰 + 데스크탑에 Tailscale client install. `ops.
+  <tailnet-domain>` 접근 가능. public exposure 0.
+- **v1+ (Cloudflare Tunnel + Access)**: public URL + Cf-Access-Jwt-Assertion
+  header → Hono middleware (JWKS public cert + audience + issuer 검증) →
+  operator_id 매핑.
+
+### CF Pages artifact 안전 규칙
+
+- Astro build 시 `vault/publications/**/*.{md,mdx}` 만 include. `src/ops/*`
+  / `src/api/*` / `src/shared/research/*` 모두 exclude.
+- Astro adapter (Hetzner Bun serve) 가 CF Pages adapter 와 분리된 build
+  target — `astro.config.public.ts` (CF Pages) + `astro.config.ops.ts`
+  (Hetzner) 두 config.
 
 ## 14. 사용자 결정 항목 (UI-spec)
 
