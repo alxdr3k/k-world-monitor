@@ -73,7 +73,7 @@ Workflow files (활성):
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
 | `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
-| `.github/workflows/ci.yml` | PR + push | **required** (DEC-020 Q-048 resolution — branch protection admin task) | bun install + typecheck + bun test (490 cases) + migrate dry-run |
+| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (490 cases) + migrate dry-run |
 | `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
 | `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
@@ -83,12 +83,32 @@ Workflow files (활성):
 |---|---|
 | `.github/workflows/cd.yml.example` | publishing pipeline 도입 시점 활성 (P0-M6) |
 
-## CI notes
+## CI required check 등록 3-state
 
-- 본 PR (`claude/comprehensive-code-review-FE0w3`) 가 `ci.yml.example` →
+DEC-020 Q-048 resolution 안에서 CI required check 활성은 3 단계로 분리되어
+있다. 단계가 섞이면 "이미 required 인지 / 사용자 결정만 끝났는지" 가 모호해
+지므로 본 표로 명시.
+
+| Stage | 의미 | 현재 상태 (2026-05-14) | 책임 |
+|---|---|---|---|
+| (1) workflow exists | `.github/workflows/ci.yml` 파일이 활성 trigger 로 등록되어 PR / push 마다 실행 | ✓ done (PR #32 0a76d31, `claude/comprehensive-code-review-FE0w3` 가 rename) | repo (코드) |
+| (2) policy decision accepted | 운영자가 ci.yml 을 required 로 promote 한다는 정책 결정 | ✓ done (DEC-020 Q-048 resolution, 2026-05-13) | 운영자 (DEC) |
+| (3) branch protection admin task applied | GitHub repo settings → branch protection → require status check 에 `ci.yml` 명시 등록 | ✗ pending — admin task 미실시 (현재 main 은 PR-only protection 만 적용, required check 등록은 별도 admin step) | 운영자 (admin) |
+
+(3) 이 완료되기 전까지는 ci.yml fail 이 PR merge 를 차단하지 않는다.
+(1)+(2) 가 완료되었다는 사실 만으로 "required" 로 보고하는 표현은 stage
+(3) 까지 lock 된 후 가능. 현재 표 column "Required?" 값은 (2) 정책 기준
+("policy: required") + (3) admin 미적용 함께 명시.
+
+invariant-check.yml 은 ADR-0002 INV-0002-1 warning-level contract 이므로
+(2) policy decision = "advisory only" 로 lock — (3) 진입 대상 아님 (영구
+advisory).
+
+## CI notes (history)
+
+- PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
-  으로 advisory 활성.
-- branch protection required check 등록은 Q-048 사용자 결정 대기.
+  으로 (1) workflow exists stage 진입.
 - 코드 테스트 (`bun test`) 는 18 file / 200+ 케이스 — Bun native runner
   1 분 이내 expected.
 - External CI owner: same repo (.github/workflows/)

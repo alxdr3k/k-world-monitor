@@ -2,8 +2,28 @@
 
 운영 절차 모음. "장애/배포/데이터 작업을 어떻게 처리하는가"를 담는다.
 
-> 코드가 아직 없으므로 대부분의 절차는 "Not currently defined." 상태다.
-> milestone P0-M2 ~ P0-M6 진입 시점마다 해당 절차를 채운다.
+> **Coverage status (2026-05-14)**: P0-M1 / P0-M2 운영 절차는 본 문서에 채워져
+> 있다 (Doppler integration / Data Operations 백업·R2 lifecycle / pre-deploy
+> schema migration contract / discovery 운영 etc). P0-M3 (Extraction / Review
+> queue / cost throttling worker) ~ P0-M6 (Publishing pipeline) milestone 의
+> 일부 절차는 해당 슬라이스 landing 시점에 추가. 새 운영 절차는 해당 슬라이스
+> 의 PR 안에서 본 문서에 함께 commit.
+
+### Defined sections
+
+- How to Deploy / Doppler integration (DEC-020 Q-047, 이번 milestone 활성)
+- Publishing Site Deployment (ADR-0022 / Cloudflare Pages — P0-M6 진입 직전)
+- Data Operations (백업 / R2 lifecycle / retention batch / soft-delete /
+  RETENTION_PROTECTED_KINDS — INFRA-1A.8 landed)
+- Pre-deploy schema migration contract (DEC-019 Q-040 — P1-MVP-prep entry)
+
+### Pending sections (slice landing 시 채움)
+
+- Publish pipeline runbook (PUB-1A.1 ~ PUB-1A.5 진입 시)
+- Extraction / Review queue runbook (EXTR-1A.1 ~ EXTR-1A.6 진입 시)
+- Cost throttling worker runbook (OPS-1A.2 진입 시)
+- Metrics framework + evaluation harness runbook (OPS-1A.3 ~ 1A.4 진입 시)
+- Stale worker runbook (OPS-1B.1 진입 시)
 
 ## How to Deploy
 

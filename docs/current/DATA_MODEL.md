@@ -84,7 +84,7 @@ FTS indexes (Lucene): claim_fts, source_fts, document_fts, scenario_fts, thesis_
 | `schema_migrations` | — | applied migration version tracking |
 | `source_registry_slug_map` | DEC-015 | slug↔source_id 안정 매핑 (v3, INFRA-1B.1) |
 | `crawl_state` | ADR-0030 INV-0030-5 | discovery scheduler per-source state — last_polled_at / last_etag / last_modified_header / consecutive_failures / next_eligible_at (v5, INFRA-1B.2b) |
-| `discovery_queue` | INFRA-1B.2 / INFRA-1B.3 | 발견 URL pending Snapshot fingerprint — source_id / url / status / worker_id (P1-M2-hardening) / discovered_at / updated_at (v6, partial unique index `(source_id, url) WHERE status IN ('pending','processing')`) |
+| `discovery_queue` | INFRA-1B.2 / INFRA-1B.3 | 발견 URL pending Snapshot fingerprint. **Current columns (v6 landed)**: source_id / url / status / discovered_at / updated_at + partial unique index `(source_id, url) WHERE status IN ('pending','processing')`. **Planned columns (P1-M2-hardening, INFRA-1B.3.x)**: worker_id (Q-038 / DEC-019, CAS pattern for multi-worker concurrency). worker_id 는 현재 schema 미포함 — INFRA-1B.3.x 슬라이스 안 ALTER 로 추가 (DEPLOY-1A.1 ALTER-only contract) |
 
 ## Lifecycle states
 
