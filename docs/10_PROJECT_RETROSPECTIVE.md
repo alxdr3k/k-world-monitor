@@ -150,6 +150,7 @@ P0-M6 "2주 목표 lock (DEC-005)" 는 **사용자 명시 지시로 fixed**. 일
 | "thin docs SHA pinning 은 commit hook 또는 PR template 없이는 100% drift" | doc-heavy repo 에서 `Last verified against code: <SHA>` 류 contract 는 자동화 없이 유지 불가능. PR template 의 checkbox 또는 pre-push hook 필요 | yes | later |
 | "in-flight 표기 + landed status 분리 의무" | PR open 시점과 main merge 시점의 status reflow 가 분리되어 있으면 둘 다 stale. PR merge event hook 으로 자동 reflow 검토 | yes | later |
 | "CI `.example` 확장자는 silent disable 함정" | boilerplate 가 workflow file 을 `.example` 로 배포하면 rename 안 하는 한 활성화 안 됨. boilerplate sync 시점에 active workflow inventory check 필요 | yes | later |
+| "Retrospective / 본문 heading 의 첫 token 이 ID-PATTERN (DEC-NNN / ADR-NNN / Q-NNN 등) 이면 doc-governance lint 가 두 번째 canonical definition 으로 탐지 → duplicate definition CI fail" | `scripts/check-doc-governance.rb` line 274 의 heading definition regex (`^\s{0,3}#+\s+\`?(ID-PATTERN)\`?(?::|\b)`) 가 ID 로 시작하는 heading 을 strong definition 으로 인식. 신규 DEC/ADR/Q 발급 후 retrospective / 다른 doc 에서 reference 시 heading 첫 token 을 일반 단어 ("Research App UI stack lock", "First Publication Retrospective Lock" 등) 로 두고 ID 는 괄호 안 reference 형태로 배치하면 우회 가능. **재발 방지 권고**: (1) 신규 DEC/ADR/Q 발급 직후 retrospective entry 작성 시 heading 첫 token = 일반 단어 패턴 의무. (2) 기존 안전 패턴 참조: line 19 "First Publication Retrospective Lock (DEC-013 follow-up)" — DEC ID 가 괄호 안. (3) Local pre-push hook 또는 PR template checkbox 로 "doc-governance lint 통과" 확인 추가 검토 | yes (doc-heavy repo 운영 일반 규칙) | later |
 
 ### 8) Actions (본 PR 처리 / 후속 PR)
 
