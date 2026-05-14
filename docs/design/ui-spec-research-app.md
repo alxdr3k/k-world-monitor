@@ -461,7 +461,7 @@ Same repo / shared design:
 - **/ops minimum P0-M6 scope = Read-only mobile** (Q-D) — publication
   결과 / cite anchor / session list / round timeline 보기 가능. ask /
   edit / publish trigger 는 CLI.
-- Read-only minimum 슬라이스: `RESEARCH-1A.0-readonly` (신규, P0-M6 안)
+- Read-only minimum 슬라이스: `RESEARCH-1A.0` (P0-M6 안)
   — `/ops` 홈 + `/ops/sessions` list + `/ops/sessions/:id` 읽기 +
   `/posts/:slug` public 검토. Cloudflare Access (또는 Tailscale) auth.
   DB 직접 read (Hetzner Bun API 의 thin read-only endpoint).
