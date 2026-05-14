@@ -19,8 +19,10 @@ related_adr: [ADR-0022, ADR-0023]
 ## 1. Goal
 
 1인 운영자가 **데스크탑 + 모바일** (특히 phone) 환경에서 AI 와 함께
-research session 을 진행할 수 있는 web app. CLI 는 v1+ optional secondary
-entry (자동화 / cron / scripting 용도).
+research session 을 진행할 수 있는 web app. **P0-M6 까지는 CLI 가
+publication critical path (PUB-1A.5 ask/edit/publish trigger), web /ops
+는 read-only 보조** (RESEARCH-1A.0). **P1+ 부터 web /ops 가 primary,
+CLI 는 자동화/cron/scripting secondary**.
 
 핵심 사용 시나리오:
 
