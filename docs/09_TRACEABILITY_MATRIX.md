@@ -13,11 +13,11 @@ Question ↔ Decision ↔ Requirement ↔ Gate/Test ↔ Milestone/Track/Phase/Sl
 
 | TRACE-ID | Question | Decision / ADR | Requirement | Gate / Test | Milestone | Track | Phase | Slice | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| TRACE-001 | — | ADR-0011 (supersedes 0003) | REQ-001 | AC-001 / TEST-001 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.1 | 9-stage object model lock (Source + Thesis 추가) |
+| TRACE-001 | — | ~~ADR-0011~~ (object model superseded by ADR-0025) → ADR-0025 | REQ-001 | AC-001 / TEST-001 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.1 | 10-stage object model lock (Source → Document → Snapshot → Claim → Dossier → Scenario → EditorialIntent → Thesis → ContentDraft → Publication). ADR-0011 9-stage 는 historical, ADR-0025 가 canonical |
 | TRACE-002 | Q-004 | ADR-0012 (supersedes 0004) | REQ-002, REQ-004 | AC-002, AC-004 / TEST-002, TEST-004 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.2 | Neo4j canonical (graph) + SQLite (relational) + Markdown promoted only |
 | TRACE-003 | — | ADR-0012 (supersedes 0004) | REQ-003 | AC-003, AC-020 / TEST-003, TEST-020 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.3 | R2 permitted artifact only + raw_cloud_policy=always_prohibited + content_hash |
-| TRACE-004 | — | ADR-0011 (supersedes 0003) | REQ-005 | AC-005 / TEST-005 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.1 | ID 체계 (`src_/doc_/snap_/clm_/dos_/scn_/ths_/drf_/pub_/edge_/run_/aci_/mcl_`) |
-| TRACE-005 | — | ADR-0005, ADR-0011, ADR-0016 | REQ-006 | AC-006 / TEST-006 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.1 | confidence 분해 + collectability_score + claim_status 8-state |
+| TRACE-004 | — | ADR-0025 (supersedes ADR-0011 object model) + ADR-0024 (met_) | REQ-005 | AC-005 / TEST-005 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.1/1A.2 | ID 체계 (`src_/doc_/snap_/clm_/dos_/scn_/eit_/ths_/drf_/pub_/edge_/run_/aci_/mcl_/met_`) — `eit_` 신규 (EditorialIntent, ADR-0025) + `met_` 신규 (derived_metric, ADR-0024). TEST-005 28 tests passing (INFRA-1A.2 landed) |
+| TRACE-005 | — | ADR-0005 + ADR-0025 (supersedes ADR-0011 object model) + ADR-0016 | REQ-006 | AC-006 / TEST-006 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.1 | confidence 분해 + collectability_score + claim_status 8-state. 10-stage anchor (ADR-0025 supersedes ADR-0011) |
 | TRACE-006 | — | ADR-0015 (supersedes 0008) | REQ-007, NFR-005 | AC-007 / TEST-007 | P0-M3 | EXTR | EXTR-1A | EXTR-1A.2 | evidence nullable quote + quote_reason + storage_level |
 | TRACE-007 | — | ADR-0013 (supersedes 0007) | REQ-008 | AC-008 / TEST-008 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.4 | Neo4j typed edges (v0 5종) + frontmatter 배열 lint |
 | TRACE-008 | — | ADR-0006 | REQ-009 | AC-009 / TEST-009 | P0-M3 | EXTR | EXTR-1A | EXTR-1A.1 / EXTR-1A.5 | extractor router |
@@ -29,12 +29,12 @@ Question ↔ Decision ↔ Requirement ↔ Gate/Test ↔ Milestone/Track/Phase/Sl
 | TRACE-013b | — | ADR-0009 | NFR-002 | AC-017 / manual reproducibility | P0-M5 | AGG | AGG-1A | AGG-1A.2 / AGG-1A.3 | reproducibility는 manual gate (AC-017) — 자동 TEST 미정의 |
 | TRACE-014 | Q-002 | ADR-0010 | REQ-016 | AC-016 / TEST-016 | P0-M5 | OPS | OPS-1B | OPS-1B.1 | stale 트리거 3종 |
 | TRACE-015 | SPIKE-001 | ADR-0012, ADR-0014 | NFR-001 | AC-002 / TEST-002 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.2 | Neo4j Community + native FTS 검색 p95 < 1s |
-| TRACE-016 | — | ADR-0011 (supersedes 0003) | NFR-003 | AC-018 / TEST-018 | P0-M6 | PUB | PUB-1A | PUB-1A.1 | 5-step trace (9-stage 안에서 5단계 이내) |
+| TRACE-016 | Q-042 → DEC-020 | ADR-0025 (supersedes ADR-0011 object model) + DEC-020 | NFR-003 | AC-018 / TEST-018 | P0-M6 | PUB | PUB-1A | PUB-1A.1 / PUB-1A.2 | 5-hop 단축 trace path lock — Publication → ContentDraft → Thesis → Scenario → Claim → Snapshot. EditorialIntent / Source / Document 선택적 skip (metadata anchor). 9-stage 표현은 historical, ADR-0025 10-stage 가 canonical. TRACE-039 와 동일 결정 (중복 row) |
 | TRACE-017 | Q-028 → DEC-008 → DEC-010 | ~~ADR-0006~~ (superseded) → ADR-0023 + DEC-010 | NFR-004 | AC-019 / TEST-019 | P0-M3 | OPS | OPS-1A | OPS-1A.1 / OPS-1A.2 | run ledger + cost throttling. run_ledger 확장 필드: prompt_version + system_prompt_sha256 + cached_tokens + batch_id + backfill_run_id + **vendor + tier + cross_vendor_review_of + domain_override_reason** (ADR-0023 INV-0023-7) |
 | TRACE-018 | — | ADR-0006 | NFR-007 | AC-021 / TEST-021 | P0-M3 | EXTR | EXTR-1A | EXTR-1A.1 | extractor interface 확장 |
 | TRACE-019 | Q-003 | ADR-0015 (supersedes 0008) | REQ-013 | AC-013 / TEST-013 | P0-M6 | PUB | PUB-1A | PUB-1A.3 | publication cascade — Q-003 결정 후 활성 |
-| TRACE-020 | — | ADR-0012 (supersedes 0004) | NFR-006 | AC-020 / TEST-020 | P0-M1 | INFRA | INFRA-1A | INFRA-1A.3 | Snapshot fingerprint + content_hash + R2 permitted artifact durability |
-| TRACE-021 | Q-021 (reflow by DEC-004 + DEC-009; pending `data/sources_seed.yaml` commit in **this repo**) | ADR-0016 + DEC-004 + DEC-009 | REQ-017 | AC-022 / TEST-022 | P0-M2 | INFRA | INFRA-1B | INFRA-1A.6 / INFRA-1B.1 | Tier A-D + collectability_score + access_method. size cap 없음 — v0 entry 72 source proposed (경제 22 + 정책 17 + 사회 18 + 대중문화 15, 한국 24개 + 글로벌 48개) `docs/research/source-seed-list-2026-05.md` |
+| TRACE-020 | Q-049 → DEC-021 | ADR-0012 (supersedes 0004) + ADR-0010 INV-0010-4 + DEC-021 | NFR-006 | AC-020 / TEST-020 | P0-M1 / P0-M2 hardening / P1+ | INFRA | INFRA-1A / INFRA-1B | INFRA-1A.3 (landed) + INFRA-1B.9 (P1+ canonical_text_hash) + INFRA-1B.10 (P0-M2 hardening document_fetch_state v7) | Snapshot fingerprint durability — `canonical_text_hash` diff = 의미 변경 trigger primary (ADR-0010 INV-0010-4), `raw_body_hash` diff 단독 = `source_changed_minor` alert (v1+) 만. canonical_text_hash NULL fallback = raw_body_hash. R2 round-trip = raw_body_hash + r2_key 무결성 verify (permitted artifact only) |
+| TRACE-021 | ~~Q-021~~ resolved (INFRA-1A.6, 2026-05-12) | ADR-0016 + DEC-004 + DEC-009 | REQ-017 | AC-022 / TEST-022 | P0-M2 | INFRA | INFRA-1B | INFRA-1A.6 / INFRA-1B.1 (둘 다 landed) | Tier A-D + collectability_score + access_method. size cap 없음 — v0 entry 72 source landed (경제 22 + 정책 17 + 사회 18 + 대중문화 15, 한국 24개 + 글로벌 48개) **`data/sources_seed.yaml` commit landed** (PR #12, 67a5f6e, 2026-05-12). 분포 risk 19% / opportunity 29% / neutral 42% / mixed 10% (AC-027 안전 마진 4%). RSS endpoint 실 검증은 INFRA-1B.1 / 1B.2 슬라이스 안에서 별도 완료 |
 | TRACE-022 | — | ADR-0017 | REQ-018 | AC-023 / TEST-023 | P0-M2 | INFRA | INFRA-1B | INFRA-1B.1 | source_policy 3 필드 + mode-aware policy gate + 8 위험 행동 트리거 |
 | TRACE-023 | — | ADR-0017, ADR-0015 | REQ-019 | AC-024 / TEST-024 | P0-M2 | INFRA | INFRA-1B | INFRA-1B.5 | access_intervention Neo4j 노드 + severity 자동 산정 + batch report |
 | TRACE-024 | — | ADR-0018 | REQ-020 | AC-025 / TEST-025 | P0-M3 | INFRA | INFRA-1B | INFRA-1B.6 | Manual feedback CLI + 3-way 분리 + 3-option intervention review |
@@ -78,38 +78,58 @@ Question ↔ Decision ↔ Requirement ↔ Gate/Test ↔ Milestone/Track/Phase/Sl
 
 ## Gaps
 
-- Q-001 (horizon enum) 미해결 → AC-012(scenario validate), AC-013(cite check
-  horizon mismatch) 부분 검증만 가능
-- Q-002 (stale_after) 미해결 → AC-016 시간 트리거 placeholder 30일 사용 중
-- Q-003 (publication 정정 트리거) 미해결 → AC-013 cascade 완전 구현 차단
-- Q-008 (Thesis ID 체계) 미해결 → AGG-1A.4 / PUB-1A.1 진입 전 lock
-- Q-012 (Neo4j ↔ SQLite sync 정책) 미해결 → INFRA-1A.2 commit 전 lock 권고
-- Q-020 (Neo4j GPL v3 boundary) 미해결 → INFRA-1A.2 commit 전 lock 권고
-- Q-021 (Tier A seed — size cap 없음) — `docs/research/source-seed-list-
-  2026-05.md` 72 source proposed (경제 22 + 정책 17 + 사회 18 + 대중문화 15,
-  한국 소스 24개 + 글로벌 48개). 분포 충족: risk 14 (19%) / opportunity
-  21 (29%) / neutral 30 (42%) / mixed 7 (10%) — AC-027 통과 (안전 마진
-  4%). 사용자 list review + accept 후 **이 repo** `data/
-  sources_seed.yaml` 또는 SQLite migration INSERT commit 시 resolved
-  (외부 repo 의존성 없음 — `alxdr3k/k-world-monitor` 자체가 canonical)
-- ~~Q-022~~ **resolved by DEC-004** (v0 4 메타 카테고리)
-- Q-024 (Neo4j-specific 기능 활용 boundary) 미해결 → INFRA-1A.2 commit
-  전 lock 권고
-- Q-025 (이 repo = second-brain vault 기준 "외부 repo" 부트스트랩 cadence)
-  미해결 → INFRA-1A.1 완료 후 재평가
-- ~~Q-026~~ **resolved by DEC-006** (vault sync trigger = git push 단일)
-- ~~Q-027~~ **resolved by DEC-007** (retention / R2 lifecycle / backup
-  schedule)
-- ~~Q-028~~ **resolved by DEC-008 → re-resolved by DEC-010** (LLM routing v2
-  multi-vendor + Data Science Module + cost ceiling 재산정. DEC-008 의
-  Anthropic-only 라우팅 supersede)
-- Q-029 (ImpactAssessment v0 embedded vs v1 노드) 미해결 → AGG-1A.2
-  진입 전 lock
-- Q-030 (counterclaim multi-relation v1 도입 우선순위) 미해결 → v1 진입
-  시점 lock
-- Q-031 (TTS v1 timing) / Q-032 (4-format auto-generate phasing) / Q-033
-  (외부 플랫폼 auto cross-post) / Q-034 (auto retraction trigger) 모두 v1+
-  PUB-1B / OPS-1B 트랙 진입 시점 lock (TRACE-037)
-- 모든 TEST 위치는 `(planned)` 상태 — 코드 도입 시 실제 위치로 갱신
-- staging/production 환경 미정의 → AC-017 reproducibility는 local manual로만
-  실행 가능 (P1 검토)
+### Open (block 진입 시점 가까운 항목 위주)
+
+- **Q-001** (scenario horizon enum) — AGG-1A.3 진입 전 lock → AC-012 /
+  AC-013 부분 검증만 가능
+- **Q-002** (Dossier `stale_after` 기본값) — OPS-1B.1 진입 전 lock → AC-016
+  시간 트리거 default 30일 placeholder
+- **Q-003** (Publication 정정 ledger 트리거) — PUB-1A.3 진입 전 lock →
+  AC-013 cascade 완전 구현 차단
+- **Q-008** (Thesis ID 체계) — AGG-1A.4 / PUB-1A.1 진입 전 lock
+- **Q-012** (Neo4j ↔ SQLite sync 정책 CDC vs batch) — v1+ research session
+  multi-store 도입 시점 lock
+- **Q-025** (외부 repo 부트스트랩 cadence) — P0-M2 게이트 accept 후 재평가
+- **Q-029** (ImpactAssessment v0 embedded vs v1 노드) — AGG-1A.2 진입 전 lock
+- **Q-030** (counterclaim multi-relation v1 도입 우선순위) — v1 진입 시점 lock
+- **Q-031/Q-032/Q-033/Q-034** (TTS / 4-format auto-generate / 외부 플랫폼
+  auto cross-post / auto retraction trigger) — v1+ PUB-1B / OPS-1B 트랙 진입
+  시점 lock (TRACE-037)
+- **Q-050** (AI 검색 + repo 통합 architecture) — 운영자 결정 7 항목 pending
+  (parent_round_id branching semantics / mode='mixed' validation profile /
+  termination defaults / migration v8 ALTER 범위 / ScenarioRevision FK 위치 /
+  EditorialIntent.purpose lock 시점 / 신규 ADR 발급 시점). resolution 후
+  INFRA-1B.7b ~ 1B.7e + AGG-1A.6 + DISCOVERY-EXT.1 + EXTR-1A.7 진입
+
+### Resolved (audit anchor)
+
+- ~~Q-004~~ resolved (INFRA-1A.2) — SQLite local + vault jsonl external
+- ~~Q-020~~ resolved (INFRA-1A.2) — Neo4j GPL v3 1인 internal use scope lock
+- ~~Q-021~~ resolved (INFRA-1A.6) — Tier A 72 source seed, AC-027 통과
+- ~~Q-022~~ resolved by DEC-004 — v0 4 메타 카테고리
+- ~~Q-024~~ resolved (INFRA-1A.2) — APOC standard + Cypher 5.x core lock
+- ~~Q-026~~ resolved by DEC-006 — vault sync = git push 단일
+- ~~Q-027~~ resolved by DEC-007 — retention / R2 lifecycle lock
+- ~~Q-028~~ resolved by DEC-008 → re-resolved by DEC-010 — LLM routing v2
+  multi-vendor + Data Science Module + cost ceiling
+- ~~Q-037~Q-041~~ resolved by DEC-019 — apoc.lock / worker_id CAS / chunked
+  stream / pre-deploy migration framework / millis-bearing timestamp
+- ~~Q-042~Q-048~~ resolved by DEC-020 — NFR-003 5-hop reflow / evidence_role
+  AGG-1A.1 자동 검증 / NFR-008 R2 audit code enforcement / invariant
+  validator coverage 확장 / 일반화 quota module / Doppler secret store /
+  CI required check + branch protection (admin task)
+- ~~Q-049~~ resolved by DEC-021 — revisit policy TTL + event-driven hybrid;
+  snapshot_diff = canonical_text_hash diff primary, raw_body_hash fallback
+- ~~Q-051~~ resolved by DEC-022 + DEC-023 — UI stack (Astro shell + React
+  island + shadcn/Radix + Tailwind + TanStack + SSE) + Round 1 routing
+  default 5 항목 lock
+
+### Operational
+
+- 모든 TEST 위치 — INFRA-1A.2 ~ INFRA-1B.6 + OPS-1A.1 슬라이스 안에서
+  실제 위치 backfill 완료 (TEST-005/008/019/020/022/024/025/026/027). 미구현
+  TEST-### 는 여전히 `(planned)` — P0-M3+ 슬라이스 진입 시 갱신
+- staging/production 환경 미정의 → AC-017 reproducibility 는 local manual
+  로만 실행 가능 (P1 검토)
+- branch protection required check 등록 (DEC-020 Q-048 partial — admin task)
+  미실시. ci.yml workflow 자체는 활성

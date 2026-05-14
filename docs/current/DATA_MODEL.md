@@ -1,6 +1,6 @@
 # Data Model
 
-> Last verified against code: 13d61af (2026-05-13) — comprehensive review backfill (v2~v6 마이그레이션 + crawl_state / discovery_queue 추가 반영)
+> Last verified against code: 0a76d31 (code baseline, 2026-05-13 — last code-touching commit on branch: `src/discovery/worker/run-discovery.ts`, `src/storage/r2/client.ts`, `.github/workflows/{ci,doc-freshness,invariant-check}.yml`). Thin-doc edits since: 5aa70ac → ceaa17c → 38b846d → this commit (2026-05-14, PR #37 doc-drift fix — discovery_queue current/planned column split: worker_id 가 P1-M2-hardening planned column 임을 명시). **코드 baseline (0a76d31) 이후 본 branch 의 모든 commit 은 docs-only** (verified via `git log --name-only 0a76d31..HEAD -- 'src/**' 'migrations/**' 'scripts/**' 'tests/**' '.github/**' 'package.json' 'tsconfig.json` 빈 결과). 다음 코드 변경 시점에 baseline SHA 갱신.
 
 ## Source of truth
 
@@ -84,7 +84,7 @@ FTS indexes (Lucene): claim_fts, source_fts, document_fts, scenario_fts, thesis_
 | `schema_migrations` | — | applied migration version tracking |
 | `source_registry_slug_map` | DEC-015 | slug↔source_id 안정 매핑 (v3, INFRA-1B.1) |
 | `crawl_state` | ADR-0030 INV-0030-5 | discovery scheduler per-source state — last_polled_at / last_etag / last_modified_header / consecutive_failures / next_eligible_at (v5, INFRA-1B.2b) |
-| `discovery_queue` | INFRA-1B.2 / INFRA-1B.3 | 발견 URL pending Snapshot fingerprint — source_id / url / status / worker_id (P1-M2-hardening) / discovered_at / updated_at (v6, partial unique index `(source_id, url) WHERE status IN ('pending','processing')`) |
+| `discovery_queue` | INFRA-1B.2 / INFRA-1B.3 | 발견 URL pending Snapshot fingerprint. **Current columns (v6 landed)**: source_id / url / status / discovered_at / updated_at + partial unique index `(source_id, url) WHERE status IN ('pending','processing')`. **Planned columns (P1-M2-hardening, INFRA-1B.3.x)**: worker_id (Q-038 / DEC-019, CAS pattern for multi-worker concurrency). worker_id 는 현재 schema 미포함 — INFRA-1B.3.x 슬라이스 안 ALTER 로 추가 (DEPLOY-1A.1 ALTER-only contract) |
 
 ## Lifecycle states
 

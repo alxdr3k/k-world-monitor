@@ -49,7 +49,16 @@ CLI 는 자동화/cron/scripting secondary**.
 "managed edge 도입 X" 와 충돌 — Q-051 사용자 결정 항목 #7 (hosting) 에서
 ADR Constraints 본문 reflow 의무.
 
-## 3. Stack 옵션 (사용자 결정 항목)
+## 3. Stack 옵션 (historical — DEC-022 lock 후 superseded)
+
+> **Status: superseded by DEC-022 (2026-05-14)**. 본 section 의 옵션 A~F
+> 비교는 historical audit record 다. 실제 채택 stack 은 **A' (Astro shell
+> + React 18 island + Tailwind + shadcn/ui + Radix UI + TanStack Query v5
+> + SSE)** — §14 #1 + DEC-022 본문 + ADR-0031 (placeholder) 가 canonical.
+> 이전 round 의 "기본 권고: 옵션 E (bun + Hono + HTMX + Tailwind)" 는
+> **reject** (SPA-grade interaction 부족, `/ops` 는 AI research console).
+> 옵션 B (Next.js) / 옵션 C/D/F 도 reject. 신규 슬라이스 / 신규 PR 에서
+> 본 §3 옵션 표현을 stack default 로 참조 금지.
 
 ### 옵션 A — Astro 5.0 + Solid islands
 
@@ -78,7 +87,7 @@ ADR Constraints 본문 reflow 의무.
 - light, fast SSR, file-based routing
 - 단점: ecosystem 작음, 본 repo React/Astro 와 별도 framework family
 
-### 옵션 E — **bun + Hono + HTMX + Tailwind (lightest, 권고)**
+### 옵션 E — bun + Hono + HTMX + Tailwind (~~lightest, 권고~~ — historical, **rejected by DEC-022**)
 
 - bun runtime native (본 repo 이미 사용)
 - Hono = bun-friendly HTTP framework
@@ -102,10 +111,13 @@ ADR Constraints 본문 reflow 의무.
 - Vue 3 기반, SSR
 - 단점: 본 repo 와 framework family 분리
 
-**기본 권고: 옵션 E (bun + Hono + HTMX + Tailwind)**. 본 repo stack
-align + 1인 운영 surface 최소 + mobile responsive 친화. 단 SPA-grade UI
-가 필요한 경우 (Q-050 의 scenario branch visualization 등) 는 별도 page
-에서 vega-lite / mermaid + HTMX swap 으로 처리.
+~~**기본 권고: 옵션 E (bun + Hono + HTMX + Tailwind)**.~~ → **rejected by
+DEC-022 (2026-05-14)**. SPA-grade interaction 부족 + `/ops` 는 AI research
+console (scenario graph + route selector + drawer/sheet + SSE progress +
+cache invalidation 등 island-grade interactivity 필요) + LLM coding safety
+열위 (HTMX 패턴 학습 자료 / 디버깅 사례 적음). 실제 채택 stack 은 §14 #1
++ DEC-022 6 layer lock = **Astro shell + React 18 island + Tailwind +
+shadcn/ui + Radix + TanStack Query v5 + SSE** 다.
 
 ## 4. Hosting / Deploy — Topology B 채택 (lock, §13 참조)
 
