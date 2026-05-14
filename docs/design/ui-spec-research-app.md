@@ -361,7 +361,8 @@ source trace:
 ## 9. PWA / offline 지원
 
 - `manifest.json` + service worker
-- offline 가능 페이지: `/ask` (입력만), `/sessions/:id` (cached)
+- offline 가능 페이지: `/ops/ask` (입력만), `/ops/sessions/:id` (cached)
+  — §6.1 의 `/ops/*` private prefix 와 일치
 - offline 차단 페이지: `/api/*` (네트워크 의무)
 - install prompt: 모바일 iOS / Android Add to Home Screen
 
@@ -501,17 +502,21 @@ Same repo / shared design (DEC-022 stack lock):
    WebSocket reject. turn_event durable log (Q-050 GPT T-4) 와 binding.
 7. Public site vs Research app 의 sub-domain 분리 (research.<domain>)
    동의 여부
-8. ADR Constraints "managed edge 도입 X" 본문 reflow — Cloudflare Workers
-   는 Pages 와 같은 vendor surface 안 exception 으로 인정 (이미 ADR-0022
-   lock) 동의 여부
+8. ADR Constraints "managed edge 도입 X" 본문 reflow: **lock 완료** —
+   Topology B (§4/§13) 가 이미 lock 된 상태에서 CF Workers reject 결정
+   (Hetzner backend same-origin 불가 + Tailscale-only v0 와 horizontal
+   배치 불일치) 이 canonical. CF Pages public anchor 만 Constraints
+   exception 으로 인정 (ADR-0022 lock). 본 항목은 historical 옵션 비교,
+   결정은 lock 됨 — CF Workers exception 추가 인정 검토 종료.
 
 ## 15. 슬라이스 / phasing
 
 본 UI 도입은 Q-049/050/051 resolution 이후 P1+ phasing:
 
 - **RESEARCH-1A.1**: HTTP API + research_turn schema + auth + routing logic
-- **RESEARCH-1A.2**: Web UI core pages (mobile-first) — `/ask` / `/sessions`
-  / `/sessions/:id` / `/turns/:tid`
+- **RESEARCH-1A.2**: Web UI core pages (mobile-first) — `/ops/ask` /
+  `/ops/sessions` / `/ops/sessions/:id` / `/ops/turns/:tid` (§6.1 의
+  `/ops/*` private prefix 의무와 일치)
 - **RESEARCH-1A.3**: Web UI advanced — graph view / evidence inspector /
   publication preflight
 - **RESEARCH-1A.4**: PWA + offline draft
