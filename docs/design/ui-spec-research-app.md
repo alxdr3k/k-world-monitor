@@ -211,37 +211,39 @@ RESEARCH-1A.API0 lock — turn-detail / round-timeline endpoint 는 P0
 (RESEARCH-1A.1+) 로 미룬다. 아래 페이지 명세는 P1+ 완성 형태 기준이며,
 **P0 read-only 스코프 별로** 명시.
 
-- `/` 홈 — "Continue last session" CTA + "New session" + recent 5 sessions
-  *(P0 = recent 5 sessions read-only 만 — `GET /api/sessions`; CTA /
-  "New session" 버튼 P1+)*
-- `/ask` — 풀스크린 text input + send button + voice icon *(P1+ 전용 —
-  P0 없음, API0 mutation endpoint 미존재)*
-- `/sessions` — list view (title + mode + last activity + active marker)
-  *(P0 read-only — `GET /api/sessions`; active marker 표시만, switch 액션
-  은 P1+)*
-- `/sessions/:id` — vertical timeline (round → turn) + "Add round" / "Ask"
-  버튼 fixed bottom *(P0 read-only = `GET /api/sessions/:id` 의 session
-  header + status + intent 만; **round timeline / turn list 는 P0 미포함**
-  — RESEARCH-1A.0 plan lock "round timeline 미포함, P0-M6 안에서는
-  single-shot research_session 만, ExplorationRound P1+" 와 일치. "Add
-  round" / "Ask" / mutation 전부 P1+)*
-- `/turns/:tid` — user message + AI answer (markdown render) + artifact
-  link list *(P1+ 전용 — P0 없음, API0 에 `GET /api/turns/:tid` 미정의 +
-  RESEARCH-1A.0 plan 의 round timeline P1+ 와 일치)*
+- `/ops/` 홈 — "Continue last session" CTA + "New session" + recent 5
+  sessions *(P0 = recent 5 sessions read-only 만 — `GET /api/sessions`;
+  CTA / "New session" 버튼 P1+)*
+- `/ops/ask` — 풀스크린 text input + send button + voice icon *(P1+ 전용
+  — P0 없음, API0 mutation endpoint 미존재)*
+- `/ops/sessions` — list view (title + mode + last activity + active
+  marker) *(P0 read-only — `GET /api/sessions`; active marker 표시만,
+  switch 액션은 P1+)*
+- `/ops/sessions/:id` — vertical timeline (round → turn) + "Add round" /
+  "Ask" 버튼 fixed bottom *(P0 read-only = `GET /api/sessions/:id` 의
+  session header + status + intent 만; **round timeline / turn list 는
+  P0 미포함** — RESEARCH-1A.0 plan lock "round timeline 미포함, P0-M6
+  안에서는 single-shot research_session 만, ExplorationRound P1+" 와
+  일치. "Add round" / "Ask" / mutation 전부 P1+)*
+- `/ops/turns/:tid` — user message + AI answer (markdown render) +
+  artifact link list *(P1+ 전용 — P0 없음, API0 에 `GET /api/turns/:tid`
+  미정의 + RESEARCH-1A.0 plan 의 round timeline P1+ 와 일치)*
 - `/posts/:slug` — public publication 검토 *(P0 read-only — `GET /api/
-  publications` / public artifact, RESEARCH-1A.0 plan 의 "`/posts/:slug`
+  publications` / public artifact, **public surface 이므로 `/ops` prefix
+  없음** §6.1 라우팅 맵과 일치. RESEARCH-1A.0 plan 의 "`/posts/:slug`
   public 검토" 와 일치)*
 
 ### 6.3 데스크탑 우선 페이지 (full UX)
 
-- `/dossiers/:did` — 2-pane: claim list + evidence panel
-- `/publications/:pid` — preflight panel + cite check inspector
-- `/drafts/:did/edit` — **ContentDraft 본문 편집 전체 (Q-F 사용자 결정 —
-  데스크탑 only). 모바일은 preview 만, full edit 데스크탑.**
+- `/ops/dossiers/:did` — 2-pane: claim list + evidence panel
+- `/ops/publications/:pid` — preflight panel + cite check inspector (§6.1
+  `/ops/publications` list 의 detail 화)
+- `/ops/drafts/:did/edit` — **ContentDraft 본문 편집 전체 (Q-F 사용자
+  결정 — 데스크탑 only). 모바일은 preview 만, full edit 데스크탑.**
 
 ### 6.4 모바일 + 데스크탑 양립 페이지 (Q-G 사용자 결정 — 모바일 zoom/pan)
 
-- `/scenarios/:sid` — Scenario branch graph (vega-lite or mermaid) +
+- `/ops/scenarios/:sid` — Scenario branch graph (vega-lite or mermaid) +
   branches list. **모바일에서 zoom / pan / 1-tap branch expand 가능**.
   단 branch 편집 (assumption / falsifier 추가) 은 데스크탑 우선.
 
@@ -502,8 +504,10 @@ Same repo / shared design:
 - **첫 publication 흐름 = CLI + /ops 둘 다** (Q-C) — CLI 가 critical path
   유지, /ops 가 mobile inspection 보조.
 - **/ops minimum P0-M6 scope = Read-only mobile** (Q-D) — publication
-  결과 / cite anchor / session list / round timeline 보기 가능. ask /
-  edit / publish trigger 는 CLI.
+  결과 / cite anchor / session list (header + status + intent 만) 보기
+  가능. **round timeline / turn detail 은 P0-M6 미포함** (RESEARCH-1A.0
+  + §6.2 와 일치, ExplorationRound 자체가 P1+ schema). ask / edit /
+  publish trigger 는 CLI.
 - Read-only minimum 슬라이스: `RESEARCH-1A.0` (P0-M6 안)
   — `/ops` 홈 + `/ops/sessions` list + `/ops/sessions/:id` 읽기 +
   `/posts/:slug` public 검토. **v0 Auth = Tailscale-only (Q-051 lock)**.
