@@ -265,15 +265,21 @@ source trace:
 1. POST /api/ask { message, sessionId?, roundId?, route?, ... }
 2. Server:
    - resolve session/round (flag > active_context > error)
-   - INSERT research_turn (status='in_progress')
-   - dispatch to SearchOrchestrator (Q-050 INFRA-1B.7c)
+   - INSERT research_turn (created_at = NOW, completed_at = NULL)
+     // status 컬럼은 Q-051 schema 에 없음 — completion 은 completed_at IS NOT NULL 로 derive
+   - if route != 'answer_only':
+       - dispatch to SearchOrchestrator (Q-050 INFRA-1B.7c)
    - stream SSE events: turn started / search results / answer chunks
 3. Client (HTMX SSE):
    - swap turn detail into round timeline
    - update active context badge if route changed
 4. Server finalize:
-   - UPDATE research_turn (status='completed', answer_summary, cost_usd)
-   - INSERT round_search_run / round_candidate_url
+   - UPDATE research_turn (completed_at = NOW, answer_summary, cost_usd)
+   - if route != 'answer_only':
+       - INSERT round_search_run (turn_id = current turn_id, ...) /
+         INSERT round_candidate_url (search_run_id = ..., ...)
+   - else (answer_only):
+       - search_run / candidate_url 작성 skip — Q-051 정의 (turn 만 기록)
    - 의무 audit log
 ```
 
