@@ -10,6 +10,7 @@ import { createHash } from "crypto";
 import { withSession } from "../../storage/neo4j/connection";
 import { r2Put } from "../../storage/r2/client";
 import { getDb } from "../../storage/sqlite/connection";
+import { recordR2UploadDecision } from "../../storage/audit/policy-decisions";
 import type { ContentKind } from "../fetch/safe-fetch";
 
 export type ArchivePolicy =
@@ -474,6 +475,18 @@ export async function createSnapshotFingerprint(
         input.body.byteOffset,
         input.body.byteOffset + input.body.byteLength
       ) as ArrayBuffer;
+      // INV-0012-3 audit row 1/2 — record attempt BEFORE r2Put so a network
+      // failure still leaves a recoverable audit trail (NFR-008 audit-by-absence
+      // proof requires every upload attempt accounted for).
+      recordR2UploadDecision({
+        sourceId: input.sourceId,
+        snapId: existing.snapId,
+        url: input.url,
+        archivePolicy: input.archivePolicy,
+        rawCloudPolicy: input.rawCloudPolicy,
+        decision: "attempted",
+        rationale: "dedup back-fill path",
+      });
       await r2Put(key, bodyBuf);
       // ADR-0012 INV-0012-3 TOCTOU close: re-check linked-source policy AFTER
       // r2Put completes. A concurrent linker can attach a prohibited source
@@ -516,13 +529,47 @@ export async function createSnapshotFingerprint(
             );
           });
           dedupR2Key = key;
+          // INV-0012-3 audit row 2/2 — successful upload + back-patch.
+          recordR2UploadDecision({
+            sourceId: input.sourceId,
+            snapId: existing.snapId,
+            url: input.url,
+            archivePolicy: input.archivePolicy,
+            rawCloudPolicy: input.rawCloudPolicy,
+            decision: "uploaded",
+            rationale: `dedup back-fill path; r2_key=${key}`,
+          });
         } catch (setErr) {
           console.warn(
             `[snapshot] dedup r2_key back-patch failed for ${existing.snapId}; ` +
               `r2 object uploaded, retry will back-fill:`,
             setErr instanceof Error ? setErr.message : setErr
           );
+          // INV-0012-3 audit row 2/2 — r2 object uploaded but Neo4j SET failed.
+          recordR2UploadDecision({
+            sourceId: input.sourceId,
+            snapId: existing.snapId,
+            url: input.url,
+            archivePolicy: input.archivePolicy,
+            rawCloudPolicy: input.rawCloudPolicy,
+            decision: "set_r2_key_failed_neo4j",
+            rationale: `dedup back-fill path; ${setErr instanceof Error ? setErr.message : String(setErr)}`,
+          });
         }
+      } else {
+        // INV-0012-3 audit row 2/2 — TOCTOU recheck rejected (concurrent
+        // prohibited source linker, or recheck itself threw). r2 object
+        // remains orphaned by design (see rationale above for why we do
+        // NOT r2Delete here).
+        recordR2UploadDecision({
+          sourceId: input.sourceId,
+          snapId: existing.snapId,
+          url: input.url,
+          archivePolicy: input.archivePolicy,
+          rawCloudPolicy: input.rawCloudPolicy,
+          decision: "skipped_toctou",
+          rationale: "dedup back-fill path; post-r2Put cross-source policy recheck rejected — r2_key not set",
+        });
       }
     }
 
@@ -577,6 +624,18 @@ export async function createSnapshotFingerprint(
         input.body.byteOffset,
         input.body.byteOffset + input.body.byteLength
       ) as ArrayBuffer;
+      // INV-0012-3 audit row 1/2 — new-path attempt BEFORE r2Put.
+      recordR2UploadDecision({
+        sourceId: input.sourceId,
+        snapId: actualSnapId,
+        url: input.url,
+        archivePolicy: input.archivePolicy,
+        rawCloudPolicy: input.rawCloudPolicy,
+        decision: "attempted",
+        rationale: mergeMatchedExisting
+          ? "new-path; MERGE matched existing Snapshot"
+          : "new-path; first create",
+      });
       await r2Put(key, bodyBuf);
       // ADR-0012 INV-0012-3 TOCTOU close (MERGE-matched branch only): if our
       // Snapshot CREATE collided with a concurrent worker, re-check policy
@@ -615,13 +674,44 @@ export async function createSnapshotFingerprint(
             );
           });
           r2Key = key;
+          // INV-0012-3 audit row 2/2 — successful new-path upload + back-patch.
+          recordR2UploadDecision({
+            sourceId: input.sourceId,
+            snapId: actualSnapId,
+            url: input.url,
+            archivePolicy: input.archivePolicy,
+            rawCloudPolicy: input.rawCloudPolicy,
+            decision: "uploaded",
+            rationale: `new-path; r2_key=${key}`,
+          });
         } catch (setErr) {
           console.warn(
             `[snapshot] new-path r2_key back-patch failed for ${actualSnapId}; ` +
               `r2 object uploaded, retry will back-fill:`,
             setErr instanceof Error ? setErr.message : setErr
           );
+          // INV-0012-3 audit row 2/2 — r2 object uploaded, Neo4j SET failed.
+          recordR2UploadDecision({
+            sourceId: input.sourceId,
+            snapId: actualSnapId,
+            url: input.url,
+            archivePolicy: input.archivePolicy,
+            rawCloudPolicy: input.rawCloudPolicy,
+            decision: "set_r2_key_failed_neo4j",
+            rationale: `new-path; ${setErr instanceof Error ? setErr.message : String(setErr)}`,
+          });
         }
+      } else {
+        // INV-0012-3 audit row 2/2 — TOCTOU recheck rejected on MERGE-matched branch.
+        recordR2UploadDecision({
+          sourceId: input.sourceId,
+          snapId: actualSnapId,
+          url: input.url,
+          archivePolicy: input.archivePolicy,
+          rawCloudPolicy: input.rawCloudPolicy,
+          decision: "skipped_toctou",
+          rationale: "new-path; MERGE-matched existing snapshot; post-r2Put cross-source policy recheck rejected",
+        });
       }
     }
   }

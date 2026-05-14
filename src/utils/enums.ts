@@ -158,6 +158,37 @@ export function isThesisMarketStance(v: unknown): v is ThesisMarketStance {
 }
 
 // ---------------------------------------------------------------------------
+// policy_decisions.intended_action audit ledger enums
+// (INFRA-1B.3.x-audit, AC-032 / NFR-008, ADR-0012 INV-0012-3)
+// ---------------------------------------------------------------------------
+export const INTENDED_ACTION = ["r2_upload"] as const;
+export type IntendedAction = (typeof INTENDED_ACTION)[number];
+export function isIntendedAction(v: unknown): v is IntendedAction {
+  return typeof v === "string" && (INTENDED_ACTION as readonly string[]).includes(v);
+}
+
+// R2UploadDecision values populate policy_decisions.decision when
+// intended_action='r2_upload'. Every r2Put call site in
+// src/discovery/worker/snapshot-fingerprint.ts inserts:
+//   - one 'attempted' row BEFORE r2Put returns (so an r2Put exception still
+//     leaves an audit trail for NFR-008 reconstruction)
+//   - one outcome row AFTER r2Put returns ('uploaded' | 'skipped_toctou' |
+//     'set_r2_key_failed_neo4j')
+// The 'blocked_by_policy' value is NOT a runtime row — policy gating happens
+// before r2Put is reached; absence of an audit row for a Snapshot proves
+// no upload was attempted (ADR-0012 INV-0012-3 audit-by-absence).
+export const R2_UPLOAD_DECISION = [
+  "attempted",
+  "uploaded",
+  "skipped_toctou",
+  "set_r2_key_failed_neo4j",
+] as const;
+export type R2UploadDecision = (typeof R2_UPLOAD_DECISION)[number];
+export function isR2UploadDecision(v: unknown): v is R2UploadDecision {
+  return typeof v === "string" && (R2_UPLOAD_DECISION as readonly string[]).includes(v);
+}
+
+// ---------------------------------------------------------------------------
 // Source bidirectional perspective enum (ADR-0019, AC-027)
 // ---------------------------------------------------------------------------
 export const SOURCE_PERSPECTIVE = ["risk_observer", "opportunity_observer", "neutral", "mixed"] as const;

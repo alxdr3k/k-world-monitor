@@ -148,6 +148,21 @@ function setupDb() {
     INSERT OR REPLACE INTO source_material_policy
       (source_id, archive_policy, raw_cloud_policy, external_llm_policy)
       VALUES ('src-1', 'full_snapshot_allowed', 'allowed_public_data_only', 'allowed');
+    -- policy_decisions: v1 + v7 (intended_action column for R2 upload audit).
+    -- INFRA-1B.3.x-audit hooks INSERT into this table around every r2Put call,
+    -- so the snapshot-fingerprint tests must materialize the schema here.
+    CREATE TABLE IF NOT EXISTS policy_decisions (
+      decision_id       TEXT PRIMARY KEY,
+      source_id         TEXT,
+      session_id        TEXT,
+      url               TEXT,
+      trigger_type      TEXT NOT NULL,
+      policy_gate_mode  TEXT NOT NULL CHECK (policy_gate_mode IN ('inline_block','inline_warn','batch_report')),
+      decision          TEXT NOT NULL,
+      rationale         TEXT,
+      created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+      intended_action   TEXT
+    );
   `);
   return db;
 }

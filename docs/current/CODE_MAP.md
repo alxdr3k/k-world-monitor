@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: 13d61af (2026-05-13) — comprehensive review backfill (P0-M2 게이트 검증 직전)
+> Last verified against code: __COMMIT_SHA__ (2026-05-14) — INFRA-1B.3.x-audit landed (R2 upload audit ledger, AC-032 / NFR-008 evidence, Q-044 → DEC-020 / TRACE-040). Previous code baseline = 13d61af (2026-05-13) — comprehensive review backfill.
 
 ## Runtime stack
 
@@ -34,6 +34,7 @@
 | `migrations/sqlite/v4_run_ledger_completed_at_idx.sql` | Composite index on run_ledger(completed_at, vendor) for daily cost aggregation (OPS-1A.1) |
 | `migrations/sqlite/v5_crawl_state.sql` | crawl_state table — discovery scheduler etag/Last-Modified + backoff (INFRA-1B.2b, ADR-0030 INV-0030-5) |
 | `migrations/sqlite/v6_discovery_queue.sql` | discovery_queue table — discovered URLs pending fingerprint (INFRA-1B.2, INFRA-1B.3) |
+| `migrations/sqlite/v7_policy_decisions_intended_action.sql` | policy_decisions ADD COLUMN intended_action — R2 upload audit ledger (INFRA-1B.3.x-audit, AC-032 / NFR-008, Q-044 → DEC-020 / TRACE-040) |
 
 ## Source
 
@@ -56,6 +57,7 @@
 | `src/storage/r2/policy.ts` | PERMITTED_PREFIXES + `checkPermittedPrefix()` + sha256 helpers (ADR-0012 INV-0012-4, INFRA-1A.3) |
 | `src/storage/r2/client.ts` | Bun.S3Client wrapper — `r2Put/r2Get/r2Delete` with policy enforcement (INFRA-1A.3) |
 | `src/storage/source-registry/seed.ts` | Parse `data/sources_seed.yaml`, validate enums + URLs, upsert source_material_policy + slug map (INFRA-1B.1) |
+| `src/storage/audit/policy-decisions.ts` | `recordR2UploadDecision()` — immutable audit row INSERT into policy_decisions around every r2Put call site in snapshot-fingerprint (INFRA-1B.3.x-audit, AC-032 / NFR-008, ADR-0012 INV-0012-3) |
 
 ### Discovery
 
@@ -110,6 +112,7 @@
 | `tests/unit/chunker_test.ts` | Snapshot text → chunk + Neo4j FTS index | — (INFRA-1B.4) |
 | `tests/unit/feedback_test.ts` | manual_claim_entry 3-way + intervention review 3-option | TEST-025 (AC-025) |
 | `tests/unit/run_ledger_test.ts` | startRun / completeRun / failRun + daily cost aggregation (29 tests) | TEST-019 (AC-019) |
+| `tests/unit/audit_policy_decisions_test.ts` | recordR2UploadDecision audit ledger — IntendedAction + R2UploadDecision enum + canonical column INSERT + 4 lifecycle decisions + snap_id rationale anchor correlation (16 tests) | — (INFRA-1B.3.x-audit, AC-032 / NFR-008) |
 | `tests/test-helpers/neo4j-mock.ts` | Shared Neo4j mock helper | (test infra) |
 | `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
 
