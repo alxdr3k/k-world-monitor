@@ -358,7 +358,7 @@ source trace:
    - `useEventStream` hook 으로 SSE message 수신
    - `queryClient.setQueryData(['session', sessionId, 'rounds'])` in-place
      update → React 가 round timeline component 자동 re-render
-   - `queryClient.invalidateQueries(['active-context'])` for route change
+   - `queryClient.invalidateQueries({ queryKey: ['active-context'] })` for route change (TanStack Query v5 object-form filter)
 4. Server finalize:
    - UPDATE research_turn (completed_at = NOW, answer_summary, cost_usd)
    - if route != 'answer_only':
@@ -460,7 +460,7 @@ Same repo / shared design (DEC-022 stack lock):
                                primitive 기반 Dialog / Sheet / Drawer /
                                Popover / DropdownMenu. P1+ RESEARCH-1A.1
                                부터 도입, P0-M6 안에서는 plain Tailwind 만)
-  ops/lib/query/              (TanStack Query v5 provider + queryClient +
+  src/ops/lib/query/          (TanStack Query v5 provider + queryClient +
                                SSE binding hook — useEventStream + setQueryData
                                표준 패턴. P1+ RESEARCH-1A.1 부터 도입)
 ```
@@ -496,11 +496,17 @@ Same repo / shared design (DEC-022 stack lock):
      island / 0 shadcn/ui dep / 0 TanStack Query). P1+ RESEARCH-1A.1+ =
      full stack adoption (React island + shadcn/ui CLI scaffold + TanStack
      Query + SSE binding).
-   - 신규 ADR 발급 의무: 가칭 ADR-0031 (Research App /ops Stack) 를
-     RESEARCH-1A.1 슬라이스 시작 직전까지 발급 — DEC-022 가 anchor (별도
-     PR). ADR-0029 / ADR-0030 은 이미 main 에 점유됨 (LLM prompt
-     injection containment / discovery worker concurrency model) — 다음
-     사용 가능 번호 ADR-0031. 본 §14 #1 의 ADR 작성 의무 (line 433) 흡수.
+   - 신규 ADR 발급 의무 = **closed** — ADR-0031 (Research App /ops
+     Stack) 가 후속 PR (`claude/adr-0029-research-app-ops-stack`) 에서
+     body 본격 작성 + `status: accepted` promote 완료. INV-0031-1~7
+     (Critique 1~6 흡수 + bundle budget) + §3.1 package.json caret 범위
+     + §3.2 astro.config.ops.ts shape + §3.3 client:* directive policy
+     페이지별 표 + §3.4 src/shared/ui layout + §3.5 src/ops/lib/query 구조
+     + §3.6 Lighthouse mobile bundle budget acceptance gate 모두 lock.
+     ADR-0029 / ADR-0030 은 main 에 점유됨 (LLM prompt injection
+     containment / discovery worker concurrency model) — 본 ADR 번호 =
+     ADR-0031 (다음 사용 가능 번호). 본 §14 #1 의 ADR 작성 의무 흡수
+     완료, canonical body 는 `docs/adr/0031-research-app-ops-stack.md`.
 2. Hosting: **lock — Topology B (CF Pages public anchor + Hetzner private
    /ops + /api, same-origin)**. GPT 31 review (2026-05-14) + 사용자 명시
    ("나 이미 다른 서비스들 운영중인 hetzner 서버 있어") 로 결정 lock —
