@@ -159,7 +159,12 @@ topology 는 §13 참조.
 - third-party SSO
 - 단점: provider dependency
 
-**기본 권고: (i) Cloudflare Access**. 1인 운영 + 무료 tier 충분 + 단순.
+**기본 권고: v0 Tailscale-only (사용자 명시 선호), v1+ Cloudflare Tunnel
++ Access** (§13 Topology B lock, Q-051 phasing). 본 section 의 (i)/(ii)/
+(iii) 옵션 비교는 historical record — 실제 채택은 v0 Tailscale → v1+ CF
+Access 의 phasing. (i) Cloudflare Access 직접 default 는 reject (CF Pages
+artifact 와 Tailscale-only Hetzner backend 분리 의무 + 폰 외부망 접근의
+public exposure risk).
 
 ## 6. 페이지 구조 (mobile-first)
 
@@ -360,7 +365,7 @@ source trace:
 
 ## 12. 보안 / privacy
 
-- **Auth**: Cloudflare Access (zero trust)
+- **Auth**: v0 Tailscale-only / v1+ Cloudflare Tunnel + Access (§13 lock)
 - **API key**: Doppler 안에서만 (server-side), client 노출 절대 X
 - **Quote ≤ 200자** (ADR-0015 NFR-005) — client 입력 시 검증, server 재검증
 - **Raw cloud 0건** (NFR-008) — server 가 R2 prefix policy 강제
@@ -428,7 +433,8 @@ Same repo / shared design:
 1. Stack: 옵션 A~F 중 선택. 기본 권고: E (bun + Hono + HTMX + Tailwind)
 2. Hosting: 옵션 a/b/c 중 선택. 기본 권고: a (Cloudflare Workers). ADR
    Constraints 본문 reflow 의무
-3. Auth: 옵션 i/ii/iii 중 선택. 기본 권고: i (Cloudflare Access)
+3. Auth: **v0 Tailscale-only lock (사용자 명시), v1+ CF Tunnel + Access**
+   (§13 phasing) — 본 항목은 historical 옵션 비교, 결정은 lock 됨
 4. PWA / offline 지원 도입 여부. 기본 권고: 도입 (mobile-first)
 5. Voice input: 옵션 p/q/r 중 선택. 기본 권고: q (Whisper API), round 2
    phasing
@@ -463,7 +469,8 @@ Same repo / shared design:
   edit / publish trigger 는 CLI.
 - Read-only minimum 슬라이스: `RESEARCH-1A.0` (P0-M6 안)
   — `/ops` 홈 + `/ops/sessions` list + `/ops/sessions/:id` 읽기 +
-  `/posts/:slug` public 검토. Cloudflare Access (또는 Tailscale) auth.
+  `/posts/:slug` public 검토. **v0 Auth = Tailscale-only (Q-051 lock)**.
+  CF Tunnel/Access 는 v1+ phasing.
   DB 직접 read (Hetzner Bun API 의 thin read-only endpoint).
 - Full ask / round / orchestration (RESEARCH-1A.1+) 는 P1+ phasing.
 
