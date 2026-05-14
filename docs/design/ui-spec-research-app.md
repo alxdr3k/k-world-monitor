@@ -185,8 +185,20 @@ align + 1인 운영 surface 최소 + mobile responsive 친화. 단 SPA-grade UI
 ### 6.3 데스크탑 우선 페이지 (full UX)
 
 - `/dossiers/:did` — 2-pane: claim list + evidence panel
-- `/scenarios/:sid` — graph view (vega-lite / mermaid) + branches list
 - `/publications/:pid` — preflight panel + cite check inspector
+- `/drafts/:did/edit` — **ContentDraft 본문 편집 전체 (Q-F 사용자 결정 —
+  데스크탑 only). 모바일은 preview 만, full edit 데스크탑.**
+
+### 6.4 모바일 + 데스크탑 양립 페이지 (Q-G 사용자 결정 — 모바일 zoom/pan)
+
+- `/scenarios/:sid` — Scenario branch graph (vega-lite or mermaid) +
+  branches list. **모바일에서 zoom / pan / 1-tap branch expand 가능**.
+  단 branch 편집 (assumption / falsifier 추가) 은 데스크탑 우선.
+
+### 6.5 모바일 1-tap 의무 (Q-H 사용자 결정)
+
+- `/ops/interventions` — AccessIntervention 3-option review (ignore /
+  manual_claim / temp_text) 모두 1-tap. 모바일 single-handed 가능 의무.
 
 ## 7. 핵심 component / interaction
 
@@ -379,9 +391,20 @@ research.<domain>            (Cloudflare Workers + Hono)
 - **RESEARCH-1A.5**: Voice input (Whisper API)
 - **CLI wrapper** (v1+ optional)
 
-P0-M6 turn-key MVP (2주 lock) 안에는 위 슬라이스 미포함 — single-shot
-LLM + 시나리오 1 + 첫 publication 발행 만. Research app 은 P0-M6 accept
-후 진입.
+### Q-C / Q-D 사용자 결정 (2026-05-14)
+
+**P0-M6 turn-key MVP (2주 lock) 안의 minimum scope** — 사용자 결정:
+
+- **첫 publication 흐름 = CLI + /ops 둘 다** (Q-C) — CLI 가 critical path
+  유지, /ops 가 mobile inspection 보조.
+- **/ops minimum P0-M6 scope = Read-only mobile** (Q-D) — publication
+  결과 / cite anchor / session list / round timeline 보기 가능. ask /
+  edit / publish trigger 는 CLI.
+- Read-only minimum 슬라이스: `RESEARCH-1A.0-readonly` (신규, P0-M6 안)
+  — `/ops` 홈 + `/ops/sessions` list + `/ops/sessions/:id` 읽기 +
+  `/posts/:slug` public 검토. Cloudflare Access (또는 Tailscale) auth.
+  DB 직접 read (Hetzner Bun API 의 thin read-only endpoint).
+- Full ask / round / orchestration (RESEARCH-1A.1+) 는 P1+ phasing.
 
 ## 16. 관련 ADR / DEC / Q
 
