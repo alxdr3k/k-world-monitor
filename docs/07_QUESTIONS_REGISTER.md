@@ -67,7 +67,17 @@ validator는 legacy entry를 ID 추적만 하고 invariant scope에서 제외 (w
 | [Q-027](questions/Q-027.md) | [DEC-007](decisions/DEC-007.md) | Retention / R2 lifecycle / backup schedule |
 | [Q-028](questions/Q-028.md) | [DEC-008](decisions/DEC-008.md) → [DEC-010](decisions/DEC-010.md) | LLM routing v2 multi-vendor + cost ceiling |
 | [Q-036](questions/Q-036.md) | [DEC-011](decisions/DEC-011.md) | v0 turn-key 첫 발행 sub-topic — 한국 부동산 폭락 시나리오 |
-| Q-037 ~ Q-041 | [DEC-019](decisions/DEC-019.md) | apoc.lock / worker_id CAS / chunked stream / migration framework / millis-bearing timestamp |
-| Q-042 ~ Q-048 | [DEC-020](decisions/DEC-020.md) | NFR-003 5-hop reflow / evidence_role / R2 audit / validator coverage / quota / Doppler / CI required |
+| [Q-037](questions/Q-037.md) | [DEC-019](decisions/DEC-019.md) | AccessIntervention resolveIntervention multi-reviewer race — apoc.lock.nodes |
+| [Q-038](questions/Q-038.md) | [DEC-019](decisions/DEC-019.md) | discovery_queue worker_id CAS — heartbeat/markQueueItemDone TOCTOU |
+| [Q-039](questions/Q-039.md) | [DEC-019](decisions/DEC-019.md) | pollEligibleSources Promise.allSettled 메모리 — Phase 1/2 streaming |
+| [Q-040](questions/Q-040.md) | [DEC-019](decisions/DEC-019.md) | v0→production schema migration framework — in-place vs ALTER-only contract |
+| [Q-041](questions/Q-041.md) | [DEC-019](decisions/DEC-019.md) | updated_at 형식 CHECK constraint — future writer drift 방지 (millis-bearing ISO) |
+| [Q-042](questions/Q-042.md) | [DEC-020](decisions/DEC-020.md) | NFR-003 5-hop trace 의무를 ADR-0025 10-stage 도입 이후 reflow |
+| [Q-043](questions/Q-043.md) | [DEC-020](decisions/DEC-020.md) | AC-044 (Dossier evidence_role minimum coverage, ADR-0027) row 정식 정의 |
+| [Q-044](questions/Q-044.md) | [DEC-020](decisions/DEC-020.md) | NFR-008 audit log (raw text 0건 cloud 저장) 의 코드 enforcement 위치 |
+| [Q-045](questions/Q-045.md) | [DEC-020](decisions/DEC-020.md) | invariant validator scope 확장 — ADR INV ↔ 코드 enforcement cross-ref |
+| [Q-046](questions/Q-046.md) | [DEC-020](decisions/DEC-020.md) | Tier 0 호출 일일 quota 5회 (DEC-010 cap) 의 코드 enforcement 위치 |
+| [Q-047](questions/Q-047.md) | [DEC-020](decisions/DEC-020.md) | Secret management — Doppler vs `.env` (OpenAI / Anthropic / Google / R2 API key 4종) |
+| [Q-048](questions/Q-048.md) | [DEC-020](decisions/DEC-020.md) | CI branch protection — invariant-check / ci workflow 를 advisory → required check |
 | [Q-049](questions/Q-049.md) | [DEC-021](decisions/DEC-021.md) | revisit policy + canonical_text_hash semantic diff |
 | [Q-051](questions/Q-051.md) | [DEC-022](decisions/DEC-022.md) + [DEC-023](decisions/DEC-023.md) | Research App UI stack + Round 1 routing default 5항 |
