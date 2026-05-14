@@ -221,7 +221,9 @@ RESEARCH-1A.API0 lock — turn-detail / round-timeline endpoint 는 P0
   switch 액션은 P1+)*
 - `/ops/sessions/:id` — vertical timeline (round → turn) + "Add round" /
   "Ask" 버튼 fixed bottom *(P0 read-only = `GET /api/sessions/:id` 의
-  session header + status + intent 만; **round timeline / turn list 는
+  P0 schema 컬럼만 (session_id + status + scenario_id link + thesis_id
+  link + created_at, **`title` / `initial_intent` / `editorial_intent_id`
+  미포함** — 이들은 INFRA-1B.7b v8 migration P1+); **round timeline / turn list 는
   P0 미포함** — RESEARCH-1A.0 plan lock "round timeline 미포함, P0-M6
   안에서는 single-shot research_session 만, ExplorationRound P1+" 와
   일치. "Add round" / "Ask" / mutation 전부 P1+)*
@@ -523,7 +525,8 @@ Same repo / shared design (DEC-022 stack lock):
 - **첫 publication 흐름 = CLI + /ops 둘 다** (Q-C) — CLI 가 critical path
   유지, /ops 가 mobile inspection 보조.
 - **/ops minimum P0-M6 scope = Read-only mobile** (Q-D) — publication
-  결과 / cite anchor / session list (header + status + intent 만) 보기
+  결과 / cite anchor / session list (P0 schema 컬럼만 — session_id /
+  status / scenario_id link / thesis_id link / created_at) 보기
   가능. **round timeline / turn detail 은 P0-M6 미포함** (RESEARCH-1A.0
   + §6.2 와 일치, ExplorationRound 자체가 P1+ schema). ask / edit /
   publish trigger 는 CLI.
