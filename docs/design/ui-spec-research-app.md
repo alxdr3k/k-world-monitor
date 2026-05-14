@@ -203,13 +203,24 @@ Public (CF Pages, no /ops prefix):
 
 ### 6.2 모바일 우선 페이지 (간소화)
 
+**P0-M6 phasing 주의 (RESEARCH-1A.0)**: P0-M6 안에서는 본 모바일 페이지
+**전부 read-only** — `/ops/` (홈) 와 `/ops/sessions` / `/ops/sessions/:id`
+/ `/ops/turns/:tid` 의 view-only 렌더만 P0 안에 포함. `/ops/ask` 풀스크린
+입력 / "Add round" / "Ask" 버튼 / 모든 mutation flow 는 P1+ (RESEARCH-1A.1
+이후) 로 미룬다. 아래 페이지 명세는 P1+ 완성 형태 기준이며, **P0 read-only
+스코프** 항목은 명시.
+
 - `/` 홈 — "Continue last session" CTA + "New session" + recent 5 sessions
-- `/ask` — 풀스크린 text input + send button + voice icon
+  *(P0 = recent 5 sessions read-only 만; CTA / "New session" 버튼 P1+)*
+- `/ask` — 풀스크린 text input + send button + voice icon *(P1+ 전용 —
+  P0 안에는 없음)*
 - `/sessions` — list view (title + mode + last activity + active marker)
+  *(P0 read-only 포함; active marker 는 표시만, switch 액션은 P1+)*
 - `/sessions/:id` — vertical timeline (round → turn) + "Add round" / "Ask"
-  버튼 fixed bottom
+  버튼 fixed bottom *(P0 read-only = vertical timeline 표시만; "Add round"
+  / "Ask" 버튼 / round 추가 / turn 추가 mutation 전부 P1+)*
 - `/turns/:tid` — user message + AI answer (markdown render) + artifact
-  link list
+  link list *(P0 read-only 포함)*
 
 ### 6.3 데스크탑 우선 페이지 (full UX)
 
@@ -433,8 +444,14 @@ Same repo / shared design:
 본 spec 의 다음 항목 사용자 결정 후 정식 ADR 작성:
 
 1. Stack: 옵션 A~F 중 선택. 기본 권고: E (bun + Hono + HTMX + Tailwind)
-2. Hosting: 옵션 a/b/c 중 선택. 기본 권고: a (Cloudflare Workers). ADR
-   Constraints 본문 reflow 의무
+2. Hosting: **lock — Topology B (CF Pages public anchor + Hetzner private
+   /ops + /api, same-origin)**. GPT 31 review (2026-05-14) + 사용자 명시
+   ("나 이미 다른 서비스들 운영중인 hetzner 서버 있어") 로 결정 lock —
+   본 항목은 historical 옵션 비교 (a/b/c) 만 남기며, 결정은 §4 / §13 의
+   Topology B 본문이 canonical. CF Workers (옵션 a) 는 reject — Hetzner
+   backend same-origin 불가 + Tailscale-only v0 와 horizontal 배치 불일치.
+   ADR-0022 Constraints 본문은 Topology B 의 CF Pages 부분만 흡수 (`/ops`
+   artifact 는 CF Pages bundle 에서 영구 exclude — INV-0022-X 추가 검토)
 3. Auth: **v0 Tailscale-only lock (사용자 명시), v1+ CF Tunnel + Access**
    (§13 phasing) — 본 항목은 historical 옵션 비교, 결정은 lock 됨
 4. PWA / offline 지원 도입 여부. 기본 권고: 도입 (mobile-first)
