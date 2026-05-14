@@ -488,10 +488,13 @@ Same repo / shared design (DEC-022 stack lock):
    artifact 는 CF Pages bundle 에서 영구 exclude — INV-0022-X 추가 검토)
 3. Auth: **v0 Tailscale-only lock (사용자 명시), v1+ CF Tunnel + Access**
    (§13 phasing) — 본 항목은 historical 옵션 비교, 결정은 lock 됨
-4. PWA / offline 지원 도입 여부. 기본 권고: 도입 (mobile-first)
-5. Voice input: 옵션 p/q/r 중 선택. 기본 권고: q (Whisper API), round 2
-   phasing
-6. Realtime: SSE 만. WebSocket 불필요 동의 여부
+4. PWA / offline: **lock — 도입 (Q-051 #9 / Q-E lock)**. mobile idea
+   capture 우선 + IndexedDB pending queue + online 시점 sync. 슬라이스
+   = RESEARCH-1A.4 (P1+).
+5. Voice input: **lock — Whisper API (Q-051 #11 lock)**. ADR-0023
+   routing 안 Tier 3 추가. 슬라이스 = RESEARCH-1A.5 (P1+).
+6. Realtime: **lock — SSE only (Q-051 #12 / DEC-022 6 layer lock)**.
+   WebSocket reject. turn_event durable log (Q-050 GPT T-4) 와 binding.
 7. Public site vs Research app 의 sub-domain 분리 (research.<domain>)
    동의 여부
 8. ADR Constraints "managed edge 도입 X" 본문 reflow — Cloudflare Workers
