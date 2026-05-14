@@ -320,7 +320,11 @@ source trace:
 ### 7.4 Streaming AI response (SSE)
 
 - 사용자 ask 후 AI 응답이 streaming 으로 전개
-- HTMX SSE extension 사용
+- **DEC-022 stack**: 브라우저 `EventSource` API + TanStack Query
+  `useEventStream` hook (custom — `src/ops/lib/query/use-event-stream.ts`)
+  로 SSE message 수신 → `queryClient.setQueryData(['turn', turnId], ...)`
+  in-place update. Q-050 turn_event durable log (GPT T-4) 와 binding,
+  모바일 reconnect 시 `?after_seq=` replay.
 - round_search_run 진행 상황도 streaming (예: "Internal search... 3 claims
   found", "External AI search (Gemini)... 2 candidate URLs")
 - 운영자가 mid-stream 에 "Stop" 가능
@@ -338,9 +342,11 @@ source trace:
    - if route != 'answer_only':
        - dispatch to SearchOrchestrator (Q-050 INFRA-1B.7c)
    - stream SSE events: turn started / search results / answer chunks
-3. Client (HTMX SSE):
-   - swap turn detail into round timeline
-   - update active context badge if route changed
+3. Client (React island + TanStack Query + SSE, DEC-022):
+   - `useEventStream` hook 으로 SSE message 수신
+   - `queryClient.setQueryData(['session', sessionId, 'rounds'])` in-place
+     update → React 가 round timeline component 자동 re-render
+   - `queryClient.invalidateQueries(['active-context'])` for route change
 4. Server finalize:
    - UPDATE research_turn (completed_at = NOW, answer_summary, cost_usd)
    - if route != 'answer_only':
@@ -427,7 +433,7 @@ Cloudflare Pages (public artifact only):
 
 Hetzner (private artifact + API, same-origin):
   ops.<tailnet-or-private>/
-    /ops/*                    (CSR-first SPA shell)
+    /ops/*                    (SSR-first Astro shell + React 18 island, DEC-022)
     /api/*                    (Bun + Hono, SQLite + Neo4j local access)
   v0: Tailscale Serve (HTTPS, tailnet only)
   v1+: Cloudflare Tunnel + Access (public URL + JWT 검증)
