@@ -89,13 +89,19 @@ invariants:
   - id: INV-0031-7
     statement: |
       Bundle budget acceptance gate (Lighthouse mobile, Slow 4G throttle)
-      — RESEARCH-1A.1 슬라이스 accept 조건의 일부. 페이지별 budget:
-      (a) JS transfer ≤ 100KB gzip per route (`client:visible` default
-      페이지), (b) JS transfer ≤ 170KB gzip per route (`client:load`
-      exceptional 페이지 — `/ops/scenarios/:sid` 만 허용), (c) LCP ≤ 2.5s
-      mobile, (d) TBT ≤ 200ms, (e) CLS ≤ 0.1. budget 초과 시 RESEARCH-1A.1
-      gate fail — `client:visible` migration 또는 lazy chunk 분리 의무.
-      P0-M6 RESEARCH-1A.0 은 React island 0 이므로 본 gate 미적용.
+      — phased per route 도입 시점 기준 enforce. **(a) `client:visible`
+      default 페이지 budget = JS transfer ≤ 100KB gzip per route /
+      LCP ≤ 2.5s mobile / TBT ≤ 200ms / CLS ≤ 0.1**: RESEARCH-1A.1
+      슬라이스 accept 조건 (1A.1 안에서 도입되는 React island 페이지가
+      모두 `client:visible` 이므로 본 gate 가 1A.1 안에서 actionable).
+      **(b) `client:load` exceptional 페이지 budget = JS transfer ≤
+      170KB gzip per route**: 해당 directive 사용 페이지 (`/ops/
+      scenarios/:sid`) 가 도입되는 RESEARCH-1A.3 슬라이스 accept 조건
+      (그 이전 슬라이스에는 `client:load` 페이지가 없으므로 본 gate
+      미적용 — RESEARCH-1A.1 안에서 검증 불가). budget 초과 시 해당
+      슬라이스 gate fail — `client:visible` migration 또는 lazy chunk
+      분리 의무. P0-M6 RESEARCH-1A.0 은 React island 0 이므로 (a)/(b)
+      모두 미적용.
     status: active
 
 preconditions:
@@ -428,8 +434,14 @@ src/shared/ui/
 - **React-only component 는 React island 안에서만 import**. Astro public
   site (`/posts/*`) 의 `.astro` 파일은 `src/shared/ui/lib/utils.ts` 의
   `cn()` 만 import 가능 (Tailwind utility class composition). Radix
-  component import 시도 시 `astro check` lint rule 로 차단 (RESEARCH-1A.1
-  안에 lint rule 추가 의무).
+  component import 시도 시 **ESLint `no-restricted-imports` rule** 로
+  차단 — `eslint-plugin-astro` 도입 + `overrides` block 안 `*.astro`
+  pattern 에 `src/shared/ui/{button,dialog,sheet,drawer,popover,
+  dropdown-menu,tooltip,textarea,input,label}` 차단 (cn util 만 allow).
+  본 ESLint config + `eslint` / `eslint-plugin-astro` devDep 추가는
+  RESEARCH-1A.1 슬라이스 의무 (§3.1 caret 표는 minimum set 만 — ESLint
+  체인은 RESEARCH-1A.1 안에서 lock). `astro check` 는 type-checker 로
+  본 rule enforcement 와 별개로 그대로 사용.
 - shadcn/ui component 는 vendor lock-in 회피 의도로 copy-paste — 본
   디렉토리 안 파일은 repo 안 source 로 lock, vendor update risk 0
   (DEC-022 Critique 2 lock 일치).
@@ -488,25 +500,29 @@ export function useEventStream<T>(opts: {
 
 #### 3.6 Bundle budget acceptance gate (Lighthouse mobile, INV-0031-7)
 
-RESEARCH-1A.1 슬라이스 accept 조건:
+페이지 도입 시점 슬라이스 별 phased gate. RESEARCH-1A.1 안에서 도입되는
+React island 페이지는 모두 `client:visible` directive 이므로 (a) gate
+만 1A.1 안에서 actionable. (b) `client:load` gate 는 `/ops/scenarios/
+:sid` 가 도입되는 RESEARCH-1A.3 슬라이스 accept 조건.
 
-| Metric | Budget | 측정 조건 |
-|---|---|---|
-| JS transfer per route (`client:visible` default) | ≤ 100KB gzip | Slow 4G throttle, mobile preset |
-| JS transfer per route (`client:load` exceptional) | ≤ 170KB gzip | `/ops/scenarios/:sid` 만 허용 |
-| LCP | ≤ 2.5s | Slow 4G mobile |
-| TBT (Total Blocking Time) | ≤ 200ms | Slow 4G mobile |
-| CLS | ≤ 0.1 | mobile preset |
+| Metric | Budget | 적용 슬라이스 | 측정 조건 |
+|---|---|---|---|
+| JS transfer per route (`client:visible` default) | ≤ 100KB gzip | **RESEARCH-1A.1** accept | Slow 4G throttle, mobile preset |
+| LCP | ≤ 2.5s | **RESEARCH-1A.1** accept | Slow 4G mobile |
+| TBT (Total Blocking Time) | ≤ 200ms | **RESEARCH-1A.1** accept | Slow 4G mobile |
+| CLS | ≤ 0.1 | **RESEARCH-1A.1** accept | mobile preset |
+| JS transfer per route (`client:load` exceptional) | ≤ 170KB gzip | **RESEARCH-1A.3** accept (`/ops/scenarios/:sid` 도입 시점) | Slow 4G throttle, mobile preset. 그 이전 슬라이스에는 `client:load` 페이지 없음 → 본 gate 미적용 (검증 불가). RESEARCH-1A.3 PR 안에서 §3.6 본 행 활성화 의무 |
 
-- budget 초과 → RESEARCH-1A.1 gate fail. Mitigation 옵션:
+- 해당 슬라이스 budget 초과 → 그 슬라이스 gate fail. Mitigation 옵션:
   1. `client:load` → `client:visible` 또는 `client:idle` migration
   2. lazy chunk split (dynamic `import()`)
   3. shadcn/ui component 안 사용 안 하는 Radix primitive 제거 (copy-
      paste 안에서 명시적 제거 가능)
 - 측정 도구 = Playwright + lighthouse CLI (RESEARCH-1A.1 안에 CI step
-  추가 의무). manual smoke 도 허용 (1인 운영).
-- P0-M6 RESEARCH-1A.0 은 React island 0 이므로 본 gate 미적용 — SSR
-  HTML + Tailwind CSS 만 측정 (별도 budget 없음, 자명하게 budget 안).
+  추가 의무 — `client:visible` budget 만 검증; RESEARCH-1A.3 안에서
+  `client:load` budget 검증 추가). manual smoke 도 허용 (1인 운영).
+- P0-M6 RESEARCH-1A.0 은 React island 0 이므로 본 gate 전부 미적용 —
+  SSR HTML + Tailwind CSS 만 측정 (별도 budget 없음, 자명하게 budget 안).
 
 ## Alternatives Considered
 
