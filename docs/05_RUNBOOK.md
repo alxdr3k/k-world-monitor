@@ -50,7 +50,8 @@ store 에서 관리. local dev / GitHub Actions cron / production cron host
    - `OPENAI_API_KEY`
    - `ANTHROPIC_API_KEY`
    - `GOOGLE_AI_API_KEY`
-   - `S3_ACCOUNT_ID` (Cloudflare account ID — endpoint URL 자동 구성)
+   - `S3_ENDPOINT` (full S3 endpoint URL — preferred. 예: https://<accountid>.r2.cloudflarestorage.com)
+     · `S3_ACCOUNT_ID` (fallback when S3_ENDPOINT 미설정 — endpoint auto-built)
    - `S3_ACCESS_KEY` (R2 access key ID)
    - `S3_SECRET_KEY` (R2 secret access key)
    - `S3_BUCKET` (R2 bucket name)
