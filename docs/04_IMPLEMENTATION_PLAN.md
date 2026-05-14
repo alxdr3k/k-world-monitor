@@ -75,8 +75,8 @@ MVP milestone rule: 대상 사용자가 현실적인 환경에서 core workflow�
 
 | Milestone | Product / user gate | Target date | Status | Gate | Evidence | Notes |
 |---|---|---|---|---|---|---|
-| `P0-M1` | Schema & Bulk Store Bootstrap — 9-stage ADR(0011-0021) lock + Neo4j Cypher schema + SQLite relational + R2 permitted-artifact 적용 | TBD | in_progress | AC-001, AC-002, AC-003, AC-005, AC-006, AC-008, AC-022, AC-023, AC-026, AC-032 | doc commits, SPIKE-001 결과 | 현재 milestone (Round 25 canonical) |
-| `P0-M2` | Source Registry & Collection Queue — Tier A seed (size cap 없음, v0 entry 72 source proposed) + collectability_score + source policy gate + discovery → 큐 → fingerprint snapshot → chunk 1건 end-to-end | TBD | in_progress | AC-001, AC-009, AC-020, AC-022, AC-024 | TBD | M1 의존 |
+| `P0-M1` | Schema & Bulk Store Bootstrap — 10-stage ADR(0011 superseded by 0025; 0012-0021) lock + Neo4j Cypher schema + SQLite relational + R2 permitted-artifact 적용 | TBD | landed (gate 검증 대기) | AC-001, AC-002, AC-003, AC-005, AC-006, AC-008, AC-022, AC-023, AC-026, AC-032 | INFRA-1A.1~1A.8 + INFRA-1B.1/1B.1.x 일괄 landed (migrations/neo4j/v1, migrations/sqlite/v1~v3, src/{domain,storage,utils}/, data/sources_seed.yaml 등). SPIKE-001 (Neo4j FTS p95 <1s) + AC-032 R2 upload audit ledger (Q-044) 미실시 — gate accept 차단 | M1 slice 전부 landed, gate 검증 단계. SPIKE-001 결과 + Q-044 R2 audit code enforcement 후 accepted |
+| `P0-M2` | Source Registry & Collection Queue — Tier A seed (size cap 없음, v0 entry 72 source) + collectability_score + source policy gate + discovery → 큐 → fingerprint snapshot → chunk 1건 end-to-end | TBD | landed (gate 검증 대기) | AC-001, AC-009, AC-020, AC-022, AC-024 | INFRA-1B.1~1B.6 + OPS-1A.1 일괄 landed (data/sources_seed.yaml, src/discovery/{fetch,parse,scheduler,worker}/, src/pipeline/{access-intervention,feedback}/, src/ops/run-ledger.ts, migrations/sqlite/v4~v6). M2 게이트 검증 (AC-022/023/024 evidence 확정) 미실시 | M1 의존. M2 slice 전부 landed, 게이트 검증 단계. P1-M2-hardening (1B.2.x/1B.3.x/1B.6.x) 은 P0-M6 accept 후 별도 진입 |
 | `P0-M3` | Extraction & Review — Haiku 1차 + Sonnet escalate + auto-confirm + reviewer queue + manual feedback CLI + access_intervention batch report | TBD | planned | AC-007, AC-010, AC-015, AC-019, AC-024, AC-025, SPIKE-002 | TBD | M2 의존 (OPS-1A.1 run ledger landing cross-milestone during M2 does not advance M3 status) |
 | `P0-M4` | Search & Dossier — Neo4j native FTS 검색 + Dossier 합성 1건 (counterclaim pool, source_perspective 분포) | TBD | planned | AC-002, AC-004, AC-027 | TBD | M3 의존 |
 | `P0-M5` | Scenario Validate — assumptions/branches/falsifier/counterclaim(polarity-symmetric)/monitoring/impact_targets/transmission_channels + revisions ledger | TBD | planned | AC-012, AC-014, AC-017, AC-026 | TBD | M4 의존 |
@@ -89,11 +89,11 @@ MVP milestone rule: 대상 사용자가 현실적인 환경에서 core workflow�
 
 | Track | Purpose | Active phase | Status | Notes |
 |---|---|---|---|---|
-| `INFRA` | Neo4j + SQLite + R2 스키마 / Source registry / policy gate / access_interventions / queue / store / ID / ledger | `INFRA-1A` | in_progress | M1 owner |
+| `INFRA` | Neo4j + SQLite + R2 스키마 / Source registry / policy gate / access_interventions / queue / store / ID / ledger | `INFRA-1B` (INFRA-1A 전부 landed) | in_progress | M1/M2 owner — INFRA-1B 게이트 검증 단계 |
 | `EXTR` | extractor (article/dataset/report) + LLM routing + review queue | `EXTR-1A` | planned | M3 owner |
 | `AGG` | dossier / scenario(impact_targets) / scenario_revisions / validate / thesis(stance + market_stance) | `AGG-1A` | planned | M4-M5-M6 owner |
 | `PUB` | content_draft 4-format(v0 blog_long only) / cite_check 5+1 / publication / cascade / **자체 사이트 Astro + Cloudflare Pages** / vault publications/ sync (git push trigger) | `PUB-1A` | planned | M6 owner — v0 turn-key |
-| `OPS` | run ledger / cost throttling / stale worker / 백업 / metrics framework / policy learning | `OPS-1A` | in_progress | M3+ 횡단 |
+| `OPS` | run ledger / cost throttling / stale worker / 백업 / metrics framework / policy learning | `OPS-1A` | in_progress | M3+ 횡단 (OPS-1A.1 run ledger landed, OPS-1A.2+ planned) |
 
 ## Phases / Slices
 
@@ -109,13 +109,13 @@ MVP milestone rule: 대상 사용자가 현실적인 환경에서 core workflow�
 | `INFRA-1A.8` | P0-M1 | INFRA | INFRA-1A | Backup runbook — Neo4j dump 일간 + SQLite snapshot 일간 + JSONL audit export 월별. `docs/05_RUNBOOK.md` 갱신 | INFRA-1A.2, Q-027 resolution | AC-032 | defined | landed | docs/05_RUNBOOK.md Data Operations 섹션 전면 업데이트 — backup schedule, R2 lifecycle rules, retention batch, RETENTION_PROTECTED_KINDS, soft-delete 2단계, 복구 절차; PR #10 merged 2026-05-12 | INFRA-1B.1 |
 | `INFRA-1B.1` | P0-M2 | INFRA | INFRA-1B | Source Registry Bootstrap — seed 72 sources from data/sources_seed.yaml into SQLite source_material_policy (enum validation + src_<ULID> IDs + idempotent upsert). Neo4j Source node creation is INFRA-1B.2+. (Collection Queue, manual_intake CLI, 8 위험 행동 트리거는 INFRA-1B.5/1B.6으로 분리) | INFRA-1A.2, INFRA-1A.6 | AC-001, AC-022, AC-023 | defined | landed | src/storage/source-registry/seed.ts (parse+validate+upsert, ON CONFLICT DO UPDATE); scripts/seed-sources.ts (CLI --dry-run); tests/unit/source_registry_test.ts (22 tests); PR #15 merged 2026-05-12 (c51b2ce) | INFRA-1B.1.x |
 | `INFRA-1B.1.x` | P0-M2 | INFRA | INFRA-1B | **Hotfix slice** (아키텍처 리뷰 follow-up, ADR-0030/DEC-014/DEC-015): (1) `PRAGMA busy_timeout=5000` — getDb()에 추가 (DEC-014); (2) source_registry_slug_map을 migrations/sqlite/v3_source_registry_slug_map.sql로 이전 + seed.ts 인라인 DDL 제거 (DEC-015); (3) seed.ts URL 파싱 유효성 검사 추가 (ADR-0028 PRE-0028-2); (4) Neo4j 풀 설정 환경변수화 (DEC-016) | INFRA-1B.1 | AC-022 | defined | landed | 모두 c51b2ce(PR #15)에 포함: PRAGMA busy_timeout(connection.ts), v3_source_registry_slug_map.sql migration, seed.ts validateWebUrl(), neo4j/connection.ts NEO4J_MAX_POOL_SIZE/NEO4J_ACQ_TIMEOUT_MS | INFRA-1B.2 |
-| `INFRA-1B.2a` | P0-M2 | INFRA | INFRA-1B | **Safe-Fetch 기반 (ADR-0028 선행 구현)**: src/discovery/fetch/safe-fetch.ts — SSRF 방어(DNS pre-resolve + 사설IP 거부), 리다이렉트 체인 호스트 검증(≤3홉), 바이트 상한(DEC-017), zip bomb 방어, robots.txt 캐시, Content-Type sniff + 실행파일 거부; src/discovery/parse/xml-safe.ts — fast-xml-parser + XXE 비활성화(DEC-018). 방어별 단위 테스트 포함 | INFRA-1B.1.x | AC-001 | defined | in_progress | PR #16 open (claude/infra-1b2a-safe-fetch → main) | INFRA-1B.2b |
-| `INFRA-1B.2b` | P0-M2 | INFRA | INFRA-1B | **Discovery 스케줄러 + crawl_state**: migrations/sqlite/v4_crawl_state.sql — (source_id PK, last_polled_at, last_etag, last_modified_header, last_status, consecutive_failures, next_eligible_at); 바운드 세마포어 풀(전역 8 / 호스트당 1, ADR-0030 INV-0030-1); fetch/write 분리 패턴(INV-0030-2); etag/Last-Modified 조건부 fetch; 연속 5회 실패 24h backoff | INFRA-1B.2a | AC-001 | defined | in_progress | PR #17 open (claude/infra-1b2b-discovery-scheduler → claude/infra-1b2a-safe-fetch) | INFRA-1B.2 |
-| `INFRA-1B.2` | P0-M2 | INFRA | INFRA-1B | Discovery worker v0 (RSS/sitemap 1종 + API 1종, Tier A 한정) → 큐 적재. safe-fetch + 스케줄러 완성 후 실제 소스 연결 | INFRA-1B.2b | AC-001 | defined | in_progress | PR #18 open (claude/infra-1b2-discovery-worker → claude/infra-1b2b-discovery-scheduler) | INFRA-1B.3 |
-| `INFRA-1B.3` | P0-M2 | INFRA | INFRA-1B | Fetcher → Snapshot fingerprint row + content_hash dedupe (R2 binary는 permitted artifact만) | INFRA-1B.2, INFRA-1A.3 | AC-003, AC-020 | defined | in_progress | PR #19 open (claude/infra-1b3-snapshot-fingerprint → claude/infra-1b2-discovery-worker) | INFRA-1B.4 |
-| `INFRA-1B.4` | P0-M2 | INFRA | INFRA-1B | Chunker / Neo4j native FTS 인덱서 — snapshot 텍스트 → chunk + Neo4j FTS 인덱스 | INFRA-1B.3, INFRA-1A.2 | AC-002 | defined | in_progress | PR #20 open (claude/infra-1b4-chunker → claude/infra-1b3-snapshot-fingerprint) | INFRA-1B.5 |
+| `INFRA-1B.2a` | P0-M2 | INFRA | INFRA-1B | **Safe-Fetch 기반 (ADR-0028 선행 구현)**: src/discovery/fetch/safe-fetch.ts — SSRF 방어(DNS pre-resolve + 사설IP 거부), 리다이렉트 체인 호스트 검증(≤3홉), 바이트 상한(DEC-017), zip bomb 방어, robots.txt 캐시, Content-Type sniff + 실행파일 거부; src/discovery/parse/xml-safe.ts — fast-xml-parser + XXE 비활성화(DEC-018). 방어별 단위 테스트 포함 | INFRA-1B.1.x | AC-001 | defined | landed | src/discovery/fetch/safe-fetch.ts + src/discovery/parse/xml-safe.ts + tests/unit/safe_fetch_test.ts (117 tests) + tests/unit/xml_safe_test.ts; PR #16 merged 2026-05-12 (ed09aa5) | INFRA-1B.2b |
+| `INFRA-1B.2b` | P0-M2 | INFRA | INFRA-1B | **Discovery 스케줄러 + crawl_state**: migrations/sqlite/v5_crawl_state.sql — (source_id PK, last_polled_at, last_etag, last_modified_header, last_status, consecutive_failures, next_eligible_at); 바운드 세마포어 풀(전역 8 / 호스트당 1, ADR-0030 INV-0030-1); fetch/write 분리 패턴(INV-0030-2); etag/Last-Modified 조건부 fetch; 연속 5회 실패 24h backoff | INFRA-1B.2a | AC-001 | defined | landed | src/discovery/scheduler/{semaphore,pool,crawl-state,scheduler}.ts + migrations/sqlite/v5_crawl_state.sql + tests/unit/{semaphore,pool,crawl_state}_test.ts; PR #17 merged 2026-05-12 (0eec962) | INFRA-1B.2 |
+| `INFRA-1B.2` | P0-M2 | INFRA | INFRA-1B | Discovery worker v0 (RSS/sitemap 1종 + API 1종, Tier A 한정) → 큐 적재. safe-fetch + 스케줄러 완성 후 실제 소스 연결 | INFRA-1B.2b | AC-001 | defined | landed | src/discovery/worker/{rss-worker,run-discovery}.ts + migrations/sqlite/v6_discovery_queue.sql + tests/unit/rss_worker_test.ts; PR #18 merged 2026-05-12 (896ddf2) | INFRA-1B.3 |
+| `INFRA-1B.3` | P0-M2 | INFRA | INFRA-1B | Fetcher → Snapshot fingerprint row + content_hash dedupe (R2 binary는 permitted artifact만) | INFRA-1B.2, INFRA-1A.3 | AC-003, AC-020 | defined | landed | src/discovery/worker/snapshot-fingerprint.ts + tests/unit/snapshot_fingerprint_test.ts; PR #19 merged 2026-05-12 (4dfa94f) | INFRA-1B.4 |
+| `INFRA-1B.4` | P0-M2 | INFRA | INFRA-1B | Chunker / Neo4j native FTS 인덱서 — snapshot 텍스트 → chunk + Neo4j FTS 인덱스 | INFRA-1B.3, INFRA-1A.2 | AC-002 | defined | landed | src/discovery/worker/chunker.ts + tests/unit/chunker_test.ts; PR #20 merged 2026-05-12 (06c49d7) | INFRA-1B.5 |
 | `INFRA-1B.5` | P0-M2 | INFRA | INFRA-1B | access_interventions Neo4j 노드 + severity deterministic 산정 + batch_report mode 구현 | INFRA-1A.2, INFRA-1B.1 | AC-024 | defined | landed | src/pipeline/access-intervention/severity.ts (computeSeverity, GateMode × importance_score × relatedAssumptionIds); src/pipeline/access-intervention/recorder.ts (recordIntervention, aci_ ULID, Source→:HAS_INTERVENTION→AccessIntervention); src/pipeline/access-intervention/batch-report.ts (generateBatchReport, hasBlockers flag); tests/unit/access_intervention_test.ts (26 tests); PR #21 merged 2026-05-12 (c3b19c4) | INFRA-1B.6 |
-| `INFRA-1B.6` | P0-M3 | INFRA | INFRA-1B | Manual feedback CLI — `pipeline feedback add|bulk|link|from-report` + `pipeline intervention review <id>` 3-option | INFRA-1B.5 | AC-025 | defined | in_progress | PR #22 open (claude/infra-1b6-feedback-cli → main; retargeted after PR #21 merged) | EXTR-1A.1 |
+| `INFRA-1B.6` | P0-M3 | INFRA | INFRA-1B | Manual feedback CLI — `pipeline feedback add|bulk|link|from-report` + `pipeline intervention review <id>` 3-option | INFRA-1B.5 | AC-025 | defined | landed | src/pipeline/feedback/{manual-claim-entry,intervention-review}.ts + tests/unit/feedback_test.ts; PR #22 merged 2026-05-12 (7f4e980) | EXTR-1A.1 |
 | `INFRA-1B.6.x` | P1-M3-hardening | INFRA | INFRA-1B | **Intervention concurrency hardening** (PR #25 retro F-08, Q-037) — `resolveIntervention`의 MATCH+SET race를 `apoc.lock.nodes` 또는 CAS pattern으로 닫는다. v0는 single-operator라 deferred했지만 multi-reviewer / web UI 도입 전 hardening 필수 | INFRA-1B.6, Q-037 resolution | AC-025 | defined | planned | TBD | INFRA-1B.3.x |
 | `INFRA-1B.3.x` | P1-M2-hardening | INFRA | INFRA-1B | **Discovery multi-worker hardening** (PR #25 retro F-15, Q-038) — `discovery_queue.worker_id` 컬럼 + 모든 UPDATE WHERE에 `worker_id = $self` CAS 조건. heartbeat / markQueueItemDone TOCTOU window 닫음. v0 single-worker에선 무해 | INFRA-1B.3, Q-038 resolution | AC-003 | defined | planned | TBD | INFRA-1B.2.x |
 | `INFRA-1B.2.x` | P1-M2-hardening | INFRA | INFRA-1B | **Discovery streaming phase** (PR #25 retro F-13, Q-039) — `pollEligibleSources`를 chunked allSettled 또는 async-iterator로 전환해 source 수 / body size 증가에도 메모리 bounded 유지 | INFRA-1B.2, Q-039 resolution | AC-001 | defined | planned | TBD | DEPLOY-1A.1 |
@@ -128,7 +128,7 @@ MVP milestone rule: 대상 사용자가 현실적인 환경에서 core workflow�
 | `EXTR-1A.4` | P0-M3 | EXTR | EXTR-1A | Review queue + auto-confirm threshold(SPIKE-002 결과 반영) | EXTR-1A.3, SPIKE-002 | AC-010, AC-015 | defined | planned | TBD | EXTR-1A.5 |
 | `EXTR-1A.5` | P0-M3 | EXTR | EXTR-1A | **Data Science Module (ADR-0024)** — Polars + DuckDB + statsmodels + scipy stack lock + dataset_vintage 입력 → derived metric 산출 → `derived_metric_ledger` (SQLite) row + reproducibility 3-tuple (dataset_vintage_id + spec_sha256 + library_version_lock_sha256). + Report extractor (Tier 2 GPT-5 mini with structure prompt + section page locator) | EXTR-1A.1, INFRA-1A.2 (derived_metric_ledger migration) | AC-009 | defined | planned | TBD | EXTR-1A.6 |
 | `EXTR-1A.6` | P0-M3 | EXTR | EXTR-1A | **Cross-vendor reviewer infrastructure** (ADR-0023 INV-0023-4) — preflight cite check overclaim (GPT-5 nano → Haiku 4.5) + scenario validate adversarial (GPT-5.5 Pro xthink → Opus 4.7 xhigh) + high-stakes thesis (operator flag) 의 cross-vendor pair wiring + `cross_vendor_review_ledger` (SQLite) row + cross_vendor_review_coverage KPI ≥ 0.95 측정 | EXTR-1A.5, INFRA-1A.2 (cross_vendor_review_ledger migration) | AC-013, AC-019 | defined | planned | TBD | OPS-1A.2 |
-| `OPS-1A.1` | P0-M3 | OPS | OPS-1A | Run ledger 테이블 + cost 집계 | INFRA-1A.2 | AC-019 | defined | in_progress | src/ops/run-ledger.ts (startRun/completeRun/failRun/getDailyCostUsd/getDailyCostBreakdown); tests/unit/run_ledger_test.ts (29 tests); PR #23 open (claude/ops-1a1-run-ledger → main) | OPS-1A.2 |
+| `OPS-1A.1` | P0-M3 | OPS | OPS-1A | Run ledger 테이블 + cost 집계 | INFRA-1A.2 | AC-019 | defined | landed | src/ops/run-ledger.ts (startRun/completeRun/failRun/getDailyCostUsd/getDailyCostBreakdown) + migrations/sqlite/v4_run_ledger_completed_at_idx.sql + tests/unit/run_ledger_test.ts (29 tests, TEST-019); PR #23 merged 2026-05-12 (23de14c). cost throttling worker는 OPS-1A.2 슬라이스에서 추가 | OPS-1A.2 |
 | `OPS-1A.2` | P0-M3 | OPS | OPS-1A | 일별 cost 상한 throttling worker | OPS-1A.1 | AC-019 | defined | planned | TBD | OPS-1A.3 |
 | `OPS-1A.3` | P0-M3 | OPS | OPS-1A | Metrics framework v0 — metrics_run hook (publication preflight, scenario_validate, build_evidence_pack 부산물) + CLI `pipeline metrics report` markdown/CSV | INFRA-1A.2, OPS-1A.1 | AC-029 | defined | planned | TBD | OPS-1A.4 |
 | `OPS-1A.4` | P0-M3 | OPS | OPS-1A | Policy learning Pattern 1 (source policy refinement) + policy_learning_events / source_policy_rules + raw_cache_items TTL worker | INFRA-1B.5 | AC-030 | defined | planned | TBD | INFRA-1B.7 |
@@ -210,13 +210,11 @@ MVP milestone rule: 대상 사용자가 현실적인 환경에서 core workflow�
 - Q-003: Publication 정정 ledger 트리거 — PUB-1A.3 진입 전 lock
 - ~~Q-004~~: **resolved (INFRA-1A.2)** — k-world-monitor repo는 SQLite(research.db)만 보유; vault-wide index는 second-brain vault jsonl 책임. promoted artifact export 시 변환 (INFRA-1B+).
 - ~~Q-020~~: **resolved (INFRA-1A.2)** — 1인 internal use 범위 lock. (a) embed-배포 / (b) Cypher procedure fork / (c) open data dump 동봉 셋 다 미해당 현재. 해당 시 별도 ADR 의무.
-- Q-021: Tier A source seed (size cap 없음 — DEC-009 reflow 후 v0 entry
-  72 source `docs/research/source-seed-list-2026-05.md`) + source_perspective
-  분포 균형 (전체 seed 기준 risk ≤50% / opportunity ≥25% / neutral ≥15%
-  충족 — 72 source 에서 14/21/30 + mixed 7 = 19% / 29% / 42% / 10%
-  충족, 안전 마진 4%). 사용자 list review
-  + accept 후 이 repo `data/sources_seed.yaml` 또는 SQLite migration INSERT
-  commit 시 resolved — INFRA-1A.6 진입 전 lock
+- ~~Q-021~~: **resolved (INFRA-1A.6, 2026-05-12)** — 72 source 가
+  `data/sources_seed.yaml` 로 commit (PR #12, 67a5f6e). 분포 risk 19% /
+  opportunity 29% / neutral 42% / mixed 10% (AC-027 통과, 안전 마진 4%).
+  size cap 폐기 (DEC-009 reflow). RSS endpoint 실 검증은 INFRA-1B.1 ~ 1B.2
+  슬라이스에서 별도 완료
 - ~~Q-022~~: **resolved by DEC-004** (v0 4 메타 카테고리: 정책 / 경제 / 사회
   / 대중문화. 기존 8 enum + tag 5개는 subtopic_tags[] 로 강등 보존)
 - ~~Q-024~~: **resolved (INFRA-1A.2)** — v0: APOC standard + Cypher 5.x core. v1+: GDS Community 알고리즘. Enterprise-only/extended는 별도 ADR 권한 부여 시만.
@@ -245,6 +243,29 @@ MVP milestone rule: 대상 사용자가 현실적인 환경에서 core workflow�
 - Q-034: Auto retraction trigger 정책 v1+ (live → corrected 일부 자동,
   retracted 는 v2까지 manual) — v1 OPS-1B 트랙 진입 시점에 lock (DEC-005
   v0 manual approve 연장)
+- ~~Q-037 ~ Q-041~~: **resolved by DEC-019** (apoc.lock / worker_id CAS /
+  chunked streaming / pre-deploy migration framework / millis-bearing
+  timestamp). Implement slices: INFRA-1B.2.x / 1B.3.x / 1B.6.x (P1-M2/M3
+  hardening) + DEPLOY-1A.1/1A.2 (P1-MVP-prep)
+- ~~Q-042 ~ Q-048~~: **resolved by DEC-020** (NFR-003 5-hop trace path
+  reflow / evidence_role / NFR-008 R2 audit code enforcement / invariant
+  validator coverage extension / quota module / Doppler secret store / CI
+  required check + branch protection). Implement slices: AGG-1A.1 evidence
+  _role + INFRA-1B.3.x-audit + OPS-1A.2 quota + INFRA-1A.9-validator-
+  extension + CI admin task
+- ~~Q-049~~: **resolved by DEC-021** (revisit policy = TTL + event-driven
+  hybrid; snapshot_diff = canonical_text_hash diff primary, raw_body_hash
+  fallback; ADR-0010 INV-0010-4 lock). Implement slice: INFRA-1B.8/1B.9/
+  1B.10 (P0-M2 hardening + P1+)
+- Q-050: AI 검색 + repo 통합 architecture (proposed body landed, 7 운영자
+  결정 항목 pending — Q-050 frontmatter status:open 유지). Implement slices:
+  INFRA-1B.7a~e + AGG-1A.6 + DISCOVERY-EXT.1 + EXTR-1A.7 (대부분 P1+;
+  INFRA-1B.7a 만 P0-M6 흡수)
+- ~~Q-051~~: **resolved by DEC-022 + DEC-023** (UI stack lock = Astro shell
+  + React island + shadcn/Radix + Tailwind + TanStack + SSE; Round 1 routing
+  default 5 항목 lock). Implement slices: RESEARCH-1A.0/API0 (P0-M6) +
+  RESEARCH-1A.1~5 (P1+). ADR-0031 placeholder landed, RESEARCH-1A.1 시작
+  직전 본문 확장
 
 ## Capacity / Timeline
 
