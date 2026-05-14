@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: 13d61af (code baseline, 2026-05-13). Thin-doc edits since: 5aa70ac → ceaa17c → this commit (2026-05-14, PR #37 doc-drift fix — CI required check 3-state separation + ci.yml policy/admin task distinction). **코드 baseline (13d61af) 이후 코드 변경 없음** — 본 thin doc 의 verification subject 는 code baseline `13d61af`, doc edits 는 동일 baseline 위 docs-only 누적. 다음 코드 변경 시점에 verification baseline SHA 갱신.
+> Last verified against code: 0a76d31 (code baseline, 2026-05-13 — last code-touching commit on branch: `src/discovery/worker/run-discovery.ts`, `src/storage/r2/client.ts`, `.github/workflows/{ci,doc-freshness,invariant-check}.yml`). Thin-doc edits since: 5aa70ac → ceaa17c → 38b846d → this commit (2026-05-14, PR #37 doc-drift fix — CI required check 3-state separation + ci.yml policy/admin task distinction). **코드 baseline (0a76d31) 이후 본 branch 의 모든 commit 은 docs-only** (verified via `git log --name-only 0a76d31..HEAD -- 'src/**' 'migrations/**' 'scripts/**' 'tests/**' '.github/**' 'package.json' 'tsconfig.json` 빈 결과). 다음 코드 변경 시점에 baseline SHA 갱신.
 
 ## Testing policy
 

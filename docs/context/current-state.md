@@ -35,7 +35,7 @@ injection containment / discovery worker concurrency / research app stack)
 
 ## Current roadmap position
 
-- current milestone: `P0-M2` (Source Registry & Collection Queue) — M2 슬라이스 일괄 landed, 게이트 검증 단계 진입. P0-M1 게이트도 별도 통과 필요 (SPIKE-001 미실시 + AC-032 audit ledger 미구현 — Q-044 결정 필요).
+- current milestone: `P0-M2` (Source Registry & Collection Queue) — M2 슬라이스 일괄 landed, 게이트 검증 단계 진입. P0-M1 게이트도 별도 통과 필요 (SPIKE-001 미실시 + AC-032 audit ledger 미구현 — Q-044 는 이미 DEC-020 으로 resolved, R2 upload audit code enforcement 신규 slice 미진입 — TRACE-040 anchor).
 - active tracks: `INFRA` (primary — INFRA-1B collection pipeline 슬라이스 일괄 landed), `OPS` (cross-cutting — OPS-1A.1 run ledger landed)
 - active phase: `INFRA-1B` (게이트 검증 단계); `OPS-1A` (게이트 검증 단계)
 - active slice: **M2 own slices INFRA-1B.1 ~ INFRA-1B.5 landed** (P0-M2 gate accept evidence 대상) + **cross-milestone early landed** (P0-M3 slices, M2 phase 안에서 흡수): INFRA-1B.6 (feedback CLI) + OPS-1A.1 (run ledger). Landed PR 목록: #15 (INFRA-1B.1 source registry seed + 1B.1.x hotfix, c51b2ce — busy_timeout / slug-map migration / URL 파싱 / Neo4j pool env), #16 (INFRA-1B.2a safe-fetch, ed09aa5), #17 (INFRA-1B.2b scheduler, 0eec962), #18 (INFRA-1B.2 discovery worker, 896ddf2), #19 (INFRA-1B.3 snapshot fingerprint, 4dfa94f), #20 (INFRA-1B.4 chunker, 06c49d7), #21 (INFRA-1B.5 access-intervention, c3b19c4), #22 (INFRA-1B.6 feedback CLI early-land, 7f4e980), #23 (OPS-1A.1 run ledger early-land, 23de14c). M2 게이트 검증 미실시 evidence: SPIKE-001 (NFR-001 1만 graph object < 1s p95), AC-022/023/024 evidence 확정. 2026-05-13 comprehensive review 가 식별한 doc-code drift 일괄 backfill 됨 (본 retro entry 참조).
