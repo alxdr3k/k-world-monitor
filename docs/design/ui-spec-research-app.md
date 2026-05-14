@@ -207,7 +207,9 @@ align + 1인 운영 surface 최소 + mobile responsive 친화. 단 SPA-grade UI
 ```
 
 - Route dropdown: continue_round (default) / new_round / branch_round /
-  fork_session / new_session
+  fork_session / new_session / **answer_only** (Q-051 first-class route —
+  turn 만 기록, search_run / synthesis 미생성. 운영자가 검색 없이 단순
+  AI 응답만 원할 때 명시 선택)
 - AI intent classifier 가 sensitive route 추천 시 confirmation modal:
   > Suggested: fork_session (confidence 0.92)
   > Reason: topic shift detected
