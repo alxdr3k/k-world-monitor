@@ -64,8 +64,21 @@ alone. Mode definitions and adoption-only sections live in
 - If architecture direction changes, create or supersede an ADR.
 - Do not rewrite archived design notes for implementation changes.
 - If the thin doc you are editing carries a `Last verified against code:
-  <SHA> (<date>)` header, update the SHA and date to the current commit
-  before pushing.
+  <SHA> (<date>)` header, update it before pushing using the rule below
+  (chosen by whether code changed in this commit):
+  - **If the commit changes code** (src/, migrations/, scripts/, tests/,
+    config that runtime reads, etc.): update the SHA + date to the current
+    commit before pushing. The header SHA is the verification baseline.
+  - **If the commit is doc-only** (no code change since the last code
+    baseline): keep the existing code baseline SHA + date and append /
+    update a `Thin-doc edits since: <SHA1> → <SHA2> → this commit (<date>)`
+    marker (or use the form `Last verified against code: <baseline-SHA>
+    (<baseline-date>). Thin-doc edits since: <SHA1> → ... → this commit
+    (<edit-date>)`). Rationale: replacing the baseline with a doc-only
+    commit SHA falsely advertises "verified against new code" when no code
+    changed, and creates a moving-target header that re-stales every
+    follow-up doc commit (PR #37 round 1/2 codex review evidence). The
+    audit trail is preserved by the `Thin-doc edits since` marker.
 
 ## Response style (overrides default agent system prompt)
 
