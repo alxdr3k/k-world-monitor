@@ -29,6 +29,9 @@ invariants:
   - id: INV-0010-3
     statement: stale로 전이된 claim을 인용하는 ContentDraft / Publication은 cascade 알림을 받는다 (ADR-0008 cite check stale_check가 lake source)
     status: active
+  - id: INV-0010-4
+    statement: INV-0010-1 (b) snapshot diff 의 정의 = `canonical_text_hash` diff (의미 변경 trigger). `raw_body_hash` diff 만 단독으로는 stale trigger 가 *아니다* — wrap diff (광고 / timestamp / tracker) 의 false-positive 회피. raw diff + canonical 동일 인 경우 `source_changed_minor` alert 로 분류 (v1+, NFR-009 thesis_polarity_distribution metric 과 별도). canonical_text_hash 가 NULL 인 Snapshot (P0 시점, INFRA-1B.9 도입 전) 은 fallback 으로 raw_body_hash diff 적용. Q-049 / DEC-021 (2026-05-14) 결정
+    status: active
 
 preconditions:
   - id: PRE-0010-1
@@ -81,7 +84,7 @@ stale 전이 트리거(셋 다 적용):
 | 트리거 | 조건 |
 |---|---|
 | time | `now > snapshot.fetched_at + dossier.stale_after` (Q-002 결정 후, 그 전에는 default 30일 placeholder) |
-| snapshot_diff | 같은 Document에 새 Snapshot이 fetch되고 sha256 변경 |
+| snapshot_diff | 같은 Document에 새 Snapshot이 fetch되고 **canonical_text_hash diff** 검출 (INV-0010-4 — 의미 변경 trigger). raw_body_hash 만 다르면 trigger X (wrap diff false-positive 회피). canonical_text_hash NULL fallback = raw_body_hash diff. Q-049 / DEC-021 lock |
 | counterclaim | edge_ledger에 contradicts edge가 등록됨 (provenance ∈ {user_confirmed, llm_inferred}) |
 
 셋 중 하나라도 만족하면 claim_status: confirmed → stale 전이.

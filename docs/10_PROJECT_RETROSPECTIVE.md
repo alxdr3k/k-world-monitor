@@ -139,6 +139,9 @@ P0-M6 "2주 목표 lock (DEC-005)" 는 **사용자 명시 지시로 fixed**. 일
 - 사용자 결정 필요 항목: `docs/questions/Q-042 ~ Q-048` 신규 등록 (commit bbdd1c0).
 - **2026-05-13 사용자 응답**: 7개 Q 일괄 결정 + Q-049 신규 (재방문 / 캐싱 / 변경 감지) — DEC-020 일괄 resolution 으로 lock. AC-043 / TEST-043 / REQ-028 proposed → defined/planned/must promote, NFR-003 본문 reflow, main push 정책 해제 (PR-only), Doppler secret store, doc-freshness 활성, 후속 슬라이스 4개 등록 (INFRA-1A.9 / INFRA-1B.3.x-audit / OPS-1A.2 refined / PUB-1A.5 entry).
 - **2026-05-13 사용자 후속 메타 의문**: "GPT/Claude 도 web search 가능한데 본 repo 의 수집 기능이 뭐가 다른가?" → Q-050 신규 등록 (AI 검색 + repo crawler 통합 architecture, 시나리오 1/2 + a/b/c/d 분류 + 다중 라운드 context propagation). Q-049 와 cross-cutting (article-level conditional fetch + force-revalidate option). resolution 은 별도 PR 에서 처리.
+- **2026-05-14 사용자 추가 round**: CLI ask → Web pivot (mobile-first) → Q-051 신규 (UI surface 결정). PR #33 (Q-049/050/051 combined) 진행. UI-spec 초안 작성 (`docs/design/ui-spec-research-app.md`). 사용자 결정 (Q-A ~ Q-K) lock: **same repo / shared schema / shared design system, separate deployment artifact** (Topology B, GPT 31 리뷰 lock) — anchor blog = CF Pages public only / `/ops` + `/api` = Hetzner same-origin + Tailscale-only v0 + 폰 Ask/round/cite-check 가능 + draft 편집 데스크탑 + Scenario graph **모바일 zoom/pan 가능** + AccessIntervention 모바일 1-tap + 발행 단계 운영자 수동 마킹 + fork_session enum (operator 명시) + exploratory → directed transition 운영자 명시 promote. P0-M6 안에는 **RESEARCH-1A.0** minimum scope 만 흡수 (mobile read-only), full ask/round/orchestration 은 P1+ phasing.
+- **2026-05-14 사용자 후속 결정**: Q-049 + Q-050 GPT 추가 답변 + 본 메타 리뷰의 보강 항목 *모두 채택*. ResearchSession 의 multi-round 지원 의문 → ExplorationRound 1:N child 추가 lock. Q-049/050/051 통합 PR (`claude/q-049-q-050-resolution`) 으로 본문 reflect + 슬라이스 등록.
+- **2026-05-14 Q-051 신규 (CLI ask + routing) + round 2 pivot (web mobile-first)**: 사용자 "폰으로도 작업 가능해야 함" → UI surface 가 CLI 가 아닌 **web (mobile-first)** 로 reframe. UI-spec 초안 `docs/design/ui-spec-research-app.md` 작성. **스택 lock (Q-051 #6 — DEC-022, 2026-05-14 GPT 32 review + 사용자 동의)** = A' (Astro 5.x shell + React 18 island + Tailwind + shadcn/ui + Radix UI + TanStack Query v5 + SSE) 6 layer. **Hosting = Topology B lock** (Public CF Pages + Private Hetzner same-origin, GPT 31 리뷰 후 Cloudflare Workers default reject). Auth = Tailscale-only v0, v1+ Cloudflare Tunnel + Access. **CLI phasing**: P0-M6 까지 CLI 가 critical path (PUB-1A.5 publish), P1+ 부터 web /ops 가 primary, CLI 는 secondary 자동화 용도. **Q-051 status: open 유지** — Round 1 routing default 5 항목 (line 460-480) 미해결 (round 17 Codex finding 후 resolved → open). #6 stack 만 partial lock by DEC-022.
 
 ### 7) Lesson candidates (외부 KB 승격 후보 식별만)
 
@@ -159,6 +162,57 @@ P0-M6 "2주 목표 lock (DEC-005)" 는 **사용자 명시 지시로 fixed**. 일
 | CI workflow rename (advisory) | claude | `.github/workflows/` | **landed (본 PR)** |
 | `docs/_generated/` regen | claude | `docs/_generated/` | **landed (본 PR)** |
 | Q-042~Q-048 resolution → 후속 PR | user 결정 후 claude | TBD | pending |
+
+---
+
+## Research App `/ops` UI stack lock (DEC-022 / Q-051 #6, 2026-05-14)
+
+### Context
+
+Q-051 (Research App UI surface) round 2 에서 CLI → Web (mobile-first)
+pivot + GPT 31 review 로 Topology B (CF Pages public + Hetzner private
+same-origin) lock 후, 구체 frontend stack 만 미결정 상태로 round 14/15
+까지 §14 #1 pending. round 16 P1 finding 처리 후 사용자가 GPT 32 review
+(2026-05-14) 를 전달하며 stack lock 의무 진행.
+
+### GPT 32 review 권고 요약
+
+- A' lock — Astro + React island + shadcn/ui + Radix + Tailwind + TanStack
+  Query + SSE.
+- 이유 6점: (1) Astro anchor 일관성 (ADR-0022) / (2) `/ops` = AI research
+  console (SPA-grade interaction 필요) / (3) LLM coding 안전성 (React 패턴
+  /예제 압도적) / (4) shadcn+Radix mobile drawer/sheet 표준 / (5) TanStack
+  Query 의 cache invalidation 표준 / (6) Solid/Svelte/Vue/HTMX reject.
+
+### Claude critical review (DEC-022 안에 흡수)
+
+GPT 권고 안에 명시되지 않은 6 개 critique 를 DEC-022 본문에 직접 추가:
+
+| Critique | 핵심 | DEC-022 lock |
+|----------|------|--------------|
+| 1. React island hydration cost | 모바일 LTE LCP 영향 ≈ 70KB gzip | `client:visible` directive 우선, scenario graph 만 `client:load` |
+| 2. shadcn/ui copy-paste 위치 | npm dep 가 아니라 CLI copy-paste | `src/shared/ui/` 디렉토리 lock — public + ops 공유 |
+| 3. TanStack Query phasing | P0 의무 여부 | **P0-M6 = Astro SSR + Tailwind only**, P1+ 부터 도입 |
+| 4. 신규 ADR 발급 시점 | 본 PR 안 vs 후속 | RESEARCH-1A.1 슬라이스 시작 직전 (별도 PR) — DEC-022 anchor. ADR-0029/0030 점유로 다음 번호 ADR-0031 사용 |
+| 5. PWA 호환성 (RESEARCH-1A.4) | service worker + IndexedDB + React island | Workbox + Astro adapter, TanStack Query optimistic update 와 sync |
+| 6. Voice input 통합 (RESEARCH-1A.5) | shadcn Button + MediaRecorder | 자연스럽게 동작 |
+
+### Decision
+
+DEC-022 lock — 6 layer stack (Astro shell + React 18 island + Tailwind +
+shadcn/ui + Radix + TanStack Query v5 + SSE) + phasing (P0-M6 = SSR only,
+P1+ = full stack) + 신규 ADR-0031 발급 의무 (ADR-0029/0030 점유로 다음 번호).
+
+### Outcome 작업 (본 PR 안)
+
+| Action | 위치 | 상태 |
+|--------|------|------|
+| DEC-022 발급 | `docs/decisions/DEC-022.md` | **landed (본 PR)** |
+| Q-051 partial resolution (#6 UI stack lock) + 결정 결과 표 (Q-051 status 는 routing default 5 항목 미해결로 **open 유지** — round 17 Codex finding 후 resolved 에서 되돌림) | `docs/questions/Q-051.md` | **landed (본 PR)** |
+| UI-spec §14 #1 stack pending → lock | `docs/design/ui-spec-research-app.md` | **landed (본 PR)** |
+| UI-spec §13 Topology B 본문에 shadcn+Radix+TanStack Query 추가 | 동상 | **landed (본 PR)** |
+| 04 PLAN RESEARCH-1A.1/.2/.3/.4 artifacts 에 stack 명시 | `docs/04_IMPLEMENTATION_PLAN.md` | **landed (본 PR)** |
+| 신규 ADR-0031 (가칭 Research App /ops Stack) **placeholder stub** 발급 (status: proposed, ADR-0029/0030 점유 회피로 다음 번호) | `docs/adr/0031-research-app-ops-stack.md` | **stub landed (본 PR, round 18)** — body 본격 작성 (dep version / config / client:\* policy / 추가 INV / bundle budget) 은 RESEARCH-1A.1 슬라이스 시작 직전 별도 PR 로 deferred |
 
 ---
 
