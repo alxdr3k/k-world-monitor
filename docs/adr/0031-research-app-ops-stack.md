@@ -237,6 +237,7 @@ budget acceptance gate) 를 본 PR 안에서 확정한다.
     "astro": "^5.x",
     "@astrojs/react": "^4.x",
     "@astrojs/node": "^9.x",
+    "@astrojs/tailwind": "^5.x",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "tailwindcss": "^3.4.0",
@@ -272,19 +273,46 @@ budget acceptance gate) 를 본 PR 안에서 확정한다.
 
 #### 3.2 astro.config.ops.ts shape (Hetzner build target)
 
+본 ADR 는 phase 별 두 변종을 정의 — INV-0031-4 (P0-M6 안에서 `@astrojs/
+react` / TanStack Query / shadcn-ui dep 도입 금지) enforce 위해 P0
+변종은 `@astrojs/react` import 자체를 포함하지 않는다.
+
+**P0-M6 (RESEARCH-1A.0) — SSR + Tailwind only**:
+
 ```ts
-// astro.config.ops.ts (RESEARCH-1A.1 부터 활성)
+// astro.config.ops.ts (P0-M6 RESEARCH-1A.0 변종)
 import { defineConfig } from 'astro/config';
-import react from '@astrojs/react';
 import node from '@astrojs/node';
-import tailwindcss from '@tailwindcss/vite';
+import tailwind from '@astrojs/tailwind';
 
 export default defineConfig({
   output: 'server',
   adapter: node({ mode: 'standalone' }),
-  integrations: [react()],
+  integrations: [tailwind()],
+  server: {
+    host: '127.0.0.1',
+    port: 4321,
+  },
+  build: {
+    inlineStylesheets: 'auto',
+  },
+});
+```
+
+**P1+ (RESEARCH-1A.1 부터) — 본 stack 6 layer 활성**:
+
+```ts
+// astro.config.ops.ts (P1+ RESEARCH-1A.1 변종)
+import { defineConfig } from 'astro/config';
+import node from '@astrojs/node';
+import tailwind from '@astrojs/tailwind';
+import react from '@astrojs/react';
+
+export default defineConfig({
+  output: 'server',
+  adapter: node({ mode: 'standalone' }),
+  integrations: [tailwind(), react()],
   vite: {
-    plugins: [tailwindcss()],
     ssr: {
       noExternal: ['@tanstack/react-query'],
     },
@@ -302,18 +330,22 @@ export default defineConfig({
 - `astro.config.public.ts` 는 ADR-0022 lock 그대로 (`@astrojs/cloudflare`
   adapter + `/posts/*` content collection). 본 ADR 는 `astro.config.
   ops.ts` 변종만 lock.
-- `output: 'server'` SSR-first (모바일 LCP) + React island hydration.
+- `output: 'server'` SSR-first (모바일 LCP) + (P1+) React island hydration.
 - Bun runtime 호환 — `@astrojs/node` standalone mode 가 Bun 에서도 작동
   (RESEARCH-1A.API0 RUNBOOK 안에서 verify 의무).
-- P0-M6 RESEARCH-1A.0 시점에는 `integrations: [react()]` line 만 주석
-  처리하여 SSR + Tailwind only 형태 운영.
+- **Tailwind v3 + `@astrojs/tailwind` integration** 사용 — shadcn-ui v0.9
+  CLI 가 Tailwind v3 기반이므로 일관성 유지 (Tailwind v4 + `@tailwindcss/
+  vite` plugin 은 shadcn-ui v0.9 호환 검증 안 됨 — 향후 v0.10+ 도입 시
+  본 §3.2 재평가).
+- RESEARCH-1A.0 → RESEARCH-1A.1 전이 = 본 config 의 P0 → P1+ 변종 교체
+  PR (`@astrojs/react` + `@tanstack/react-query` dep 추가 + import 추가).
 
 #### 3.3 `client:*` directive policy (페이지별 표 — INV-0031-2 enforce)
 
 | 페이지 | Default directive | Exception | 사유 |
 |---|---|---|---|
 | `/ops/` 홈 | `client:visible` | — | recent 5 sessions read 위주, viewport 진입 시 hydrate |
-| `/ops/ask` | `client:only="react"` | — | MediaRecorder API 사용 (INV-0031-6) — SSR 시 미존재 |
+| `/ops/ask` | `client:visible` (RESEARCH-1A.2, text + send only) → `client:only="react"` (RESEARCH-1A.5, voice 추가 시) | voice icon 도입 시 directive 전이 | RESEARCH-1A.2 슬라이스에서는 text input + send button 만 (MediaRecorder 없음) → `client:visible` 가능. RESEARCH-1A.5 (Whisper API) 슬라이스에서 voice icon 추가 시 MediaRecorder API 가 SSR 시 미존재하므로 `client:only="react"` 로 전이 (INV-0031-6). 본 directive 전이 PR 안에서 §3.3 표 본 행 갱신 의무 |
 | `/ops/sessions` list | `client:visible` | — | list filter / sort 만 |
 | `/ops/sessions/:id` | `client:visible` | — | round timeline 은 viewport 진입 시 hydrate |
 | `/ops/sessions/:id/rounds/:rid` | `client:visible` | — | turn list streaming, viewport-bound |
@@ -347,10 +379,17 @@ export default defineConfig({
   },
   "aliases": {
     "components": "@/shared/ui",
-    "utils": "@/shared/ui/lib/utils"
+    "ui": "@/shared/ui",
+    "utils": "@/shared/ui/lib/utils",
+    "lib": "@/shared/ui/lib",
+    "hooks": "@/shared/ui/hooks"
   }
 }
 ```
+
+- `aliases.ui` 가 shadcn-ui CLI 의 component install target — INV-0031-3
+  의 "단일 디렉토리 lock" 보장. `aliases.components` 와 분리되어 있어야
+  CLI 가 Dialog / Sheet 등 UI primitive 를 본 경로로 정확히 install.
 
 디렉토리 결과:
 
