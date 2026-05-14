@@ -6,10 +6,15 @@
 (Source → Document → Snapshot → Claim → Dossier → Scenario → EditorialIntent
 → Thesis → ContentDraft → Publication, ADR-0025 supersedes ADR-0011) 을 통해
 **위험·기회·회복탄력성·비대칭 영향 4축을 병렬로** 추적하고 콘텐츠를 발행하는,
-**모든 인용을 source 까지 단계 제한 trace 로 역추적 가능하게 보장하는 1인
-운영 환경의 LLM 기반 시나리오 인텔리전스 시스템**이다 (ADR-0011 →
-superseded by ADR-0025, ADR-0019). NFR-003 의 정확한 hop 제한은 ADR-0025
-도입 후 reflow 결정 대기 — Q-042 참조.
+**모든 인용을 Snapshot 까지 5-hop 이내로 역추적 가능하게 보장하는 1인 운영
+환경의 LLM 기반 시나리오 인텔리전스 시스템** 이다 (ADR-0011 → superseded by
+ADR-0025, ADR-0019). **NFR-003 5-hop 단축 trace path** = Publication →
+ContentDraft → Thesis → Scenario → Claim → Snapshot (DEC-020 Q-042 lock).
+EditorialIntent (ADR-0025 신규 stage) 는 Thesis 의 anchor metadata 로 분류,
+trace 계산 시 선택적 skip 허용 (Thesis ↔ EditorialIntent 1:1 link 으로
+reachable 보장). Source layer 의 Source / Document 는 Snapshot 의 metadata
+anchor — trace 종점은 Snapshot. manual_claim_entry path 는 Snapshot 미포함
+(4-hop 으로 추가 단축, ADR-0018).
 
 canonical store는 **Neo4j Community Edition(graph objects)** + **SQLite + FTS5
 (relational metadata)** + **R2(permitted artifacts only — open license dataset
@@ -311,7 +316,7 @@ SQLite migration).
 
 ## Related Requirements
 
-- REQ-001 (9-stage 모델) → 전 컴포넌트가 9-stage anchor (ADR-0011)
+- REQ-001 (10-stage 모델) → 전 컴포넌트가 10-stage anchor (ADR-0025 supersedes ADR-0011)
 - REQ-002 (Neo4j canonical graph) → Neo4j 컴포넌트 + native FTS (ADR-0012,
   ADR-0014)
 - REQ-003 (Snapshot fingerprint, R2 raw 금지) → Fetcher + R2 permitted (ADR-0012)
@@ -348,11 +353,19 @@ SQLite migration).
   cite anchor canonical) → Publishing Site 컴포넌트 (ADR-0022)
 - NFR-001 (1만건 < 1s p95) → Neo4j native FTS + index 정책 (SPIKE-001로 검증)
 - NFR-002 (reproducibility) → scenario_revisions + edge ledger (ADR-0009)
-- NFR-003 (5단계 trace) → 10-stage object model + ID propagation (ADR-0025 supersedes ADR-0011). NFR-003 의 hop 표현 reflow 결정 대기 — Q-042 참조.
-- NFR-004 (cost 상한) → Run Ledger + throttling (ADR-0023 supersedes ADR-0006, + DEC-010 cost ceiling lock + Q-046 Tier 0 cap enforcement 결정 대기)
+- NFR-003 (5-hop trace) → 10-stage object model + ID propagation (ADR-0025
+  supersedes ADR-0011) + DEC-020 Q-042 lock. 단축 trace path = Publication →
+  ContentDraft → Thesis → Scenario → Claim → Snapshot (EditorialIntent /
+  Source / Document 는 metadata anchor 로 선택적 skip)
+- NFR-004 (cost 상한) → Run Ledger + throttling (ADR-0023 supersedes
+  ADR-0006, + DEC-010 cost ceiling lock + DEC-020 Q-046 일반화 quota module
+  resolution — `src/ops/quota-enforcement.ts` + QuotaKind enum 으로 Tier 0
+  daily / soft / hard / weekly / backfill 일괄 enforce)
 - NFR-005 (quote ≤ 200자 + quote_reason) → Extractor assertion + Cite Check
   (ADR-0015)
-- NFR-006 (snapshot durability via fingerprint) → content_hash (ADR-0012)
+- NFR-006 (snapshot durability via fingerprint) → canonical_text_hash diff
+  primary (ADR-0010 INV-0010-4, DEC-021 Q-049 lock) + raw_body_hash fallback
+  (ADR-0012)
 - NFR-007 (extractor 확장) → Extractor interface (ADR-0023 supersedes ADR-0006, + ADR-0024 Data Science Module)
 - NFR-008 (legal safety, raw 0건 cloud) → Policy Gate + Fetcher (ADR-0012,
   ADR-0017)
