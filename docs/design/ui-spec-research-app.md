@@ -105,28 +105,39 @@ align + 1인 운영 surface 최소 + mobile responsive 친화. 단 SPA-grade UI
 가 필요한 경우 (Q-050 의 scenario branch visualization 등) 는 별도 page
 에서 vega-lite / mermaid + HTMX swap 으로 처리.
 
-## 4. Hosting / Deploy 옵션
+## 4. Hosting / Deploy — Topology B 채택 (lock, §13 참조)
 
-### 옵션 (a) — Cloudflare Workers + R2 + Pages
+GPT 31 기술 리뷰 (2026-05-14) 후 **Topology B (Public CF Pages / Private
+Hetzner same-origin)** lock. 본 section 의 (a)/(b)/(c) 옵션 비교는 historical
+record — 실제 채택은 (c) hybrid 의 정밀화 (CF Pages = public anchor only,
+Hetzner = `/ops` + `/api` same-origin, Tailscale-only v0). 사용자 의문
+"Hetzner 에 올리는 게 나으려나" + GPT 답변 T-15/T-17/T-18 결합.
 
-- ADR-0022 vendor surface 안 (이미 Pages 사용)
-- edge runtime — mobile latency 낮음
-- Cloudflare Access 로 single-operator auth 자연
-- 단점: ADR Constraints "managed edge 도입 X" 와 충돌 → reflow 의무
+### 옵션 (a) — Cloudflare Workers + R2 + Pages — **reject (round 6)**
 
-### 옵션 (b) — self-host (VPS, Docker)
+- CF Pages 에 `/ops` artifact 포함 시 Tailscale-only Hetzner backend 와
+  cross-origin / SSR fetch 불가 (T-15)
+- ADR Constraints "managed edge 도입 X" 와 충돌 — reflow 의무 발생
+- single-operator 환경에서 edge 분산 의미 약함
+
+### 옵션 (b) — self-host only — partial
 
 - ADR Constraints 그대로 준수
-- 단점: 운영 부담 (1인 운영자), mobile latency (지리 위치 의존)
+- 단점: anchor blog 의 cite anchor durability (5 년+ uptime) 단일 머신 risk
 
-### 옵션 (c) — hybrid
+### 옵션 (c) — hybrid — **lock (정밀화 후 채택)**
 
-- Static asset (HTML/CSS) = Cloudflare Pages
-- API + AI 호출 server = self-host VPS
-- 복잡도 증가, 단순 권고 안 함
+- **Public artifact** (`/posts/*` / `/citations/*` / `/corrections/*`) =
+  Cloudflare Pages (anchor blog 영속성 + edge 분산)
+- **Private artifact** (`/ops/*` + `/api/*`) = Hetzner self-host (same-
+  origin, Tailscale-only v0 / CF Tunnel + Access v1+)
+- ADR-0022 vendor surface (R2 + Pages) 유지 + ADR Constraints 그대로 준수
+  (managed edge 는 public anchor 만, dynamic backend 는 self-host)
 
-**기본 권고: (a) Cloudflare Workers + R2 + Pages**. ADR Constraints
-본문 reflow 의무 — Cloudflare 는 "managed edge 도입 X" 의 exception 으로
+**기본 권고: (c) 정밀화** — historical (a) 권고는 reject. 상세 deployment
+topology 는 §13 참조.
+
+(아래 historical 비교 텍스트는 audit log 로 보존 — 실제 결정은 위 (c)).
 이미 인정 (ADR-0022 lock). research app 도 같은 vendor.
 
 ## 5. Auth
@@ -154,22 +165,33 @@ align + 1인 운영 surface 최소 + mobile responsive 친화. 단 SPA-grade UI
 
 ### 6.1 Top-level routes
 
+Private operator routes 는 모두 `/ops/*` prefix (Topology B same-origin
+auth boundary, §13 lock). Public anchor blog 는 root (`/posts/*` 등, CF
+Pages).
+
 ```
-/                          홈 (recent sessions + quick ask)
-/ask                       global ask (mobile-first text input + voice)
-/sessions                  session list
-/sessions/:id              session detail (round timeline + summary)
-/sessions/:id/rounds/:rid  round detail (turn list + active context)
-/rounds/:rid               redirect to session/:id/rounds/:rid
-/turns/:tid                turn detail (user message + AI answer + artifacts)
-/claims/:cid               claim viewer (evidence + source trace)
-/snapshots/:sid            snapshot viewer (URL + content_hash + r2 link if permitted)
-/dossiers/:did             dossier editor (promoted_claim_ids[] + counterclaim pool)
-/scenarios/:sid            scenario detail (branches / impact_targets / revisions)
-/theses/:tid               thesis editor (stance + market_stance + EditorialIntent link)
-/drafts/:did               content draft editor (blog_long markdown)
-/publications              publication list + cite check status
-/settings                  operator settings (Doppler keys / max_rounds / cost cap)
+/ops                       홈 (recent sessions + quick ask)
+/ops/ask                   global ask (mobile-first text input + voice)
+/ops/sessions              session list
+/ops/sessions/:id          session detail (P0-M6 = session header only / P1+ = round timeline + summary)
+/ops/sessions/:id/rounds/:rid  round detail (turn list + active context)
+/ops/rounds/:rid           redirect to /ops/sessions/:id/rounds/:rid
+/ops/turns/:tid            turn detail (user message + AI answer + artifacts)
+/ops/claims/:cid           claim viewer (evidence + source trace)
+/ops/snapshots/:sid        snapshot viewer (URL + content_hash + r2 link if permitted)
+/ops/dossiers/:did         dossier editor (promoted_claim_ids[] + counterclaim pool)
+/ops/scenarios/:sid        scenario detail (branches / impact_targets / revisions)
+/ops/theses/:tid           thesis editor (stance + market_stance + EditorialIntent link)
+/ops/drafts/:did           content draft editor (blog_long markdown)
+/ops/publications          publication list + cite check status
+/ops/settings              operator settings (Doppler keys / max_rounds / cost cap)
+/ops/interventions         AccessIntervention queue (3-option 모바일 1-tap)
+
+Public (CF Pages, no /ops prefix):
+/posts/:slug               public publication
+/citations/:cid            public cite anchor
+/corrections/:cid          public correction / retraction
+/rss.xml                   feed
 ```
 
 ### 6.2 모바일 우선 페이지 (간소화)
