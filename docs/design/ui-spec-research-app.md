@@ -358,7 +358,7 @@ source trace:
    - `useEventStream` hook 으로 SSE message 수신
    - `queryClient.setQueryData(['session', sessionId, 'rounds'])` in-place
      update → React 가 round timeline component 자동 re-render
-   - `queryClient.invalidateQueries(['active-context'])` for route change
+   - `queryClient.invalidateQueries({ queryKey: ['active-context'] })` for route change (TanStack Query v5 object-form filter)
 4. Server finalize:
    - UPDATE research_turn (completed_at = NOW, answer_summary, cost_usd)
    - if route != 'answer_only':

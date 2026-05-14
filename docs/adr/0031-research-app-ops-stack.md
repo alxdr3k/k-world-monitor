@@ -72,7 +72,7 @@ invariants:
     statement: |
       PWA service worker (RESEARCH-1A.4) 와 본 stack 의 binding —
       IndexedDB 안의 pending turn queue 는 reconnect 시 TanStack Query
-      `queryClient.invalidateQueries(['session', sessionId, 'rounds'])` +
+      `queryClient.invalidateQueries({ queryKey: ['session', sessionId, 'rounds'] })` +
       `queryClient.setQueryData` optimistic update 와 sync 한다.
       conflict resolution = server timestamp 우선 (UI-spec §8.2 / Q-050
       turn_event durable log 일치). Workbox 의 background sync 가
@@ -259,7 +259,8 @@ budget acceptance gate) 를 본 PR 안에서 확정한다.
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "shadcn-ui": "^0.9.x",
-    "@playwright/test": "^1.x"
+    "@playwright/test": "^1.x",
+    "lighthouse": "^12.x"
   }
 }
 ```
@@ -289,10 +290,6 @@ export default defineConfig({
   output: 'server',
   adapter: node({ mode: 'standalone' }),
   integrations: [tailwind()],
-  server: {
-    host: '127.0.0.1',
-    port: 4321,
-  },
   build: {
     inlineStylesheets: 'auto',
   },
@@ -317,15 +314,30 @@ export default defineConfig({
       noExternal: ['@tanstack/react-query'],
     },
   },
-  server: {
-    host: '127.0.0.1',
-    port: 4321,
-  },
   build: {
     inlineStylesheets: 'auto',
   },
 });
 ```
+
+**Runtime bind (loopback enforcement, production)** — `@astrojs/node`
+standalone runtime 의 host/port 는 Astro config 의 `server.*` block 이
+아니라 **process env `HOST` / `PORT`** 로 제어한다 (`server.*` block 은
+`astro dev` / `astro preview` 전용). production loopback bind 는 systemd
+unit `Environment=` 또는 `EnvironmentFile=` 으로 lock — Tailscale Serve
+앞 (v0) / Cloudflare Tunnel 앞 (v1+) 모두 동일.
+
+```ini
+# /etc/systemd/system/k-world-monitor-ops.service (RUNBOOK anchor)
+[Service]
+Environment=HOST=127.0.0.1
+Environment=PORT=4321
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/bun /opt/k-world-monitor/dist/server/entry.mjs
+```
+
+상세 systemd unit shape / EnvironmentFile (Doppler injection) 은
+`docs/05_RUNBOOK.md` 가 canonical.
 
 - `astro.config.public.ts` 는 ADR-0022 lock 그대로 (`@astrojs/cloudflare`
   adapter + `/posts/*` content collection). 본 ADR 는 `astro.config.
