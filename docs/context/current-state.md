@@ -179,10 +179,12 @@ injection containment / discovery worker concurrency / research app stack)
    포함하지 않음** (각 slice 의 milestone row 에서 별도 평가).
 2. **SPIKE-001 실행** — Neo4j Community + native FTS, 1만 graph object 시점
    p95 < 1초 (NFR-001 / AC-002). M1 gate accept 차단 risk.
-3. **Q-044 R2 upload audit code enforcement** (DEC-020 partial) — INFRA-1B.3.x-
-   audit 슬라이스 진입 — `src/storage/audit/policy-decisions.ts` + IntendedAction
+3. **Q-044 R2 upload audit code enforcement** (DEC-020 partial) — 신규
+   slice (slice ID TBD, 진입 직전 lock — TRACE-040 anchor, INFRA-1B.3 의
+   follow-up) 진입 — `src/storage/audit/policy-decisions.ts` + IntendedAction
    enum + snapshot-fingerprint r2Put 전후 INSERT. AC-032 / NFR-008 audit
-   evidence 차단.
+   evidence 차단. (Slice ID 표현은 IMPL_PLAN Risks Q-042~Q-048 entry 의
+   TBD wording 과 align — 두 문서 모두 lock 시점 동일하게 갱신 의무).
 4. **Q-050 운영자 결정 7 항목** (open) — AI search + repo 통합 architecture
    resolution 의 사용자 결정 잔여 (parent_round_id branching semantics /
    mode='mixed' validation profile / termination defaults / migration v8 ALTER
