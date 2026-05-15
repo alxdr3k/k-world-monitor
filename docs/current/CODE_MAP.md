@@ -57,6 +57,7 @@
 | `src/storage/r2/policy.ts` | PERMITTED_PREFIXES + `checkPermittedPrefix()` + sha256 helpers (ADR-0012 INV-0012-4, INFRA-1A.3) |
 | `src/storage/r2/client.ts` | Bun.S3Client wrapper — `r2Put/r2Get/r2Delete` with policy enforcement (INFRA-1A.3) |
 | `src/storage/source-registry/seed.ts` | Parse `data/sources_seed.yaml`, validate enums + URLs, upsert source_material_policy + slug map (INFRA-1B.1) |
+| `src/storage/source-registry/neo4j-bootstrap.ts` | `bootstrapNeo4jSourceNodes()` UNWIND MERGE Neo4j Source nodes from resolved SQLite slug_map rows (`loadBootstrapRowsFromSqlite()` — YAML name preferred, historical slug-only rows fallback `name=slug`) + `preflightSourceRegistry()` SQLite policy / SQLite slug_map / Neo4j Source 3-way alignment check + null source_id detection (`neo4jNodesMissingSourceId`) + duplicate source_id detection (`neo4jDuplicateSourceIds[]`) + `assertSourceRegistryAligned()` fail-fast `BootstrapPreflightError` with remediation hints. Source node properties minimal (`source_id` / `slug` / `name` / `bootstrap_at` / `updated_at`); `was_created` via OPTIONAL MATCH query-local variable (NOT stored as Source property). (INFRA-1B.1.h1-source-bootstrap-neo4j, AI-P1-2) |
 | `src/storage/audit/policy-decisions.ts` | `recordR2UploadDecision()` — immutable audit row INSERT into policy_decisions around every r2Put call site in snapshot-fingerprint (INFRA-1B.3.x-audit, AC-032 / NFR-008, ADR-0012 INV-0012-3) |
 
 ### Discovery
@@ -101,6 +102,7 @@
 | `tests/unit/perspective_distribution_test.ts` | AC-027 Tier A seed distribution lint — reads data/sources_seed.yaml | TEST-027 |
 | `tests/unit/r2_policy_test.ts` | R2 permitted-prefix + sha256 round-trip integrity | — (AC-003, AC-020, AC-032) |
 | `tests/unit/source_registry_test.ts` | Source registry seed dry-run + enum validation + YAML structure | — (INFRA-1B.1) |
+| `tests/unit/neo4j_bootstrap_test.ts` | Neo4j Source bootstrap idempotency + preflight (3-way SQLite policy / slug_map / Neo4j Source alignment) + fail-fast BootstrapPreflightError | — (INFRA-1B.1.h1-source-bootstrap-neo4j, AI-P1-2) |
 | `tests/unit/access_intervention_test.ts` | severity scoring + recorder integration + batch-report generation (26 tests) | TEST-024 (AC-024) |
 | `tests/unit/safe_fetch_test.ts` | safe-fetch defense unit tests (117 tests) | — (ADR-0028, DEC-017) |
 | `tests/unit/xml_safe_test.ts` | xml-safe singleton + XXE block tests | — (DEC-018) |
