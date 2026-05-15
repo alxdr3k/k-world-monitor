@@ -18,9 +18,9 @@
 
 본 review 가 발견한 208 + ~80 finding 의 backlog explosion 회피 의무. **Q-059 의 운영자 결정 전까지** 다음 rule 적용:
 
-1. **engineering queue (즉시 진행 가능)** = `AI-P0-1` (R2 archive_policy guard) ~ `AI-P1-7` (policy_decisions DB enum + upload_attempt_id) 만.
-2. **운영자 admin task (병렬)** = Q-052 결정 / SPIKE-001 실행 / Doppler secret rotation cadence — engineering queue 와 별도.
-3. **`AI-P1-8` ~ `AI-P1-12`** = engineering queue 의 doc sync / setup hygiene 보조 — Week 1 안 idle time 에 흡수.
+1. **engineering deliverables (즉시 진행 가능)** = `AI-P0-1` (R2 archive_policy guard) ~ `AI-P1-7` (policy_decisions DB enum + upload_attempt_id) — P0-M2 hardening 핵심.
+2. **engineering doc-sync 보조 (Week 1 안 함께 진행 가능)** = `AI-P1-8` (frontmatter parse fix) ~ `AI-P1-12` (RUNBOOK setup hygiene) — Codex review 2026-05-15 inline #21 feedback: rule #1 의 boundary 와 Week 1 sequence 정합. 두 group 모두 engineering queue 안 active, P0-M2 gate evidence 조건.
+3. **운영자 admin task (병렬)** = Q-052 결정 / SPIKE-001 실행 / Doppler secret rotation cadence — engineering queue 와 별도.
 4. **`AI-P2-*` (~22 항목) / `AI-P3-batch-*` (3 batch ~80 finding)** = backlog only. P0-M2 gate accept 전까지 진입 금지. 운영자가 Q-059 resolve 시점 또는 PUB-1A.5 첫 발행 retrospective 시점 promotion 가능.
 5. **L2-* batch (Claude 자체 governance / glossary)** = `INFRA-1A.9-validator-extension` + `INFRA-1A.10-glossary-backfill` slice 안에 묶음 — engineering queue 후반부 또는 P0-M3 entry 직전.
 
