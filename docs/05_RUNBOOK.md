@@ -379,7 +379,7 @@ manual investigation required for orphans / null source_id / duplicates.
 | `orphanInNeo4j` | Neo4j 에 registry 외 Source 노드 존재 (manual Cypher 또는 legacy fixture) | manual investigation — `MATCH (s:Source {source_id: '<id>'}) DETACH DELETE s` 또는 SQLite slug_map 에 누락 entry 추가 |
 | `policyVsSlugMap.{onlyInPolicy, onlyInSlugMap}` | SQLite 상태 corruption (분리된 INSERT 또는 partial migration) | DB 백업 확보 후 diff 분석 — 정상 운영 중 발생 X (seed.ts upsert 가 두 table 을 동시 채움) |
 | `neo4jNodesMissingSourceId` | pre-constraint historical data 또는 manual Cypher mistake — `:Source` 노드에 `source_id` 미설정 | `MATCH (s:Source) WHERE s.source_id IS NULL RETURN s` → manual delete 또는 source_id 보정 |
-| `neo4jDuplicateSourceIds[]` | pre-constraint historical data (v1 schema `source_unique` 적용 BEFORE 노드가 만들어진 경우) | manual dedupe — `MATCH (s:Source) WITH s.source_id AS id, collect(s) AS dups WHERE size(dups) > 1 RETURN id, dups` 후 1개 survivor 유지, 나머지 DETACH DELETE. `migrate:neo4j` 재실행으로 `source_unique` 재검증 |
+| `neo4jDuplicateSourceIds[]` | pre-constraint historical data (Source 노드 생성 후 v1 schema `source_unique` 적용 — 즉 constraint applied AFTER nodes were created) | manual dedupe — `MATCH (s:Source) WITH s.source_id AS id, collect(s) AS dups WHERE size(dups) > 1 RETURN id, dups` 후 1개 survivor 유지, 나머지 DETACH DELETE. `migrate:neo4j` 재실행으로 `source_unique` 재검증 |
 | `bun run migrate:sqlite` 미실시 (table not found error) | `source_material_policy` 또는 `source_registry_slug_map` table 부재 | `bun run migrate:sqlite` 후 재실행 |
 | Neo4j password / connectivity | `NEO4J_PASSWORD` env 또는 daemon 미기동 | `.env.example` 참조 + Neo4j Community 데몬 기동 확인 |
 
