@@ -747,21 +747,51 @@ describe("createSnapshotFingerprint — audit hook integration (INFRA-1B.3.x-aud
     expect(audit[1]!.rationale).toContain("simulated Neo4j SET");
   });
 
-  it("permanent audit failure (schema mismatch) → throws BEFORE r2Put, NFR-008 fail-fast", async () => {
+  it("audit failure (schema mismatch) → throws BEFORE r2Put, NFR-008 hard gate", async () => {
     // Simulate v7 migration NOT applied: drop policy_decisions table so the
-    // first `attempted` audit insert raises "no such table". This is a
-    // permanent error (not SQLITE_BUSY/LOCKED), so bestEffortAuditR2Upload
-    // MUST re-throw — letting r2Put proceed would silently violate
-    // INV-0012-3 / NFR-008 audit guarantee (Codex PR #39 round 3 P1).
+    // first `attempted` audit insert raises "no such table". auditR2UploadOrThrow
+    // MUST re-throw on ALL audit failures (transient + permanent alike)
+    // because SQLite busy_timeout=5000ms already provides driver-level retry;
+    // letting r2Put proceed after audit failure would silently violate
+    // INV-0012-3 / NFR-008 audit-by-absence invariant (Codex PR #39 round 3
+    // P1 + reviewer "audit hard gate").
     const db = setupDb();
     db.exec("DROP TABLE policy_decisions");
-    seedQueue(db, "dq_audit_perm_fail");
+    seedQueue(db, "dq_audit_fail");
 
     await expect(
-      createSnapshotFingerprint(baseInput("dq_audit_perm_fail"))
+      createSnapshotFingerprint(baseInput("dq_audit_fail"))
     ).rejects.toThrow(/no such table|policy_decisions/i);
 
     // r2Put must NOT have run — fail-fast preserves NFR-008.
     expect(r2Puts).toHaveLength(0);
+  });
+
+  it("new-path first-create TOCTOU rejected → attempted + skipped_toctou, no SET r2_key", async () => {
+    // Codex PR #39 reviewer P1 regression: even on the new-path first-create
+    // branch (actualSnapId === snapId, no MERGE-match), a concurrent worker
+    // can dedup-link a prohibited source between createDocumentAndSnapshot
+    // commit and r2_key SET. The pre-r2Put cross-source check passes
+    // (allLinkedSourcesAllowRawCloud returns allowed), r2Put runs, but the
+    // post-r2Put recheck catches the now-prohibited link and skips SET.
+    // The previous `mergeMatchedExisting → stillAllowed=true` short-circuit
+    // failed to close this window. Symmetric to the dedup TOCTOU test.
+    findExistingResult = null; // force new-path, NOT dedup-match
+    policyRevertsAfterR2Put = true;
+    const db = setupDb();
+    seedQueue(db, "dq_newpath_toctou");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_newpath_toctou"));
+
+    expect(result.deduplicated).toBe(false); // first-create branch
+    expect(r2Puts).toHaveLength(1); // r2Put did run (pre-check passed)
+    expect(result.r2Key).toBeNull(); // post-check rejected → no SET
+    const setPatch = neo4j.runs.find(
+      (r) => r.via === "session" && /SET s\.r2_key/.test(r.query)
+    );
+    expect(setPatch).toBeUndefined();
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
+    expect(audit[0]!.rationale).toContain("new-path; first create");
   });
 });

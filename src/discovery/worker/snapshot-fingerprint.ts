@@ -54,44 +54,27 @@ function sha256HexBytes(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
 }
 
-// SQLite transient-error heuristic. bun:sqlite surfaces errors as SQLiteError
-// with `errno`: 5 = SQLITE_BUSY, 6 = SQLITE_LOCKED. Only these conditions
-// warrant swallow/retry — every other failure mode (no such column, no such
-// table, constraint violation, disk full, etc.) is a permanent schema/data
-// problem that MUST surface so the audit ledger guarantee (INV-0012-3 /
-// NFR-008) is not silently broken. Codex PR #39 round 3 P1.
-function isTransientSqliteError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const errno = (err as { errno?: number }).errno;
-  return errno === 5 || errno === 6;
-}
-
-// Audit insert with split error policy:
-//   - Transient SQLite errors (BUSY/LOCKED) → log + swallow. Worker keeps
-//     running; the audit may be slightly lossy under contention. This is the
-//     round 2 P2 contract (transient locks must not escalate to runtime_error
-//     or mis-attribute as set_r2_key_failed_neo4j).
-//   - Permanent errors (schema mismatch, constraint violations, etc.) →
-//     log + re-throw so the worker fails fast. This is the round 3 P1
-//     contract: permanent audit failure on the `attempted` row would let
-//     r2Put proceed with no ledger evidence, silently violating NFR-008.
-//     Re-throwing converts the queue row into a hard runtime_error so the
-//     operator gets a signal beyond logs.
-function bestEffortAuditR2Upload(
+// Audit ledger hard gate (Codex PR #39 round 3 P1 + reviewer "audit hard
+// gate" feedback). SQLite connection sets `busy_timeout=5000ms` (DEC-014)
+// so the driver already retries SQLITE_BUSY/LOCKED for 5 seconds. If audit
+// insert STILL fails after that, the contention is no longer transient —
+// adding application-level retry on top of driver-level retry is double-
+// retry and gains nothing. Therefore EVERY audit insert failure (transient
+// timeout or permanent schema mismatch alike) re-throws.
+//
+// This makes the audit-by-absence invariant valid: "no audit row for snap_id
+// = no r2Put attempted for snap_id". The previous best-effort swallow of
+// transient errors broke that invariant (BUSY/LOCKED could allow r2Put to
+// proceed with no `attempted` row). NFR-008 / INV-0012-3 audit guarantee
+// requires "no R2 upload without audit trail" as a hard invariant.
+function auditR2UploadOrThrow(
   input: Parameters<typeof recordR2UploadDecision>[0]
 ): void {
   try {
     recordR2UploadDecision(input);
   } catch (auditErr) {
-    if (isTransientSqliteError(auditErr)) {
-      console.warn(
-        `[snapshot] audit insert transient-failed (decision=${input.decision}, snap_id=${input.snapId}):`,
-        auditErr instanceof Error ? auditErr.message : auditErr
-      );
-      return;
-    }
     console.error(
-      `[snapshot] audit insert permanent-failed (decision=${input.decision}, snap_id=${input.snapId}) — re-throwing to surface schema/data issue:`,
+      `[snapshot] audit insert failed (decision=${input.decision}, snap_id=${input.snapId}) — throwing to surface audit ledger failure (NFR-008 hard gate):`,
       auditErr instanceof Error ? auditErr.message : auditErr
     );
     throw auditErr;
@@ -523,7 +506,7 @@ export async function createSnapshotFingerprint(
       // failure still leaves a recoverable audit trail (NFR-008 audit-by-absence
       // proof requires every upload attempt accounted for). Best-effort: an
       // audit insert failure here must not block r2Put or fail the row.
-      bestEffortAuditR2Upload({
+      auditR2UploadOrThrow({
         sourceId: input.sourceId,
         snapId: existing.snapId,
         url: input.url,
@@ -596,7 +579,7 @@ export async function createSnapshotFingerprint(
         }
         // INV-0012-3 audit row 2/2 — uploaded vs set_r2_key_failed_neo4j
         // attribution decided strictly by the Neo4j SET outcome above.
-        bestEffortAuditR2Upload({
+        auditR2UploadOrThrow({
           sourceId: input.sourceId,
           snapId: existing.snapId,
           url: input.url,
@@ -612,7 +595,7 @@ export async function createSnapshotFingerprint(
         // prohibited source linker, or recheck itself threw). r2 object
         // remains orphaned by design (see rationale above for why we do
         // NOT r2Delete here).
-        bestEffortAuditR2Upload({
+        auditR2UploadOrThrow({
           sourceId: input.sourceId,
           snapId: existing.snapId,
           url: input.url,
@@ -691,7 +674,7 @@ export async function createSnapshotFingerprint(
       ) as ArrayBuffer;
       // INV-0012-3 audit row 1/2 — new-path attempt BEFORE r2Put. Best-effort
       // (Codex PR #39 round 2 P2): audit failure must not block r2Put.
-      bestEffortAuditR2Upload({
+      auditR2UploadOrThrow({
         sourceId: input.sourceId,
         snapId: actualSnapId,
         url: input.url,
@@ -759,7 +742,7 @@ export async function createSnapshotFingerprint(
         }
         // INV-0012-3 audit row 2/2 — uploaded vs set_r2_key_failed_neo4j
         // attribution decided strictly by the Neo4j SET outcome above.
-        bestEffortAuditR2Upload({
+        auditR2UploadOrThrow({
           sourceId: input.sourceId,
           snapId: actualSnapId,
           url: input.url,
@@ -772,7 +755,7 @@ export async function createSnapshotFingerprint(
         });
       } else {
         // INV-0012-3 audit row 2/2 — TOCTOU recheck rejected on MERGE-matched branch.
-        bestEffortAuditR2Upload({
+        auditR2UploadOrThrow({
           sourceId: input.sourceId,
           snapId: actualSnapId,
           url: input.url,
