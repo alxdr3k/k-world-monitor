@@ -21,7 +21,7 @@ const doSqlite = args.has("--sqlite") || (!args.has("--sqlite") && !args.has("--
 const REPO_ROOT = join(import.meta.dir, "..");
 
 // ---------------------------------------------------------------------------
-// SQLite migration — versioned chain v1 → v6
+// SQLite migration — versioned chain v1 → v7
 // ---------------------------------------------------------------------------
 const SQLITE_MIGRATIONS: Array<{ version: string; file: string }> = [
   { version: "v1", file: "migrations/sqlite/v1_schema.sql" },
@@ -30,14 +30,27 @@ const SQLITE_MIGRATIONS: Array<{ version: string; file: string }> = [
   { version: "v4", file: "migrations/sqlite/v4_run_ledger_completed_at_idx.sql" },
   { version: "v5", file: "migrations/sqlite/v5_crawl_state.sql" },
   { version: "v6", file: "migrations/sqlite/v6_discovery_queue.sql" },
+  { version: "v7", file: "migrations/sqlite/v7_policy_decisions_intended_action.sql" },
 ];
+
+// Parse "v<N>" → integer for numeric comparison. Lexicographic string compare
+// ("v10" < "v2") breaks once v10 lands; align all version arithmetic on the
+// numeric SUBSTR pattern that getMigrationVersion() already uses (Codex PR
+// #39 reviewer P2/P3).
+function versionNum(v: string | null): number {
+  if (!v) return 0;
+  const n = Number(v.replace(/^v/, ""));
+  return Number.isFinite(n) ? n : 0;
+}
 
 async function migrateSqlite(): Promise<void> {
   const { getDb, getMigrationVersion } = await import("../src/storage/sqlite/connection");
 
   if (dryRun) {
     const current = getMigrationVersion();
-    const pending = SQLITE_MIGRATIONS.filter((m) => m.version > (current ?? ""));
+    const pending = SQLITE_MIGRATIONS.filter(
+      (m) => versionNum(m.version) > versionNum(current)
+    );
     if (pending.length === 0) {
       console.log("[SQLite] --dry-run: already at latest version.");
     } else {
@@ -50,7 +63,7 @@ async function migrateSqlite(): Promise<void> {
 
   for (const migration of SQLITE_MIGRATIONS) {
     const current = getMigrationVersion();
-    if (current !== null && current >= migration.version) {
+    if (current !== null && versionNum(current) >= versionNum(migration.version)) {
       console.log(`[SQLite] Already at ${current} — skipping ${migration.version}.`);
       continue;
     }
@@ -70,7 +83,34 @@ async function migrateSqlite(): Promise<void> {
       db.exec("COMMIT");
     } catch (err) {
       try { db.exec("ROLLBACK"); } catch { /* ignore rollback failure */ }
-      throw err;
+      // Defense-in-depth for ADD COLUMN migrations: SQLite has no native
+      // "ADD COLUMN IF NOT EXISTS", so a re-run after a successful apply
+      // throws "duplicate column name". The primary guard is the version
+      // check above (now fixed in connection.ts getMigrationVersion to
+      // order by version, not applied_at second-precision). This catch
+      // handles the residual case where schema_migrations is missing or
+      // stale: strip all ALTER TABLE statements (which are intrinsically
+      // non-idempotent) and re-run the remainder of the file — CREATE
+      // TABLE/INDEX use IF NOT EXISTS and INSERT INTO schema_migrations
+      // uses OR IGNORE, so the rest is safely idempotent.
+      // Codex PR #39 P1 — v7 ADD COLUMN intended_action.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/duplicate column name/i.test(msg)) {
+        const idempotentSql = sql.replace(/^\s*ALTER\s+TABLE[^;]*;/gim, "");
+        db.exec("BEGIN");
+        try {
+          db.exec(idempotentSql);
+          db.exec("COMMIT");
+          console.log(
+            `[SQLite] ${migration.version}: ALTER skipped (column already exists) — applied idempotent remainder`
+          );
+        } catch (retryErr) {
+          try { db.exec("ROLLBACK"); } catch { /* ignore rollback failure */ }
+          throw retryErr;
+        }
+      } else {
+        throw err;
+      }
     }
     console.log(`[SQLite] ✓ Applied ${migration.file}`);
   }

@@ -40,7 +40,15 @@ export function getMigrationVersion(): string | null {
   if (!tableExists) return null;
 
   const row = db
-    .query("SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1")
+    .query(
+      // Order by version numerically (v1 < v2 < ... < v10), NOT by applied_at:
+      // applied_at is second-precision, so concurrent migrations in the same
+      // second tie non-deterministically and can return a stale version.
+      // That stale value causes the runner to re-attempt an already-applied
+      // migration (e.g. v7 ADD COLUMN → "duplicate column name") on repeated
+      // migrate:sqlite invocations (deploy/boot workflows). Codex PR #39 P1.
+      "SELECT version FROM schema_migrations ORDER BY CAST(SUBSTR(version, 2) AS INTEGER) DESC LIMIT 1"
+    )
     .get() as { version: string } | null;
 
   return row?.version ?? null;

@@ -41,6 +41,17 @@ function registerHandlers() {
     ok({ doc_id: mergeDocIdOverride ?? (params["docId"] as string) })
   );
 
+  // SET s.r2_key handler registered BEFORE the broader Snapshot handler so it
+  // wins the first-match dispatch in createNeo4jMock. Throws when
+  // neo4jSetShouldThrow=true so audit-hook tests can exercise the
+  // set_r2_key_failed_neo4j branch deterministically.
+  neo4j.session.on(/SET s\.r2_key/, () => {
+    if (neo4jSetShouldThrow) {
+      throw new Error("simulated Neo4j SET s.r2_key failure");
+    }
+    return ok({});
+  });
+
   neo4j.session.on(/collect\(DISTINCT src\.source_id\)/, () => {
     allLinkedSourcesCallCount++;
     // First call = pre-r2Put check (always allowed). Subsequent calls =
@@ -73,9 +84,14 @@ const neo4jRuns = neo4j.runs as ReadonlyArray<{ query: string; params: Record<st
 // ---------------------------------------------------------------------------
 
 const r2Puts: Array<{ key: string }> = [];
+let r2PutShouldThrow = false;
+let neo4jSetShouldThrow = false;
 
 mock.module("../../src/storage/r2/client", () => ({
   r2Put: async (key: string, _data: ArrayBuffer) => {
+    if (r2PutShouldThrow) {
+      throw new Error("simulated r2Put failure");
+    }
     r2Puts.push({ key });
     return { key, sha256: "mock-sha256", byteSize: 4 };
   },
@@ -148,6 +164,21 @@ function setupDb() {
     INSERT OR REPLACE INTO source_material_policy
       (source_id, archive_policy, raw_cloud_policy, external_llm_policy)
       VALUES ('src-1', 'full_snapshot_allowed', 'allowed_public_data_only', 'allowed');
+    -- policy_decisions: v1 + v7 (intended_action column for R2 upload audit).
+    -- INFRA-1B.3.x-audit hooks INSERT into this table around every r2Put call,
+    -- so the snapshot-fingerprint tests must materialize the schema here.
+    CREATE TABLE IF NOT EXISTS policy_decisions (
+      decision_id       TEXT PRIMARY KEY,
+      source_id         TEXT,
+      session_id        TEXT,
+      url               TEXT,
+      trigger_type      TEXT NOT NULL,
+      policy_gate_mode  TEXT NOT NULL CHECK (policy_gate_mode IN ('inline_block','inline_warn','batch_report')),
+      decision          TEXT NOT NULL,
+      rationale         TEXT,
+      created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+      intended_action   TEXT
+    );
   `);
   return db;
 }
@@ -184,8 +215,42 @@ beforeEach(() => {
   mergeDocIdOverride = null;
   policyRevertsAfterR2Put = false;
   allLinkedSourcesCallCount = 0;
+  r2PutShouldThrow = false;
+  neo4jSetShouldThrow = false;
   setupDb();
 });
+
+// ---------------------------------------------------------------------------
+// Audit row inspector for INFRA-1B.3.x-audit integration tests.
+// ---------------------------------------------------------------------------
+
+interface AuditRow {
+  decision: string;
+  source_id: string | null;
+  url: string | null;
+  trigger_type: string;
+  policy_gate_mode: string;
+  intended_action: string | null;
+  rationale: string | null;
+}
+
+function readAuditRows(): AuditRow[] {
+  // require() typing flattens to any, which breaks .query<T,P>() generics;
+  // use an explicit cast so the returned rows keep their AuditRow shape.
+  const conn = require("../../src/storage/sqlite/connection") as {
+    getDb: () => import("bun:sqlite").Database;
+  };
+  return conn
+    .getDb()
+    .query<AuditRow, []>(
+      `SELECT decision, source_id, url, trigger_type, policy_gate_mode,
+              intended_action, rationale
+       FROM policy_decisions
+       WHERE intended_action = 'r2_upload'
+       ORDER BY decision_id`
+    )
+    .all();
+}
 
 // ---------------------------------------------------------------------------
 // createSnapshotFingerprint — new snapshot
@@ -562,5 +627,171 @@ describe("createSnapshotFingerprint — r2 orphan back-fill", () => {
     expect(setPatch).toBeUndefined();
     // Result reflects no r2 association from the caller's perspective.
     expect(result.r2Key).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// INFRA-1B.3.x-audit caller-hook integration tests.
+//
+// Audit module unit tests (tests/unit/audit_policy_decisions_test.ts) verify
+// recordR2UploadDecision INSERT shape. These tests verify the OTHER half of
+// the contract: that every r2Put call site in snapshot-fingerprint emits the
+// right audit row sequence under each operational scenario (Codex PR #39
+// reviewer P2 — caller hook tests).
+// ---------------------------------------------------------------------------
+
+describe("createSnapshotFingerprint — audit hook integration (INFRA-1B.3.x-audit)", () => {
+  it("new snapshot + allowed policy → attempted + uploaded audit rows", async () => {
+    const db = setupDb();
+    seedQueue(db, "dq_audit_new");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_audit_new"));
+
+    expect(result.deduplicated).toBe(false);
+    expect(r2Puts).toHaveLength(1);
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "uploaded"]);
+    for (const row of audit) {
+      expect(row.intended_action).toBe("r2_upload");
+      expect(row.trigger_type).toBe("r2_upload");
+      expect(row.policy_gate_mode).toBe("batch_report");
+      expect(row.source_id).toBe("src-1");
+    }
+  });
+
+  it("dedup back-fill + allowed policy → attempted + uploaded audit rows", async () => {
+    findExistingResult = { snapId: "snap_dedup_audit", r2Key: null };
+    const db = setupDb();
+    seedQueue(db, "dq_audit_dedup");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_audit_dedup"));
+
+    expect(result.deduplicated).toBe(true);
+    expect(r2Puts).toHaveLength(1);
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "uploaded"]);
+    expect(audit[0]!.rationale).toContain("dedup back-fill");
+  });
+
+  it("dedup back-fill TOCTOU rejected → attempted + skipped_toctou, no SET r2_key", async () => {
+    findExistingResult = { snapId: "snap_audit_toctou", r2Key: null };
+    policyRevertsAfterR2Put = true;
+    const db = setupDb();
+    seedQueue(db, "dq_audit_toctou");
+
+    await createSnapshotFingerprint(baseInput("dq_audit_toctou"));
+
+    expect(r2Puts).toHaveLength(1);
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
+    const setPatch = neo4j.runs.find(
+      (r) => r.via === "session" && /SET s\.r2_key/.test(r.query)
+    );
+    expect(setPatch).toBeUndefined();
+  });
+
+  it("archive_policy=metadata_only → no r2Put + no audit rows (audit-by-absence)", async () => {
+    const db = setupDb();
+    seedQueue(db, "dq_audit_meta");
+
+    await createSnapshotFingerprint({
+      ...baseInput("dq_audit_meta"),
+      archivePolicy: "metadata_only",
+    });
+
+    expect(r2Puts).toHaveLength(0);
+    expect(readAuditRows()).toHaveLength(0);
+  });
+
+  it("raw_cloud_policy=always_prohibited → no r2Put + no audit rows", async () => {
+    const db = setupDb();
+    seedQueue(db, "dq_audit_prohibited");
+
+    await createSnapshotFingerprint({
+      ...baseInput("dq_audit_prohibited"),
+      rawCloudPolicy: "always_prohibited",
+    });
+
+    expect(r2Puts).toHaveLength(0);
+    expect(readAuditRows()).toHaveLength(0);
+  });
+
+  it("r2Put throw → only attempted audit row, queue marked error", async () => {
+    r2PutShouldThrow = true;
+    const db = setupDb();
+    seedQueue(db, "dq_audit_r2_throw");
+
+    await expect(
+      createSnapshotFingerprint(baseInput("dq_audit_r2_throw"))
+    ).rejects.toThrow(/simulated r2Put failure/);
+
+    expect(r2Puts).toHaveLength(0); // pushed only on success
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted"]);
+  });
+
+  it("Neo4j SET r2_key throw → attempted + set_r2_key_failed_neo4j audit rows", async () => {
+    neo4jSetShouldThrow = true;
+    const db = setupDb();
+    seedQueue(db, "dq_audit_set_throw");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_audit_set_throw"));
+
+    expect(r2Puts).toHaveLength(1); // r2Put succeeded
+    expect(result.r2Key).toBeNull(); // SET failed → r2Key stays null
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual([
+      "attempted",
+      "set_r2_key_failed_neo4j",
+    ]);
+    expect(audit[1]!.rationale).toContain("simulated Neo4j SET");
+  });
+
+  it("audit failure (schema mismatch) → throws BEFORE r2Put, NFR-008 hard gate", async () => {
+    // Simulate v7 migration NOT applied: drop policy_decisions table so the
+    // first `attempted` audit insert raises "no such table". auditR2UploadOrThrow
+    // MUST re-throw on ALL audit failures (transient + permanent alike)
+    // because SQLite busy_timeout=5000ms already provides driver-level retry;
+    // letting r2Put proceed after audit failure would silently violate
+    // INV-0012-3 / NFR-008 audit-by-absence invariant (Codex PR #39 round 3
+    // P1 + reviewer "audit hard gate").
+    const db = setupDb();
+    db.exec("DROP TABLE policy_decisions");
+    seedQueue(db, "dq_audit_fail");
+
+    await expect(
+      createSnapshotFingerprint(baseInput("dq_audit_fail"))
+    ).rejects.toThrow(/no such table|policy_decisions/i);
+
+    // r2Put must NOT have run — fail-fast preserves NFR-008.
+    expect(r2Puts).toHaveLength(0);
+  });
+
+  it("new-path first-create TOCTOU rejected → attempted + skipped_toctou, no SET r2_key", async () => {
+    // Codex PR #39 reviewer P1 regression: even on the new-path first-create
+    // branch (actualSnapId === snapId, no MERGE-match), a concurrent worker
+    // can dedup-link a prohibited source between createDocumentAndSnapshot
+    // commit and r2_key SET. The pre-r2Put cross-source check passes
+    // (allLinkedSourcesAllowRawCloud returns allowed), r2Put runs, but the
+    // post-r2Put recheck catches the now-prohibited link and skips SET.
+    // The previous `mergeMatchedExisting → stillAllowed=true` short-circuit
+    // failed to close this window. Symmetric to the dedup TOCTOU test.
+    findExistingResult = null; // force new-path, NOT dedup-match
+    policyRevertsAfterR2Put = true;
+    const db = setupDb();
+    seedQueue(db, "dq_newpath_toctou");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_newpath_toctou"));
+
+    expect(result.deduplicated).toBe(false); // first-create branch
+    expect(r2Puts).toHaveLength(1); // r2Put did run (pre-check passed)
+    expect(result.r2Key).toBeNull(); // post-check rejected → no SET
+    const setPatch = neo4j.runs.find(
+      (r) => r.via === "session" && /SET s\.r2_key/.test(r.query)
+    );
+    expect(setPatch).toBeUndefined();
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
+    expect(audit[0]!.rationale).toContain("new-path; first create");
   });
 });
