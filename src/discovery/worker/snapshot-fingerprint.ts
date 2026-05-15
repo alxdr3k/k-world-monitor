@@ -104,12 +104,19 @@ interface ExistingSnapshot {
   r2Key: string | null;
 }
 
-// Returns true only when every Source linked to this Snapshot has
-// raw_cloud_policy='allowed_public_data_only' in source_material_policy.
-// Used by the dedup R2 back-fill path so cross-source dedup cannot retroactively
-// give a Source with always_prohibited policy access to an R2 artifact path
-// (ADR-0012 INV-0012-3). Treats unknown / unregistered sources as prohibited.
-async function allLinkedSourcesAllowRawCloud(snapId: string): Promise<boolean> {
+// Returns true only when every Source linked to this Snapshot satisfies BOTH
+// archive_policy='full_snapshot_allowed' AND raw_cloud_policy='allowed_public_data_only'
+// in source_material_policy. Used by the dedup R2 back-fill path and the new-path
+// TOCTOU recheck so cross-source dedup cannot retroactively give a Source with
+// any restrictive policy access to an R2 artifact path (ADR-0012 INV-0012-3).
+//
+// AI-P0-1 (INFRA-1B.3.h1-policy-fix): archive_policy is checked alongside
+// raw_cloud_policy. A Source with archive_policy in {metadata_only, excerpt_only,
+// do_not_collect} must not see an R2-backed Snapshot through cross-source dedup
+// even if its raw_cloud_policy happens to be allowed_public_data_only — the
+// permitted-artifact gate requires both axes to be open. Treats unknown /
+// unregistered sources as prohibited.
+async function allLinkedSourcesAllowR2SnapshotUpload(snapId: string): Promise<boolean> {
   const sourceIds = await withSession(async (session) => {
     const result = await session.run(
       `MATCH (s:Snapshot {snap_id: $snapId})<-[:HAS_SNAPSHOT]-(:Document)<-[:HAS_DOCUMENT]-(src:Source)
@@ -123,13 +130,21 @@ async function allLinkedSourcesAllowRawCloud(snapId: string): Promise<boolean> {
   const placeholders = sourceIds.map(() => "?").join(",");
   const rows = getDb()
     .prepare(
-      `SELECT source_id, raw_cloud_policy FROM source_material_policy
+      `SELECT source_id, archive_policy, raw_cloud_policy FROM source_material_policy
        WHERE source_id IN (${placeholders})`
     )
-    .all(...sourceIds) as Array<{ source_id: string; raw_cloud_policy: string }>;
-  // Any unmapped source or non-allowed policy disqualifies back-fill.
+    .all(...sourceIds) as Array<{
+      source_id: string;
+      archive_policy: string;
+      raw_cloud_policy: string;
+    }>;
+  // Any unmapped source or non-allowed policy on EITHER axis disqualifies back-fill.
   if (rows.length !== sourceIds.length) return false;
-  return rows.every((r) => r.raw_cloud_policy === "allowed_public_data_only");
+  return rows.every(
+    (r) =>
+      r.archive_policy === "full_snapshot_allowed" &&
+      r.raw_cloud_policy === "allowed_public_data_only"
+  );
 }
 
 // Returns null when no Snapshot with this content_hash exists.
@@ -486,16 +501,19 @@ export async function createSnapshotFingerprint(
     // before completing the R2 upload (leaving r2_key=null permanently without this retry).
     //
     // ADR-0012 INV-0012-3 cross-source guard: snapshots are deduplicated across sources,
-    // so the existing Snapshot may already be linked to a source whose raw_cloud_policy
-    // is `always_prohibited`. Uploading to R2 under any policy from the *current* source
-    // would retroactively give the prohibited source path an r2_key, violating the
-    // raw-cloud prohibition. Only back-fill when every linked source's policy permits it.
+    // so the existing Snapshot may already be linked to a source whose archive_policy
+    // is restrictive (metadata_only / excerpt_only / do_not_collect) or whose
+    // raw_cloud_policy is `always_prohibited`. Uploading to R2 under any policy from
+    // the *current* source would retroactively give the restricted source path an
+    // r2_key, violating the permitted-artifact gate. Only back-fill when every linked
+    // source's BOTH axes permit it (archive_policy=full_snapshot_allowed AND
+    // raw_cloud_policy=allowed_public_data_only).
     let dedupR2Key: string | null = existing.r2Key;
     if (
       existing.r2Key === null &&
       input.archivePolicy === "full_snapshot_allowed" &&
       input.rawCloudPolicy === "allowed_public_data_only" &&
-      (await allLinkedSourcesAllowRawCloud(existing.snapId))
+      (await allLinkedSourcesAllowR2SnapshotUpload(existing.snapId))
     ) {
       const key = `permitted_artifact/derived/snapshot/${existing.snapId}`;
       const bodyBuf = input.body.buffer.slice(
@@ -534,7 +552,7 @@ export async function createSnapshotFingerprint(
       // graph link the prohibited source could observe.
       let stillAllowed: boolean;
       try {
-        stillAllowed = await allLinkedSourcesAllowRawCloud(existing.snapId);
+        stillAllowed = await allLinkedSourcesAllowR2SnapshotUpload(existing.snapId);
       } catch (recheckErr) {
         console.warn(
           `[snapshot] dedup post-r2Put policy recheck failed; leaving r2_key=null for safety:`,
@@ -658,7 +676,7 @@ export async function createSnapshotFingerprint(
     // treated as "not allowed" so we fail safe (no r2Put attempted).
     let policyOk: boolean;
     try {
-      policyOk = await allLinkedSourcesAllowRawCloud(actualSnapId);
+      policyOk = await allLinkedSourcesAllowR2SnapshotUpload(actualSnapId);
     } catch (preCheckErr) {
       console.warn(
         `[snapshot] new-path pre-r2Put policy check failed; skipping r2Put for safety:`,
@@ -700,7 +718,7 @@ export async function createSnapshotFingerprint(
       // same idempotent key (the orphan is bounded — future retry back-fills).
       let stillAllowed: boolean;
       try {
-        stillAllowed = await allLinkedSourcesAllowRawCloud(actualSnapId);
+        stillAllowed = await allLinkedSourcesAllowR2SnapshotUpload(actualSnapId);
       } catch (recheckErr) {
         console.warn(
           `[snapshot] new-path post-r2Put policy recheck failed; leaving r2_key=null for safety:`,

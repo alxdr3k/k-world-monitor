@@ -41,9 +41,9 @@ invariants:
       - layer: pre-r2Put policy gate
         check: createSnapshotFingerprint는 input.archivePolicy === full_snapshot_allowed && input.rawCloudPolicy === allowed_public_data_only를 만족할 때만 r2Put을 호출한다
       - layer: dedup back-fill cross-source guard
-        check: allLinkedSourcesAllowRawCloud(snap_id) — Snapshot에 이미 linked된 모든 Source의 raw_cloud_policy가 allowed_public_data_only인 경우에만 r2Put + SET r2_key를 진행한다. 이 함수는 미등록 source / always_prohibited source를 모두 거부한다
+        check: allLinkedSourcesAllowR2SnapshotUpload(snap_id) — Snapshot에 이미 linked된 모든 Source가 archive_policy='full_snapshot_allowed' AND raw_cloud_policy='allowed_public_data_only' 두 축 모두 만족하는 경우에만 r2Put + SET r2_key를 진행한다. 이 함수는 미등록 source / 한 축이라도 restrictive한 source (metadata_only / excerpt_only / do_not_collect / always_prohibited 등) 를 모두 거부한다. AI-P0-1 (INFRA-1B.3.h1-policy-fix) 이전 함수명은 allLinkedSourcesAllowRawCloud 였으며 raw_cloud_policy 만 검사했음 — 그 상태로는 archive_policy=metadata_only + raw_cloud_policy=allowed_public_data_only source 가 R2-backed Snapshot 에 cross-source dedup-link 가능했던 P0 legal-safety 누수.
       - layer: post-r2Put TOCTOU recheck
-        check: r2Put 완료 후 SET r2_key 직전에 allLinkedSourcesAllowRawCloud를 다시 호출한다. 한 번이라도 prohibited source가 도착해 있으면 SET을 skip — r2_key=null로 남기고 r2 object는 orphan으로 둔다 (다음 retry에서 dedup-match → idempotent overwrite로 복구; r2Delete는 race window가 더 크기 때문에 미사용)
+        check: r2Put 완료 후 SET r2_key 직전에 allLinkedSourcesAllowR2SnapshotUpload를 다시 호출한다. 한 번이라도 restrictive source (어느 축이든) 가 도착해 있으면 SET을 skip — r2_key=null로 남기고 r2 object는 orphan으로 둔다 (다음 retry에서 dedup-match → idempotent overwrite로 복구; r2Delete는 race window가 더 크기 때문에 미사용)
       - layer: recheck-failure fail-safe
         check: 위 recheck 호출 자체가 throw하면(transient Neo4j blip 등) 결과를 stillAllowed=false로 처리한다. 즉 검증 실패 시 보수적으로 SET을 skip하여 prohibited source가 절대 r2 reference를 관측하지 못하게 한다
       - layer: orphan recovery contract
