@@ -2,12 +2,49 @@
 
 본 문서는 2026-05-15 Claude Opus 4.7 의 12-layer 적대적 리뷰 ([docs/10_PROJECT_RETROSPECTIVE.md](../10_PROJECT_RETROSPECTIVE.md#adversarial-review--2026-05-15-multi-layer--multi-perspective--multi-stage) 의 `## Adversarial Review — 2026-05-15` 섹션) 직후 GPT (운영자 cross-reviewer) 에 동일 repo (HEAD `43c8178` 직후 main = `4a45ce2`) 를 review 요청해 받은 외부 검토 + Claude 의 비판적 평가 + 두 review 의 합리적 종합을 정리한다.
 
-상태: `Status: CURRENT — cross-review snapshot. Authoritative findings are merged into Action Items below; the raw GPT body is retained for audit anchor.`
+상태: `Status: CURRENT — curated cross-review summary.`
+
+본 파일은 **raw GPT transcript 가 아니다**. GPT 의 4 부 review 본문 중:
+- **1부 (전체 verdict + P0/P1)** — 핵심 텍스트 그대로 보존 (편집 최소)
+- **2부 (모듈별 P2/P3 ≈35 finding)** — finding inventory **표** 로 압축 (raw body 미보존)
+- **3부 (다층 관점 7 영역)** — 핵심 포인트 표 + 5 failure scenarios 표 + 5 product invariants 그대로
+- **4부 (gate verdict + PR 순서)** — verdict 표 + PR-1~PR-5 권고 표 + 결론 그대로. PR-1~PR-5 의 Claude 작업 prompt 본문 ≈3000 줄 부분은 **미포함** (필요 시 별도 raw artifact 로 promotion 권고)
 
 목적:
-1. 외부 review 의 raw body 보존 (audit anchor — 향후 누군가 "왜 그 결정이 P0 였는가" 를 trace 할 때)
-2. Claude 의 자체 review 와 GPT review 사이 **일치 / 보강 / miss** 명시
+1. GPT review 의 **synthesized finding inventory** + 핵심 표현 보존 (audit anchor — "왜 그 결정이 P0 였는가" trace 가능)
+2. Claude 의 자체 review 와 GPT review 사이 **일치 / 보강 / miss** 명시 (Section B commensurability table)
 3. 두 review 의 종합 결과를 Action Items (Q 신규 + slice 신규) 로 promote — 같은 디렉토리 `2026-05-15-action-items.md` 에 등록
+
+## Finding index (cross-reference quick lookup)
+
+| GPT finding ID | Claude finding ID | Action Item ID | Slice ID (candidate) |
+|---|---|---|---|
+| GPT P0-1 (R2 archive_policy gap) | (Claude L4-F miss) | AI-P0-1 | `INFRA-1B.3.h1-policy-fix` |
+| GPT Latent P1 (chunker policy) | (Claude L3/L5/L6 partial) | AI-P1-1 | `INFRA-1B.4.h1-chunker-policy-gate` |
+| GPT P1-1 (Source bootstrap Neo4j 부재) | Claude L4-G partial | AI-P1-2 | `INFRA-1B.1.h1-source-bootstrap-neo4j` |
+| GPT P1-2 (Source Registry 필드 persist 부재) + P1-3 (categories.yaml) + Claude L3-M | — | AI-P1-4 | `INFRA-1B.1.h2-source-profile` |
+| GPT P1-4 (migrate dry-run 착시) | Claude L7-F partial | AI-P1-5 | `DEPLOY-1A.0-migration-validation` |
+| GPT P1-5 (audit outcome correlation) | Claude L4-D / L4-K | AI-P1-6 + AI-P1-7 | `OPS-1B.h1-runtime-invariant-scanner` + `INFRA-1B.3.h3-audit-hardening` |
+| GPT P1-6 (policy_decisions DB enum) | Claude L3-I / L7-H partial | AI-P1-7 | `INFRA-1B.3.h3-audit-hardening` (v8 migration) |
+| GPT P1-7 (TESTING test count) | Claude L8-A | AI-P1-5 (안 흡수) / AI-P2-1 | `DEPLOY-1A.0-migration-validation` |
+| GPT P1-8 (current-state stale) | Claude L1-A | AI-P1-9 | `DOC-SYNC-2026-05-15` |
+| GPT P1-9 (HLD Data Model) | (Claude HLD 본격 read 안 함) | AI-P2-1 | `DOC-SYNC-2026-05-15` |
+| GPT P1-10 (CI doc-freshness advisory) | Claude L9-C | (AI-P2-4 안 흡수) | — |
+| GPT 2부 P2-1 (fingerprint queue CLI) | — | AI-P1-3 | `INFRA-1B.3.h2-queue-cli` |
+| GPT 2부 P2-4~11 batch (scheduler/queue 8 finding) | Claude L5-I partial | AI-P2-2 + AI-P2-8 | `INFRA-1B.2.h1-discovery-hardening` |
+| GPT 2부 P2-22~24 (ManualClaimEntry validation) | — | AI-P2-3 | `INFRA-1B.6.h1-feedback-hardening` |
+| GPT 2부 P2-25~27 (Run Ledger 3 finding) | Claude L6-B / L6-C | AI-P2-4 | OPS-1A.2 (existing) |
+| GPT 2부 P2-30~31 (e2e + invariant scanner) | Claude L8-D partial | AI-P1-6 + AI-P2-9 | `OPS-1B.h1-runtime-invariant-scanner` + `INFRA-1B.2.h2-end-to-end-test` |
+| GPT 2부 P2-32 (policy-aware boundary) + Claude L9-O | — | AI-P2-6 | (doc + architectural cleanup) |
+| GPT 2부 P2-34 (operator observability) | Claude L12 partial | AI-P2-7 | `OPS-1A.5-unified-cli` |
+| GPT 3부 5 failure scenarios | Claude L12 partial | (informational) | — |
+| GPT 3부 첫 publishable format 권고 | (Claude 본격 분석 안 함) | Q-056 | PUB-1A.5 scope |
+| GPT 3부 dataset MVP 권고 | — | Q-055 | EXTR-1A.5 timing |
+| GPT 3부 source_role multi-dim | (Claude 본격 분석 안 함) | Q-058 | `INFRA-1B.1.h2-source-profile` 안 흡수 |
+| Claude L9-A (main protection 3중 mismatch) | (GPT 미커버) | AI-P0-2 | Q-052 + admin task |
+| Claude L2-A (frontmatter parse fail 6 file) | (GPT 미커버) | AI-P1-8 | doc fix |
+| Claude L2 batch (validator integrity 14 finding) | (GPT 미커버) | AI-P2-5 | `INFRA-1A.9-validator-extension` + `INFRA-1A.10-glossary-backfill` |
+| Claude L11 batch (DEC-019 5 hardening) | (GPT 일부 reverse-engineer) | (existing slices) | INFRA-1B.6.x + 1B.3.x + 1B.2.x + DEPLOY-1A.1/1A.2 |
 
 ---
 

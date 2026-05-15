@@ -2,7 +2,27 @@
 
 본 문서는 [Claude adversarial review](../10_PROJECT_RETROSPECTIVE.md#adversarial-review--2026-05-15-multi-layer--multi-perspective--multi-stage) (208 finding) 와 [GPT cross-review](2026-05-15-gpt-cross-review.md) (~80 finding) 의 합리적 종합 결과를 운영자 action items 으로 정리한다.
 
-상태: `Status: CURRENT — action items 등록 후 IMPL_PLAN slice 표 / Q register 갱신 의무 (operator).`
+상태: `Status: PROPOSED — retrospective artifact, not canonical register.`
+
+본 문서의 Q ID (Q-052~Q-059) 와 slice ID (`INFRA-1B.3.h1-policy-fix` 등) 는 모두 **candidate identifier**. Q-052~Q-059 는 `docs/questions/Q-NNN.md` 에 placeholder file 로 등록되어 있으나 (commit 241476e) IMPL_PLAN slice 표에는 아직 미등록. 본격 canonical 등록은 별도 후속 PR (`PR-canonical-register-2026-05-15` 가칭) 에서:
+
+- `docs/04_IMPLEMENTATION_PLAN.md` slice 표에 신규 slice row 추가
+- `docs/context/current-state.md` next action = `INFRA-1B.3.h1-policy-fix` 반영
+- 신규 slice 진입 시점 또는 lock 결정 시점에 별도 commit
+
+본 PR (#40) 의 scope = retrospective artifact + Q register Open TOC 갱신 + 운영자 결정 항목 placeholder. 코드 변경 0건.
+
+## Execution rule (운영자 attention budget 보호)
+
+본 review 가 발견한 208 + ~80 finding 의 backlog explosion 회피 의무. **Q-059 의 운영자 결정 전까지** 다음 rule 적용:
+
+1. **engineering queue (즉시 진행 가능)** = `AI-P0-1` (R2 archive_policy guard) ~ `AI-P1-7` (policy_decisions DB enum + upload_attempt_id) 만.
+2. **운영자 admin task (병렬)** = Q-052 결정 / SPIKE-001 실행 / Doppler secret rotation cadence — engineering queue 와 별도.
+3. **`AI-P1-8` ~ `AI-P1-12`** = engineering queue 의 doc sync / setup hygiene 보조 — Week 1 안 idle time 에 흡수.
+4. **`AI-P2-*` (~22 항목) / `AI-P3-batch-*` (3 batch ~80 finding)** = backlog only. P0-M2 gate accept 전까지 진입 금지. 운영자가 Q-059 resolve 시점 또는 PUB-1A.5 첫 발행 retrospective 시점 promotion 가능.
+5. **L2-* batch (Claude 자체 governance / glossary)** = `INFRA-1A.9-validator-extension` + `INFRA-1A.10-glossary-backfill` slice 안에 묶음 — engineering queue 후반부 또는 P0-M3 entry 직전.
+
+위반 시 attention budget 초과 + PUB-1A.5 2주 목표 (DEC-005) 위협.
 
 ## A. 우선순위 정렬 (수용 후)
 
@@ -58,23 +78,23 @@
 
 | Slice ID | Milestone | Track | Goal | source action item | dependencies |
 |---|---|---|---|---|---|
-| `INFRA-1B.3.x-policy-fix` | P0-M2-hardening | INFRA | R2 linked-source policy guard 에 `archive_policy` 추가 (`allLinkedSourcesAllowR2SnapshotUpload` rename + 6 regression tests) | AI-P0-1 | INFRA-1B.3.x-audit |
-| `INFRA-1B.1.y-source-bootstrap-neo4j` | P0-M2-hardening | INFRA | `seed-sources` 후 Neo4j Source node bootstrap + preflight (mismatch fail-fast) | AI-P1-2 | INFRA-1B.1 |
-| `INFRA-1B.3.z-queue-cli` | P0-M2-hardening | INFRA | `bun run discovery:process-queue` CLI + typed `source_not_found_in_graph` error 통일 | AI-P1-3 | INFRA-1B.3 |
-| `INFRA-1B.4.x-chunker-policy-gate` | P0-M2-hardening | INFRA | `chunkSnapshot(input)` 에 `sourceId + archivePolicy` 의무. `metadata_only` / `do_not_collect` reject, `excerpt_only` reject (limit 까지), `full_snapshot_allowed` allow. empty text 가 chunk 삭제 안 하게. | AI-P1-1 (Q-053 lock 후) | INFRA-1B.4 |
-| `INFRA-1B.1.z-source-profile` | P0-M2-hardening 또는 P0-M3 entry | INFRA | Source Registry 가 PRD/AC-022/AC-027/AC-031 의무 필드 persist (`data/categories.yaml` + `source_profile` table 또는 Neo4j projection 확장 + collectability/access_method/meta_category/subtopic_tags/active_v0 validation) | AI-P1-4 (Q-054 + Q-058 lock 후) | INFRA-1B.1 + INFRA-1B.1.y |
-| `OPS-1B.0-runtime-invariant-scanner` | P0-M2-hardening | OPS | `bun run audit:r2-invariants` — Snapshot.r2_key ↔ policy ↔ audit ledger consistency scan (read-only) | AI-P1-6 | INFRA-1B.3.x-policy-fix + INFRA-1B.3.x-audit |
-| `INFRA-1B.3.x-audit-hardening` | P0-M2-hardening | INFRA | v8 migration — `policy_decisions.intended_action` enum trigger + `r2_upload` decision enum trigger + `upload_attempt_id` column + attempted/outcome correlation | AI-P1-7 | INFRA-1B.3.x-audit |
+| `INFRA-1B.3.h1-policy-fix` | P0-M2-hardening | INFRA | R2 linked-source policy guard 에 `archive_policy` 추가 (`allLinkedSourcesAllowR2SnapshotUpload` rename + 6 regression tests) | AI-P0-1 | INFRA-1B.3.x-audit |
+| `INFRA-1B.1.h1-source-bootstrap-neo4j` | P0-M2-hardening | INFRA | `seed-sources` 후 Neo4j Source node bootstrap + preflight (mismatch fail-fast) | AI-P1-2 | INFRA-1B.1 |
+| `INFRA-1B.3.h2-queue-cli` | P0-M2-hardening | INFRA | `bun run discovery:process-queue` CLI + typed `source_not_found_in_graph` error 통일 | AI-P1-3 | INFRA-1B.3 |
+| `INFRA-1B.4.h1-chunker-policy-gate` | P0-M2-hardening | INFRA | `chunkSnapshot(input)` 에 `sourceId + archivePolicy` 의무. `metadata_only` / `do_not_collect` reject, `excerpt_only` reject (limit 까지), `full_snapshot_allowed` allow. empty text 가 chunk 삭제 안 하게. | AI-P1-1 (Q-053 lock 후) | INFRA-1B.4 |
+| `INFRA-1B.1.h2-source-profile` | P0-M2-hardening 또는 P0-M3 entry | INFRA | Source Registry 가 PRD/AC-022/AC-027/AC-031 의무 필드 persist (`data/categories.yaml` + `source_profile` table 또는 Neo4j projection 확장 + collectability/access_method/meta_category/subtopic_tags/active_v0 validation) | AI-P1-4 (Q-054 + Q-058 lock 후) | INFRA-1B.1 + INFRA-1B.1.y |
+| `OPS-1B.h1-runtime-invariant-scanner` | P0-M2-hardening | OPS | `bun run audit:r2-invariants` — Snapshot.r2_key ↔ policy ↔ audit ledger consistency scan (read-only) | AI-P1-6 | INFRA-1B.3.x-policy-fix + INFRA-1B.3.x-audit |
+| `INFRA-1B.3.h3-audit-hardening` | P0-M2-hardening | INFRA | v8 migration — `policy_decisions.intended_action` enum trigger + `r2_upload` decision enum trigger + `upload_attempt_id` column + attempted/outcome correlation | AI-P1-7 | INFRA-1B.3.x-audit |
 | `DEPLOY-1A.0-migration-validation` | P0-M2-hardening | OPS | `migrate:plan` / `migrate:sqlite:validate` / `migrate:neo4j:validate` 분리. CI 에 temp SQLite apply. TESTING test count fix. | AI-P1-5 | — |
 | `INFRA-1A.9-validator-extension` | P0-M2-hardening | INFRA | invariant validator extension — relation_enum enforce / defines[] 권리 / supersede chain bidirectional / glossary cross-check 강화 (`cross_ref_code[]` 도입) | AI-P2-5 (Claude L2 batch) | — |
 | `INFRA-1A.10-glossary-backfill` | P0-M2-hardening | INFRA | 50+ unique 신규 term glossary file 추가 (evidence_role / lifecycle_state / stance / market_stance / archive_policy / quote_reason / intervention_severity / chunk / scenario-revision + DEC-019~023 + Q-050/051 + ADR-0031 term) | AI-P2-5 (Claude L3-M) | INFRA-1A.9-validator-extension |
 | `DOC-SYNC-2026-05-15` | P0-M2-hardening | (cross-cut) | doc batch fix — current-state line 38/184-189/248 / Risks Q-042~Q-048 / TRACE-040/041 / IMPL_PLAN Risks / HLD Data Model 분리 / PRD Open Questions Q-035/Q-050 추가 / 03_RISK_SPIKES SPIKE-002/003 ADR-0023+DEC-010 reflow / Milestones P0-M2-hardening row 추가 / TEST count fix | AI-P1-9 + AI-P2-1 + Claude L1 batch | AI-P1-8 (frontmatter parse fix 선행) |
-| `INFRA-1B.2.z-discovery-hardening` | P0-M2-hardening | INFRA | discovery scheduler / queue 8 finding batch (active_v0 validation / daily cap real-daily / scheduler rejected error / done URL re-enqueue / URL canonicalization / content_hash column 분리 / content-type rejection enum / backoff outcome 별 분리) | AI-P2-2 + AI-P2-8 | INFRA-1B.2 |
-| `INFRA-1B.6.y-feedback-hardening` | P0-M2-hardening 또는 P1-M3-hardening | INFRA | ManualClaimEntry whitespace/url/retry idempotency 강화 + `:RESOLVES` edge UNIQUE constraint | AI-P2-3 | INFRA-1B.6 |
+| `INFRA-1B.2.h1-discovery-hardening` | P0-M2-hardening | INFRA | discovery scheduler / queue 8 finding batch (active_v0 validation / daily cap real-daily / scheduler rejected error / done URL re-enqueue / URL canonicalization / content_hash column 분리 / content-type rejection enum / backoff outcome 별 분리) | AI-P2-2 + AI-P2-8 | INFRA-1B.2 |
+| `INFRA-1B.6.h1-feedback-hardening` | P0-M2-hardening 또는 P1-M3-hardening | INFRA | ManualClaimEntry whitespace/url/retry idempotency 강화 + `:RESOLVES` edge UNIQUE constraint | AI-P2-3 | INFRA-1B.6 |
 | `OPS-1A.2` (existing planned) | P0-M3 | OPS | run ledger cost throttle + stale running run reaper + failure_code/detail (기존 planned slice 의 GPT P2-25/26 + Claude L6-B/C 흡수) | AI-P2-4 | OPS-1A.1 |
 | `OPS-1A.5-unified-cli` | P0-M3 | OPS | `kwm status / sources validate / discovery run / queue process / interventions report / runtime-invariants check` unified CLI namespace | AI-P2-7 | INFRA-1B.* hardening 후 |
-| `INFRA-1A.11-supply-chain-audit` | P0-M2-hardening | INFRA | `.github/dependabot.yml` + CI 에 `bun audit` step | AI-P2-10 | — |
-| `INFRA-1B.2.x-end-to-end-test` | P0-M2-hardening | INFRA | seed → bootstrap → discovery → queue → snapshot → chunk e2e test | AI-P2-9 | 모든 P1 slice 완료 후 |
+| `INFRA-1A.h1-supply-chain-audit` | P0-M2-hardening | INFRA | `.github/dependabot.yml` + CI 에 `bun audit` step | AI-P2-10 | — |
+| `INFRA-1B.2.h2-end-to-end-test` | P0-M2-hardening | INFRA | seed → bootstrap → discovery → queue → snapshot → chunk e2e test | AI-P2-9 | 모든 P1 slice 완료 후 |
 
 ## D. 운영자 admin task (코드 land 아님)
 
@@ -88,29 +108,33 @@
 
 ## E. 다음 4주 권고 sequence (GPT 4부 + Claude L9-A + Claude L1/L2 우선)
 
-**Week 1 — P0 unlock**:
-1. **Q-052 결정** (운영자) — main branch protection 정책 충돌 resolve
-2. **AI-P1-8** — ADR-0023/24/27 + DEC-009/10/11 frontmatter parse fix (1 commit, invariant validator 안 6 decision INV 자동 등록 회복)
-3. **AI-P0-1** — `INFRA-1B.3.x-policy-fix` slice (R2 archive_policy guard + 6 regression tests)
-4. **AI-P1-9** — `DOC-SYNC-2026-05-15` slice 의 current-state + Risks fix 부분 (post-43c8178 stale)
+**Week 1 — P0 unlock** (engineering queue 우선, Q-052 는 운영자 admin task 로 병렬):
+
+운영자 admin task (병렬, engineering queue 비의존):
+- **Q-052 결정** — main branch protection 정책 충돌 resolve. 모든 향후 governance baseline anchor — engineering queue 와 별도로 즉시 진행.
+
+Engineering queue (순서대로):
+1. **AI-P0-1** — `INFRA-1B.3.h1-policy-fix` slice (R2 archive_policy guard + 6 regression tests). **legal-safety P0 — 가장 먼저**.
+2. **AI-P1-9** — `DOC-SYNC-2026-05-15` slice 의 current-state + Risks fix 부분 (post-43c8178 + AI-P0-1 결과 반영).
+3. **AI-P1-8** — ADR-0023/24/27 + DEC-009/10/11 frontmatter parse fix (1 commit, invariant validator 안 6 decision INV 자동 등록 회복).
 
 **Week 2 — P1 blocker resolution**:
-5. **AI-P1-2** — `INFRA-1B.1.y-source-bootstrap-neo4j` slice
-6. **AI-P1-3** — `INFRA-1B.3.z-queue-cli` slice (+ typed `source_not_found_in_graph` 통일)
-7. **AI-P1-1** — Q-053 lock 후 `INFRA-1B.4.x-chunker-policy-gate` slice
+5. **AI-P1-2** — `INFRA-1B.1.h1-source-bootstrap-neo4j` slice
+6. **AI-P1-3** — `INFRA-1B.3.h2-queue-cli` slice (+ typed `source_not_found_in_graph` 통일)
+7. **AI-P1-1** — Q-053 lock 후 `INFRA-1B.4.h1-chunker-policy-gate` slice
 8. **AI-P1-12** — `bun install` / Doppler / pre-commit hook RUNBOOK 1 entry
 
 **Week 3 — P0-M2 gate accept preparation**:
 9. **AI-P1-10** — SPIKE-001 manual 실행
 10. **AI-P1-11** — AC-023 test 추가 또는 scope 후퇴 (운영자 결정)
-11. **AI-P1-6** — `OPS-1B.0-runtime-invariant-scanner` slice
-12. **AI-P1-7** — `INFRA-1B.3.x-audit-hardening` slice (v8 migration)
+11. **AI-P1-6** — `OPS-1B.h1-runtime-invariant-scanner` slice
+12. **AI-P1-7** — `INFRA-1B.3.h3-audit-hardening` slice (v8 migration)
 
 **Week 4 — P0-M3 entry preparation**:
 13. **AI-P1-5** — `DEPLOY-1A.0-migration-validation` slice
-14. **AI-P1-4** — Q-054 lock 후 `INFRA-1B.1.z-source-profile` slice
+14. **AI-P1-4** — Q-054 lock 후 `INFRA-1B.1.h2-source-profile` slice
 15. **AI-P2-1** — HLD Data Model section 분리 + RUNTIME/OPERATIONS 갱신
-16. **AI-P2-10** — `INFRA-1A.11-supply-chain-audit` slice
+16. **AI-P2-10** — `INFRA-1A.h1-supply-chain-audit` slice
 17. **AI-P2-5** — `INFRA-1A.9-validator-extension` + `INFRA-1A.10-glossary-backfill` slice batch (P1-8 + Q-057~058 일부 흡수)
 
 **Deferred to PUB-1A.5 후**:

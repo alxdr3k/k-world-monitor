@@ -372,13 +372,13 @@ Q&A/draft는 그대로 승격하지 않고, source anchor는 추측하지 않는
 > L10 Security & adversarial surface / L11 Concurrency & failure modes /
 > L12 1인 운영자 sustainability + 통합 권고.
 >
-> **진행 상태 (2026-05-15)**: L1 / L2 / L3 완료. L4~L12 pending.
+> **진행 상태 (2026-05-15)**: L1~L12 전수 완료. 총 208 finding (L1×16 + L2×14 + L3×17 + L4×15 + L5×20 + L6×19 + L7×18 + L8×18 + L9×16 + L10×17 + L11×19 + L12×19).
 
 ### Repo baseline (리뷰 시점)
 
 - HEAD: `43c8178 feat(audit): INFRA-1B.3.x-audit — R2 upload audit ledger enforcement (AC-032 / NFR-008, Q-044 → DEC-020) (#39)`
 - mode: greenfield (`docs/context/current-state.md` Project mode block)
-- counts: 159 docs / 31 ADR (0001~0031) / 23 DEC (DEC-001~023) / 37 Q (Q-001~051 gaps) / 44 AC (AC-001~044) / 28 REQ / 10 NFR / 8 SQLite migrations (v1~v7 + slug_map) / 1 Neo4j migration / 27 src TS / 21 test files / 22 glossary terms.
+- counts: 159 docs / 31 ADR (0001~0031) / 23 DEC (DEC-001~023) / 37 Q (Q-001~051 gaps) / 44 AC (AC-001~044) / 28 REQ / 10 NFR / **7 SQLite migrations (v1~v7; v3 = source_registry_slug_map)** / 1 Neo4j migration / 27 src TS / 21 test files / 22 glossary terms.
 - active milestone: P0-M2 게이트 검증 단계, INFRA-1B.1~.5 landed + 1B.6 + OPS-1A.1 + 1B.3.x-audit landed.
 
 ### L1 — Documentation governance & registers consistency
