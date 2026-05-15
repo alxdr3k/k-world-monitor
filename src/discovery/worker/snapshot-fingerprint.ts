@@ -54,22 +54,47 @@ function sha256HexBytes(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
 }
 
-// Best-effort wrapper around recordR2UploadDecision (INV-0012-3 audit ledger).
-// An audit insert failure (e.g. transient SQLite lock) MUST NOT escalate into
-// runtime_error and inflate the queue error counter, nor mis-attribute the
-// failure to Neo4j back-patch when the actual cause is the audit INSERT
-// itself. The structured warning preserves the failure for operator review
-// while letting the worker continue. Codex PR #39 round 2 P2.
+// SQLite transient-error heuristic. bun:sqlite surfaces errors as SQLiteError
+// with `errno`: 5 = SQLITE_BUSY, 6 = SQLITE_LOCKED. Only these conditions
+// warrant swallow/retry — every other failure mode (no such column, no such
+// table, constraint violation, disk full, etc.) is a permanent schema/data
+// problem that MUST surface so the audit ledger guarantee (INV-0012-3 /
+// NFR-008) is not silently broken. Codex PR #39 round 3 P1.
+function isTransientSqliteError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const errno = (err as { errno?: number }).errno;
+  return errno === 5 || errno === 6;
+}
+
+// Audit insert with split error policy:
+//   - Transient SQLite errors (BUSY/LOCKED) → log + swallow. Worker keeps
+//     running; the audit may be slightly lossy under contention. This is the
+//     round 2 P2 contract (transient locks must not escalate to runtime_error
+//     or mis-attribute as set_r2_key_failed_neo4j).
+//   - Permanent errors (schema mismatch, constraint violations, etc.) →
+//     log + re-throw so the worker fails fast. This is the round 3 P1
+//     contract: permanent audit failure on the `attempted` row would let
+//     r2Put proceed with no ledger evidence, silently violating NFR-008.
+//     Re-throwing converts the queue row into a hard runtime_error so the
+//     operator gets a signal beyond logs.
 function bestEffortAuditR2Upload(
   input: Parameters<typeof recordR2UploadDecision>[0]
 ): void {
   try {
     recordR2UploadDecision(input);
   } catch (auditErr) {
-    console.warn(
-      `[snapshot] audit insert failed (decision=${input.decision}, snap_id=${input.snapId}):`,
+    if (isTransientSqliteError(auditErr)) {
+      console.warn(
+        `[snapshot] audit insert transient-failed (decision=${input.decision}, snap_id=${input.snapId}):`,
+        auditErr instanceof Error ? auditErr.message : auditErr
+      );
+      return;
+    }
+    console.error(
+      `[snapshot] audit insert permanent-failed (decision=${input.decision}, snap_id=${input.snapId}) — re-throwing to surface schema/data issue:`,
       auditErr instanceof Error ? auditErr.message : auditErr
     );
+    throw auditErr;
   }
 }
 

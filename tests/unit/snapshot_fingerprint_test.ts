@@ -746,4 +746,22 @@ describe("createSnapshotFingerprint — audit hook integration (INFRA-1B.3.x-aud
     ]);
     expect(audit[1]!.rationale).toContain("simulated Neo4j SET");
   });
+
+  it("permanent audit failure (schema mismatch) → throws BEFORE r2Put, NFR-008 fail-fast", async () => {
+    // Simulate v7 migration NOT applied: drop policy_decisions table so the
+    // first `attempted` audit insert raises "no such table". This is a
+    // permanent error (not SQLITE_BUSY/LOCKED), so bestEffortAuditR2Upload
+    // MUST re-throw — letting r2Put proceed would silently violate
+    // INV-0012-3 / NFR-008 audit guarantee (Codex PR #39 round 3 P1).
+    const db = setupDb();
+    db.exec("DROP TABLE policy_decisions");
+    seedQueue(db, "dq_audit_perm_fail");
+
+    await expect(
+      createSnapshotFingerprint(baseInput("dq_audit_perm_fail"))
+    ).rejects.toThrow(/no such table|policy_decisions/i);
+
+    // r2Put must NOT have run — fail-fast preserves NFR-008.
+    expect(r2Puts).toHaveLength(0);
+  });
 });
