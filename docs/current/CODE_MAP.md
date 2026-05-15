@@ -71,9 +71,10 @@
 | `src/discovery/scheduler/crawl-state.ts` | etag/Last-Modified + consecutive_failures + next_eligible_at upsert (INFRA-1B.2b) |
 | `src/discovery/scheduler/scheduler.ts` | poll → fetch → write phases — fetch/write separation (INFRA-1B.2b, ADR-0030 INV-0030-2) |
 | `src/discovery/worker/rss-worker.ts` | RSS/Atom item parse + discovery_queue enqueue (INFRA-1B.2) |
-| `src/discovery/worker/snapshot-fingerprint.ts` | Fetcher → Snapshot fingerprint (URL + content_hash + locator) + R2 back-fill for permitted artifacts (INFRA-1B.3) |
+| `src/discovery/worker/snapshot-fingerprint.ts` | Fetcher → Snapshot fingerprint (URL + content_hash + locator) + R2 back-fill for permitted artifacts (INFRA-1B.3). AI-P1-3 (INFRA-1B.3.h2-queue-cli): new-path `createDocumentAndSnapshot()` Source-missing guard now throws `TypedQueueError("source_not_found_in_graph", ...)` — unified with dedup-path `ensureSourceLinkage()` error_code so operator alerts cover ONE code |
 | `src/discovery/worker/chunker.ts` | Snapshot text → chunk + Neo4j FTS index write (INFRA-1B.4) |
-| `src/discovery/worker/run-discovery.ts` | Discovery worker entry — orchestrates poll + fetch + fingerprint (INFRA-1B.2) |
+| `src/discovery/worker/run-discovery.ts` | Discovery worker entry — orchestrates poll + fetch + fingerprint enqueue (INFRA-1B.2) |
+| `src/discovery/worker/run-process-queue.ts` | `bun run discovery:process-queue` CLI — claim pending discovery_queue rows + safeFetch + snapshot fingerprint + R2 conditional upload. SQLite-backed `makeArchivePolicyLookup` (FK-protected, actionable diagnostics on missing rows) + `pendingSnapshot` dry-run summary. `import.meta.main` entry guard + `closeDriver()` / `closeDb()` finally cleanup. (INFRA-1B.3.h2-queue-cli, AI-P1-3) |
 
 ### Pipeline (access intervention + feedback)
 
@@ -103,6 +104,7 @@
 | `tests/unit/r2_policy_test.ts` | R2 permitted-prefix + sha256 round-trip integrity | — (AC-003, AC-020, AC-032) |
 | `tests/unit/source_registry_test.ts` | Source registry seed dry-run + enum validation + YAML structure | — (INFRA-1B.1) |
 | `tests/unit/neo4j_bootstrap_test.ts` | Neo4j Source bootstrap idempotency + preflight (3-way SQLite policy / slug_map / Neo4j Source alignment) + fail-fast BootstrapPreflightError | — (INFRA-1B.1.h1-source-bootstrap-neo4j, AI-P1-2) |
+| `tests/unit/run_process_queue_test.ts` | `discovery:process-queue` CLI internals — SQLite-backed `makeArchivePolicyLookup` enum validation + missing-row diagnostics + `pendingSnapshot` dry-run summary (total / per-source breakdown sorted by count DESC / stale-processing > 1h) | — (INFRA-1B.3.h2-queue-cli, AI-P1-3) |
 | `tests/unit/access_intervention_test.ts` | severity scoring + recorder integration + batch-report generation (26 tests) | TEST-024 (AC-024) |
 | `tests/unit/safe_fetch_test.ts` | safe-fetch defense unit tests (117 tests) | — (ADR-0028, DEC-017) |
 | `tests/unit/xml_safe_test.ts` | xml-safe singleton + XXE block tests | — (DEC-018) |

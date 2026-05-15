@@ -20,7 +20,9 @@
     "seed-sources:neo4j": "bun run scripts/seed-sources.ts --neo4j",
     "seed-sources:preflight": "bun run scripts/seed-sources.ts --preflight",
     "discovery:run": "bun run src/discovery/worker/run-discovery.ts",
-    "discovery:dry-run": "bun run src/discovery/worker/run-discovery.ts --dry-run"
+    "discovery:dry-run": "bun run src/discovery/worker/run-discovery.ts --dry-run",
+    "discovery:process-queue": "bun run src/discovery/worker/run-process-queue.ts",
+    "discovery:process-queue:dry-run": "bun run src/discovery/worker/run-process-queue.ts --dry-run"
   },
   "dependencies": {
     "fast-xml-parser": "^5.8.0",

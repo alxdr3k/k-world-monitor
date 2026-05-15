@@ -224,6 +224,12 @@ async function createDocumentAndSnapshot(
 
       // P1-3: Guard — Source must exist before linking.
       // If missing, roll back so Document+Snapshot are never committed without a Source.
+      // AI-P1-3 (INFRA-1B.3.h2-queue-cli): throw TypedQueueError so the
+      // per-row catch in processOneRow records error_code='source_not_found_in_graph'
+      // (instead of clobbering it as 'runtime_error'). This unifies the
+      // new-path with the dedup-path's ensureSourceLinkage error code so
+      // operator alerts only need to cover ONE code (DATA_MODEL.md anchor +
+      // RUNBOOK 운영자 alert 항목 정합).
       const sourceCheck = await tx.run(
         `MATCH (src:Source {source_id: $sourceId}) RETURN count(src) AS matched`,
         { sourceId: input.sourceId }
@@ -233,7 +239,10 @@ async function createDocumentAndSnapshot(
           ? Number(sourceCheck.records[0]!.get("matched"))
           : 0;
       if (matched === 0) {
-        throw new Error(`Source not found in graph: ${input.sourceId}`);
+        throw new TypedQueueError(
+          "source_not_found_in_graph",
+          `new-path: source not found in graph: ${input.sourceId}`
+        );
       }
 
       // P1-4: MERGE on content_hash makes Snapshot creation idempotent.
