@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: 79d1e5b (2026-05-15) — AI-P1-2 / `INFRA-1B.1.h1-source-bootstrap-neo4j` landed (Neo4j Source node bootstrap + 3-way preflight alignment check + fail-fast `BootstrapPreflightError`; +23 tests in `tests/unit/neo4j_bootstrap_test.ts` = 521 → 544 tests total). Tests breakdown: 15 base for bootstrap + preflight alignment, 4 regression for Codex PR #44 P1 fix `loadBootstrapRowsFromSqlite` full slug_map coverage, 4 regression for Codex PR #44 P2 fix (preflight null source_id detection + duplicate source_id detection — `neo4jNodesMissingSourceId` / `neo4jDuplicateSourceIds` mismatch axes). Post-operator review (PR #44): commit `79d1e5b` adds DATA_MODEL.md + IMPLEMENTATION_PLAN.md + 05_RUNBOOK.md drift fix + removes transient `s.created` Source node property (OPTIONAL MATCH `was_created` query-local variable). Source node schema stays minimal (5 fields: source_id, slug, name, bootstrap_at, updated_at). Pre-merge SHA is refreshed as the branch evolves — canonical post-squash-merge SHA settles in the next slice's baseline header. Previous code baseline = 327f4b2 (2026-05-15, AI-P0-1 INFRA-1B.3.h1-policy-fix PR #41 — 515 → 521). Earlier baseline = 75706c4 (2026-05-14, INFRA-1B.3.x-audit PR #39 — 490 → 515).
+> Last verified against code: bd2689b (2026-05-15) — AI-P1-3 / `INFRA-1B.3.h2-queue-cli` landed (`bun run discovery:process-queue` CLI + new-path `source_not_found_in_graph` error_code unification; +10 tests = 544 → 554 tests total). Tests breakdown: 1 regression in `snapshot_fingerprint_test.ts` (new-path Source-missing throws `TypedQueueError("source_not_found_in_graph")` instead of plain Error) + 9 new in `tests/unit/run_process_queue_test.ts` (makeArchivePolicyLookup 6 + pendingSnapshot dry-run 4). Previous code baseline = 861796a (2026-05-15, AI-P1-2 INFRA-1B.1.h1-source-bootstrap-neo4j PR #44 squash-merge — 521 → 544 incl. Codex P1/P2 regression). Earlier baselines: 327f4b2 (AI-P0-1 INFRA-1B.3.h1-policy-fix PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). Pre-merge SHA refreshes as the branch evolves — canonical post-squash-merge SHA settles in the next slice's baseline header.
 
 ## Testing policy
 
@@ -55,7 +55,7 @@ bun run invariant:write
 |---|---|---|---|---|
 | install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
 | typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
-| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 20 file / **544 cases** — Bun native runner (post-AI-P1-2 INFRA-1B.1.h1-source-bootstrap-neo4j landed: +23 tests in `tests/unit/neo4j_bootstrap_test.ts` — 15 base + 4 Codex PR #44 P1 (full slug_map coverage) + 4 Codex PR #44 P2 (null source_id + duplicate detection in preflight); previous baseline 521 = AI-P0-1 INFRA-1B.3.h1-policy-fix PR #41 327f4b2) |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 21 file / **554 cases** — Bun native runner (post-AI-P1-3 INFRA-1B.3.h2-queue-cli landed: +10 tests — 1 new-path Source-missing TypedQueueError regression in snapshot_fingerprint_test.ts + 9 new in run_process_queue_test.ts (makeArchivePolicyLookup enum validation + missing-row diagnostics + pendingSnapshot dry-run summary); previous baseline 544 = AI-P1-2 INFRA-1B.1.h1-source-bootstrap-neo4j PR #44 861796a) |
 | migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v7 schema files parse (v7 = policy_decisions ADD COLUMN intended_action, INFRA-1B.3.x-audit) |
 | invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
@@ -73,7 +73,7 @@ Workflow files (활성):
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
 | `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
-| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (544 cases) + migrate dry-run |
+| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (554 cases) + migrate dry-run |
 | `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
 | `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
@@ -109,17 +109,15 @@ advisory).
 - PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
   으로 (1) workflow exists stage 진입.
-- 코드 테스트 (`bun test`) 는 20 file / **544 케이스** — Bun native runner
+- 코드 테스트 (`bun test`) 는 21 file / **554 케이스** — Bun native runner
   1 분 이내 expected. History: 490 → 515 (INFRA-1B.3.x-audit landed 2026-05-14
-  PR #39: +audit_policy_decisions_test.ts 16 tests + 8 audit hook integration
-  tests in snapshot_fingerprint_test.ts) → 521 (INFRA-1B.3.h1-policy-fix
-  landed 2026-05-15 PR #41: +6 regression tests in snapshot_fingerprint_test.ts
-  for cross-source archive_policy guard, AI-P0-1) → **544** (INFRA-1B.1.h1-
-  source-bootstrap-neo4j landed 2026-05-15: +23 tests in neo4j_bootstrap_test.ts
-  — 15 base for Neo4j Source bootstrap + 3-way preflight alignment + 4
-  regression for Codex PR #44 P1 fix loadBootstrapRowsFromSqlite full
-  slug_map coverage + 4 regression for Codex PR #44 P2 fix preflight null
-  source_id + duplicate source_id detection, AI-P1-2).
+  PR #39) → 521 (INFRA-1B.3.h1-policy-fix landed 2026-05-15 PR #41: +6
+  regression tests for cross-source archive_policy guard, AI-P0-1) → 544
+  (INFRA-1B.1.h1-source-bootstrap-neo4j landed 2026-05-15 PR #44: +23 tests
+  — 15 base + 4 Codex P1 full slug_map + 4 Codex P2 null/duplicate detection,
+  AI-P1-2) → **554** (INFRA-1B.3.h2-queue-cli landed 2026-05-15: +1 new-path
+  Source-missing TypedQueueError regression + 9 new CLI internals tests
+  for makeArchivePolicyLookup + pendingSnapshot dry-run summary, AI-P1-3).
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR

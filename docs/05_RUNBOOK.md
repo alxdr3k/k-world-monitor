@@ -345,8 +345,13 @@ bun run migrate:neo4j
 #    (default 'bun run seed-sources' 는 SQLite 만 — backward compat)
 bun run seed-sources:neo4j
 
-# 3. discovery → snapshot E2E 실행
+# 3. Discovery — RSS / sitemap poll → discovery_queue 적재
 bun run discovery:run
+
+# 4. Process queue — 적재된 row 를 fetch + snapshot fingerprint + R2 upload
+#    (AI-P1-3, INFRA-1B.3.h2-queue-cli). Dry-run 으로 pending 카운트 사전 확인 가능
+bun run discovery:process-queue:dry-run   # pending summary, no writes
+bun run discovery:process-queue           # 실제 처리
 ```
 
 `bun run seed-sources:neo4j` 동작:
@@ -392,6 +397,47 @@ bun run seed-sources:neo4j   # 신규 source = MERGE created, 기존 = MERGE mat
 본 bootstrap 은 single-operator 가정 (v0 turn-key). multi-worker race 가
 도입되면 별도 hardening slice (`INFRA-1B.3.x` P1-M2-hardening) 의 worker_id
 CAS 패턴과 함께 재검토 의무.
+
+### Queue Processing — `discovery:process-queue` (AI-P1-3, INFRA-1B.3.h2-queue-cli)
+
+`bun run discovery:run` 이 적재한 `discovery_queue.status='pending'` row 를
+fetch → Snapshot fingerprint → 조건부 R2 upload 까지 처리.
+
+```bash
+bun run discovery:process-queue:dry-run   # pending 카운트 + per-source 분포 + stale 'processing' 카운트
+bun run discovery:process-queue           # batch size 100, stale reclaim 1h
+```
+
+처리 단계 (per-row):
+1. SQLite `source_material_policy` 에서 `archive_policy` + `raw_cloud_policy` 조회
+2. `archive_policy=do_not_collect` 면 fetch 미수행 → `error_code='policy_do_not_collect'`
+3. `safeFetch` (10MB cap, SSRF defense, robots.txt, content-type validation)
+4. `createSnapshotFingerprint` — content_hash dedup + Neo4j MERGE + 조건부 R2 upload
+5. queue row 를 `status='done'` (snap_id + content_hash) 또는 `status='error'` (error_code + error_detail) 로 마크
+
+운영자 error_code 별 대응:
+
+| error_code | 원인 | 대응 |
+|---|---|---|
+| `source_not_found_in_graph` | Neo4j Source 노드 부재 — `seed-sources:neo4j` 미실시 또는 partial. AI-P1-3 이후 new-path + dedup-path 모두 동일 code 발행 | `bun run seed-sources:preflight` 진단 → `bun run seed-sources:neo4j` 재실행 |
+| `policy_do_not_collect` | source `archive_policy=do_not_collect` (정책상 collect 금지) | 정상 — `data/sources_seed.yaml` 의 의도된 정책. 수집 대상 변경 시 YAML 갱신 + re-seed |
+| `dedup_prohibited_source` | cross-source dedup 시도가 `raw_cloud_policy=always_prohibited` source 와 충돌 | 정상 — INV-0012-3 보호. r2-backed Snapshot 이 prohibited source 와 link 되는 것을 차단 |
+| `http_status` | non-2xx HTTP response | source 측 일시적 장애 또는 URL 만료 — 재시도 또는 source 제거 |
+| `empty_body` | 2xx 인데 body 0 bytes 또는 204/205 status | source 측 redirect 변경 / API 응답 변경 가능성 — 수동 확인 |
+| `runtime_error` | 예외 (parse / Neo4j blip / SQLite lock 등) | `error_detail` 컬럼 메시지 확인. 재시도 또는 source 별 진단 |
+
+조회 SQL (CLI 종료 시 errors > 0 면 자동 print 됨):
+
+```sql
+SELECT queue_id, source_id, url, error_code, error_detail
+FROM discovery_queue
+WHERE status = 'error'
+ORDER BY updated_at DESC LIMIT 50;
+```
+
+본 CLI 는 single-process 가정 (v0). batch size = 100, stale-processing
+reclaim threshold = 1h (1h 넘게 'processing' 인 row 는 재기동 시점에
+'pending' 으로 reclaim — crashed worker 복구).
 
 ### 복구 절차
 
