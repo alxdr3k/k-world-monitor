@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: e029d51 (2026-05-14) — INFRA-1B.3.x-audit landed + PR #39 reviewer P1+P2 batch (R2 upload audit ledger, v7 migration, +16 audit unit tests + 7 audit-hook integration tests = 490 → 513 tests total, AC-032 / NFR-008 evidence). Previous code baseline = 0a76d31 (2026-05-13). Thin-doc edits since 0a76d31 → this commit chain: 5aa70ac → ceaa17c → 38b846d → c7b9088 (PR #37 squash-merged as 18abf8f) → e029d51 (Option C INFRA-1B.3.x-audit + reviewer P1 new-path TOCTOU fix + reviewer P2 numeric version compare + reviewer P2 set_r2_key_failed_neo4j comment 정정 + reviewer P2 caller-hook integration tests + reviewer P2 Q-044 closed + INFRA-1B.2-source-bootstrap planned).
+> Last verified against code: 4434933 (2026-05-14) — INFRA-1B.3.x-audit landed + PR #39 reviewer P1+P2 batch (R2 upload audit ledger, v7 migration, +16 audit unit tests + 7 audit-hook integration tests = 490 → 513 tests total, AC-032 / NFR-008 evidence). Previous code baseline = 0a76d31 (2026-05-13). Thin-doc edits since 0a76d31 → this commit chain: 5aa70ac → ceaa17c → 38b846d → c7b9088 (PR #37 squash-merged as 18abf8f) → 4434933 (Option C INFRA-1B.3.x-audit + reviewer P1 new-path TOCTOU fix + reviewer P2 numeric version compare + reviewer P2 set_r2_key_failed_neo4j comment 정정 + reviewer P2 caller-hook integration tests + reviewer P2 Q-044 closed + INFRA-1B.2-source-bootstrap planned).
 
 ## Testing policy
 

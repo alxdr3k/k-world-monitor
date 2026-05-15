@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: e029d5199a371699e54fd9399566e8c9bd4c3ae7 (2026-05-14) — INFRA-1B.3.x-audit landed (R2 upload audit ledger, AC-032 / NFR-008 evidence, Q-044 → DEC-020 / TRACE-040). Previous code baseline = 13d61af (2026-05-13) — comprehensive review backfill.
+> Last verified against code: 4434933b8c33f2d95c9b06e6c4c0907815dfb259 (2026-05-14) — INFRA-1B.3.x-audit landed (R2 upload audit ledger, AC-032 / NFR-008 evidence, Q-044 → DEC-020 / TRACE-040). Previous code baseline = 13d61af (2026-05-13) — comprehensive review backfill.
 
 ## Runtime stack
 
