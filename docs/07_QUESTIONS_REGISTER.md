@@ -54,7 +54,9 @@ validator는 legacy entry를 ID 추적만 하고 invariant scope에서 제외 (w
 | [Q-035](questions/Q-035.md) | Google Gemini 사용 scope 확장 시점 (v1+ 메인/리뷰 포함 검토) | v1+ EXTR |
 | [Q-050](questions/Q-050.md) | AI 웹 검색 + repo 통합 architecture — 7 operator decisions pending | INFRA-1B.7b~e / AGG-1A.6 |
 
-### Deferred (defer 자체가 명시 결정, re-entry gate 명시)
+### Deferred (defer = `status: open` + resolution: DEC-024 + re-entry gate 명시)
+
+> frontmatter `status` enum (`open | in_progress | resolved | dropped`) 에 `deferred` 가 없어 본 Q 들은 `status: open` 유지. defer semantics 는 `resolution: DEC-024` + Resolution body 의 re-entry gate 안에 prose 로 명시.
 
 | ID | Resolution | Re-entry gate | Title |
 |---|---|---|---|
