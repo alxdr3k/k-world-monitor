@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: 75706c4 (2026-05-14) — INFRA-1B.3.x-audit landed + PR #39 reviewer P1+P2 batch (R2 upload audit ledger, v7 migration, +16 audit unit tests + 8 audit-hook integration tests = 490 → 515 tests total, AC-032 / NFR-008 evidence). Previous code baseline = 0a76d31 (2026-05-13). Thin-doc edits since 0a76d31 → this commit chain: 5aa70ac → ceaa17c → 38b846d → c7b9088 (PR #37 squash-merged as 18abf8f) → 75706c4 (Option C INFRA-1B.3.x-audit + reviewer P1 new-path TOCTOU fix + reviewer P2 numeric version compare + reviewer P2 set_r2_key_failed_neo4j comment 정정 + reviewer P2 caller-hook integration tests + reviewer P2 Q-044 closed + INFRA-1B.2-source-bootstrap planned).
+> Last verified against code: 327f4b2 (2026-05-15) — AI-P0-1 / `INFRA-1B.3.h1-policy-fix` landed (PR #41 R2 cross-source archive_policy guard, `allLinkedSourcesAllowRawCloud` → `allLinkedSourcesAllowR2SnapshotUpload` rename + archive_policy 검사 추가 + 6 regression tests = 515 → 521 tests total, ADR-0012 INV-0012-3 enforcement layer 갱신, legal-safety P0 해소). Previous code baseline = 75706c4 (2026-05-14, INFRA-1B.3.x-audit landed PR #39 — 490 → 515). Thin-doc edits since 327f4b2 (code baseline) → this commit (doc-only, AI-P1-9 DOC-SYNC-2026-05-15 진행 중, post-AI-P1-8 PR #42 frontmatter parse fix baseline 위에서). 본 thin-doc edit 은 code 변경 없음 — `Thin-doc edits since: 327f4b2 → this commit (2026-05-15)`.
 
 ## Testing policy
 
@@ -55,7 +55,7 @@ bun run invariant:write
 |---|---|---|---|---|
 | install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
 | typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
-| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 19 file / 515 cases — Bun native runner (INFRA-1B.3.x-audit landed: +tests/unit/audit_policy_decisions_test.ts 16 tests + 8 integration tests in snapshot_fingerprint_test.ts) |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 19 file / **521 cases** — Bun native runner (post-AI-P0-1 INFRA-1B.3.h1-policy-fix landed: +6 regression tests in snapshot_fingerprint_test.ts for cross-source archive_policy guard, PR #41 327f4b2; previous baseline 515 = INFRA-1B.3.x-audit PR #39 75706c4) |
 | migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v7 schema files parse (v7 = policy_decisions ADD COLUMN intended_action, INFRA-1B.3.x-audit) |
 | invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
@@ -73,7 +73,7 @@ Workflow files (활성):
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
 | `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
-| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (490 cases) + migrate dry-run |
+| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (521 cases) + migrate dry-run |
 | `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
 | `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
@@ -109,8 +109,12 @@ advisory).
 - PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
   으로 (1) workflow exists stage 진입.
-- 코드 테스트 (`bun test`) 는 19 file / 515 케이스 — Bun native runner
-  1 분 이내 expected (INFRA-1B.3.x-audit landed 2026-05-14: +audit_policy_decisions_test.ts 16 tests + 8 audit hook integration tests in snapshot_fingerprint_test.ts).
+- 코드 테스트 (`bun test`) 는 19 file / **521 케이스** — Bun native runner
+  1 분 이내 expected. History: 490 → 515 (INFRA-1B.3.x-audit landed 2026-05-14
+  PR #39: +audit_policy_decisions_test.ts 16 tests + 8 audit hook integration
+  tests in snapshot_fingerprint_test.ts) → **521** (INFRA-1B.3.h1-policy-fix
+  landed 2026-05-15 PR #41: +6 regression tests in snapshot_fingerprint_test.ts
+  for cross-source archive_policy guard, AI-P0-1).
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR

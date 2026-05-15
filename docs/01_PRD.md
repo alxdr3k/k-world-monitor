@@ -248,6 +248,19 @@ Q-<NNN>.md`로 이동.
   DEC-005 v0 manual 연장
 - Q-034: Auto retraction trigger 정책 v1+ (manual approve → auto 전환 기준)
   — DEC-005 v0 manual approve 연장
+- Q-035: Google Gemini 사용 scope 확장 시점 (v1+ 메인/리뷰 포함 검토). v0 lock
+  = Tier 3 + 탐색(Search grounding) 보조 + 동일 tier 비용효율 우위 시만
+  (ADR-0023 INV-0023-5, DEC-010 의 메인/리뷰 X 강제). v1+ 메인 generator
+  또는 reviewer 진입 검토 시점은 운영 200+ 호출 후 vendor 별
+  faithfulness_rate / cost_per_promoted_claim 실측 SPIKE 결과로 결정
+- Q-050: AI 웹 검색 (GPT/Claude/Gemini) 과 repo 자체 수집 / 내부 검색 의
+  통합 아키텍처 — 시나리오별 흐름 + 다중 라운드 탐색 context propagation.
+  proposed body landed, 7 운영자 결정 항목 pending (parent_round_id branching
+  semantics / mode='mixed' validation profile / termination defaults /
+  migration v8 ALTER 범위 / ScenarioRevision FK 위치 / EditorialIntent.purpose
+  lock 시점 / 신규 ADR 발급 시점). Implement slices: INFRA-1B.7a~e +
+  AGG-1A.6 + DISCOVERY-EXT.1 + EXTR-1A.7 (대부분 P1+; INFRA-1B.7a 만
+  P0-M6 흡수)
 - ~~Q-027~~: **resolved by DEC-007** (retention / R2 lifecycle 3 expire
   rule + 의미적 GC batch 3개 + soft-delete tombstone 14d grace +
   RETENTION_PROTECTED_KINDS 상수 + raw_cache 24h~7d ceiling)
