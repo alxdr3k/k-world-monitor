@@ -4,7 +4,9 @@
 
 상태: `Status: PROPOSED — retrospective artifact, not canonical register.`
 
-본 문서의 Q ID (Q-052~Q-059) 와 slice ID (`INFRA-1B.3.h1-policy-fix` 등) 는 모두 **candidate identifier**. Q-052~Q-059 는 `docs/questions/Q-NNN.md` 에 placeholder file 로 등록되어 있으나 (commit 241476e) IMPL_PLAN slice 표에는 아직 미등록. 본격 canonical 등록은 별도 후속 PR (`PR-canonical-register-2026-05-15` 가칭) 에서:
+**Q-052~Q-059 ID 는 이미 open placeholder Q file 로 등록됨** (`docs/questions/Q-NNN.md`, commit 241476e + `docs/07_QUESTIONS_REGISTER.md` Open TOC). 즉 Q ID 자체는 canonical placeholder 상태 — `status: open / resolution: null` 로 운영자 결정 pending.
+
+**slice ID (`INFRA-1B.3.h1-policy-fix` 등) 는 candidate identifier** — `docs/04_IMPLEMENTATION_PLAN.md` slice 표에 아직 미등록. 본격 canonical 등록은 별도 후속 PR (`PR-canonical-register-2026-05-15` 가칭) 에서:
 
 - `docs/04_IMPLEMENTATION_PLAN.md` slice 표에 신규 slice row 추가
 - `docs/context/current-state.md` next action = `INFRA-1B.3.h1-policy-fix` 반영
@@ -82,8 +84,8 @@
 | `INFRA-1B.1.h1-source-bootstrap-neo4j` | P0-M2-hardening | INFRA | `seed-sources` 후 Neo4j Source node bootstrap + preflight (mismatch fail-fast) | AI-P1-2 | INFRA-1B.1 |
 | `INFRA-1B.3.h2-queue-cli` | P0-M2-hardening | INFRA | `bun run discovery:process-queue` CLI + typed `source_not_found_in_graph` error 통일 | AI-P1-3 | INFRA-1B.3 |
 | `INFRA-1B.4.h1-chunker-policy-gate` | P0-M2-hardening | INFRA | `chunkSnapshot(input)` 에 `sourceId + archivePolicy` 의무. `metadata_only` / `do_not_collect` reject, `excerpt_only` reject (limit 까지), `full_snapshot_allowed` allow. empty text 가 chunk 삭제 안 하게. | AI-P1-1 (Q-053 lock 후) | INFRA-1B.4 |
-| `INFRA-1B.1.h2-source-profile` | P0-M2-hardening 또는 P0-M3 entry | INFRA | Source Registry 가 PRD/AC-022/AC-027/AC-031 의무 필드 persist (`data/categories.yaml` + `source_profile` table 또는 Neo4j projection 확장 + collectability/access_method/meta_category/subtopic_tags/active_v0 validation) | AI-P1-4 (Q-054 + Q-058 lock 후) | INFRA-1B.1 + INFRA-1B.1.y |
-| `OPS-1B.h1-runtime-invariant-scanner` | P0-M2-hardening | OPS | `bun run audit:r2-invariants` — Snapshot.r2_key ↔ policy ↔ audit ledger consistency scan (read-only) | AI-P1-6 | INFRA-1B.3.x-policy-fix + INFRA-1B.3.x-audit |
+| `INFRA-1B.1.h2-source-profile` | P0-M2-hardening 또는 P0-M3 entry | INFRA | Source Registry 가 PRD/AC-022/AC-027/AC-031 의무 필드 persist (`data/categories.yaml` + `source_profile` table 또는 Neo4j projection 확장 + collectability/access_method/meta_category/subtopic_tags/active_v0 validation) | AI-P1-4 (Q-054 + Q-058 lock 후) | INFRA-1B.1 + INFRA-1B.1.h1-source-bootstrap-neo4j |
+| `OPS-1B.h1-runtime-invariant-scanner` | P0-M2-hardening | OPS | `bun run audit:r2-invariants` — Snapshot.r2_key ↔ policy ↔ audit ledger consistency scan (read-only) | AI-P1-6 | INFRA-1B.3.h1-policy-fix + INFRA-1B.3.x-audit |
 | `INFRA-1B.3.h3-audit-hardening` | P0-M2-hardening | INFRA | v8 migration — `policy_decisions.intended_action` enum trigger + `r2_upload` decision enum trigger + `upload_attempt_id` column + attempted/outcome correlation | AI-P1-7 | INFRA-1B.3.x-audit |
 | `DEPLOY-1A.0-migration-validation` | P0-M2-hardening | OPS | `migrate:plan` / `migrate:sqlite:validate` / `migrate:neo4j:validate` 분리. CI 에 temp SQLite apply. TESTING test count fix. | AI-P1-5 | — |
 | `INFRA-1A.9-validator-extension` | P0-M2-hardening | INFRA | invariant validator extension — relation_enum enforce / defines[] 권리 / supersede chain bidirectional / glossary cross-check 강화 (`cross_ref_code[]` 도입) | AI-P2-5 (Claude L2 batch) | — |

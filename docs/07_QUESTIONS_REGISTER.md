@@ -54,12 +54,12 @@ validator는 legacy entry를 ID 추적만 하고 invariant scope에서 제외 (w
 | [Q-035](questions/Q-035.md) | Google Gemini 사용 scope 확장 시점 (v1+ 메인/리뷰 포함 검토) | v1+ EXTR |
 | [Q-050](questions/Q-050.md) | AI 웹 검색 + repo 통합 architecture — 7 operator decisions pending | INFRA-1B.7b~e / AGG-1A.6 |
 | [Q-052](questions/Q-052.md) | main branch protection 3중 정책 충돌 — DEC-020 vs CLAUDE.md vs GH state | AI-P0-2 / DOC-SYNC-2026-05-15 |
-| [Q-053](questions/Q-053.md) | chunker raw text persistence 정책 — archive_policy gate + local_storage_policy enum 도입 여부 | INFRA-1B.4.x-chunker-policy-gate |
-| [Q-054](questions/Q-054.md) | Source Registry canonical store — Neo4j projection vs SQLite source_profile table | INFRA-1B.1.z-source-profile |
+| [Q-053](questions/Q-053.md) | chunker raw text persistence 정책 — archive_policy gate + local_storage_policy enum 도입 여부 | INFRA-1B.4.h1-chunker-policy-gate |
+| [Q-054](questions/Q-054.md) | Source Registry canonical store — Neo4j projection vs SQLite source_profile table | INFRA-1B.1.h2-source-profile |
 | [Q-055](questions/Q-055.md) | Dataset ingestion MVP timing — M3 이전 vs ADR-0024 EXTR-1A.5 lock 유지 | EXTR-1A.5 / PUB-1A.5 |
 | [Q-056](questions/Q-056.md) | 첫 publishable format — DEC-005/009/011 유지 vs Weekly Scenario Watch reflow | PUB-1A.5 |
 | [Q-057](questions/Q-057.md) | Claim promotion / semantic dedup 정책 — promotion score / semantic claim key / claim_direction / importance scoring | EXTR-1A.1 |
-| [Q-058](questions/Q-058.md) | Source reliability multi-dim — source_role enum (9 값) 추가 여부 | INFRA-1B.1.z-source-profile |
+| [Q-058](questions/Q-058.md) | Source reliability multi-dim — source_role enum (9 값) 추가 여부 | INFRA-1B.1.h2-source-profile |
 | [Q-059](questions/Q-059.md) | 운영자 attention budget — P2/P3 batch (~160 finding) 처리 정책 | 다음 4주 sequence |
 
 ### Resolved (audit anchor)

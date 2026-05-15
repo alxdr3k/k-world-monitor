@@ -48,9 +48,9 @@
 
 ---
 
-## A. GPT review 의 raw body
+## A. GPT review — curated excerpts + finding inventory
 
-GPT 가 4부 분할 형식으로 review 한 본문. 원문 그대로 보존 (편집 최소 — markdown rendering 위해 trivial 수정만).
+아래는 GPT 4부 review 의 **curated excerpt + synthesized finding inventory** 다. 1부 (전체 verdict + P0/P1) 는 핵심 텍스트를 비교적 원문에 가깝게 보존했고, 2~4 부는 표와 요약으로 압축됐다. 실제 raw GPT transcript 가 필요하면 별도 raw artifact 로 promotion 권고 (현재 본 파일 안에 미포함).
 
 ### 1부 — 전체 verdict + P0/P1 blocker 리뷰
 
