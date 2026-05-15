@@ -17,6 +17,8 @@
     "bench:neo4j": "bun run tests/bench/neo4j_fts_search_bench.ts",
     "seed-sources": "bun run scripts/seed-sources.ts",
     "seed-sources:dry-run": "bun run scripts/seed-sources.ts --dry-run",
+    "seed-sources:neo4j": "bun run scripts/seed-sources.ts --neo4j",
+    "seed-sources:preflight": "bun run scripts/seed-sources.ts --preflight",
     "discovery:run": "bun run src/discovery/worker/run-discovery.ts",
     "discovery:dry-run": "bun run src/discovery/worker/run-discovery.ts --dry-run"
   },
