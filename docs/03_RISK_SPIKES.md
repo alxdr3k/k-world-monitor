@@ -97,8 +97,12 @@
   + DEC-010 routing default 재검토 (예 Tier 2 default 를 Sonnet 4.6 standard
   로 promote 또는 한국어 override 적용 범위 확장)
 - fp ≪ 5%: threshold 하향(0.80) 검토
-- Follow-up: Slice `EXTR-1A.2` (Article extractor, Tier 2 default + 한국어
-  override 구현 직후 — ADR-0023 / DEC-010 anchor)
+- Follow-up: Slice `EXTR-1A.4` (Review queue + auto-confirm threshold — IMPL_PLAN
+  slice 표 의 `SPIKE-002` dependency lock 행). Experiment 의 50건 추출 자체는
+  `EXTR-1A.2` (Article extractor, Tier 2 default + 한국어 override 구현 직후 —
+  ADR-0023 / DEC-010 anchor) 또는 그 이전 baseline 위에서 수집 가능. SPIKE
+  결과 (threshold lock or supersede 결정) 는 EXTR-1A.4 진입 직전 의무 — 본
+  필드는 IMPL_PLAN slice 표 `EXTR-1A.4 | ... | SPIKE-002 | ...` 와 정합.
 
 ---
 
@@ -123,12 +127,11 @@
 - system prompt + extractor schema (≥ 1024 tokens) 을 cached prefix 로 구성
   — OpenAI (`response_format: json_schema`) + Anthropic (`strict: true` +
   `anthropic-beta: structured-outputs-2025-11-13`) 두 vendor 별 동일 prefix
-- 100~500 snapshot batch 1회 실행 (vendor 별 분리)
+- 100~500 snapshot batch 1회 실행 (vendor 별 분리, Tier 2 default + Tier 1
+  escalate 만 — Tier 0 cross-vendor reviewer 는 본 SPIKE 범위 외, EXTR-1A.6
+  슬라이스 진입 직전 별도 follow-up SPIKE 또는 본 SPIKE 의 후속 재측정)
 - run ledger 의 `cached_tokens / tokens_in` 비율 측정 — vendor 별 (ADR-0023
   INV-0023-7 의 `vendor` / `tier` / `cached_tokens` 필드)
-- Tier 0 cross-vendor review (GPT-5.5 Pro xthink → Opus 4.7 xhigh) 의
-  cache hit rate 도 별도 측정 (cross-vendor 호출 시 reviewer 의 cache 가
-  prompt 변경에 민감한지 확인)
 
 **Result**
 
