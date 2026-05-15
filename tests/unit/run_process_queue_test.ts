@@ -21,6 +21,8 @@ import { getDb, closeDb } from "../../src/storage/sqlite/connection";
 import {
   __TEST_makeArchivePolicyLookup as makeArchivePolicyLookup,
   __TEST_pendingSnapshot as pendingSnapshot,
+  parseArgs,
+  UnknownArgumentError,
 } from "../../src/discovery/worker/run-process-queue";
 
 // ---------------------------------------------------------------------------
@@ -148,6 +150,72 @@ describe("makeArchivePolicyLookup", () => {
 // ---------------------------------------------------------------------------
 // pendingSnapshot — dry-run summary
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// parseArgs — fail-fast on unknown flags (Codex PR #45 P2 fix)
+// ---------------------------------------------------------------------------
+
+describe("parseArgs — fail-fast argv handling", () => {
+  it("accepts empty argv (default = real processing run)", () => {
+    expect(parseArgs([])).toEqual({ dryRun: false });
+  });
+
+  it("accepts --dry-run", () => {
+    expect(parseArgs(["--dry-run"])).toEqual({ dryRun: true });
+  });
+
+  it("rejects --dryrun typo (no hyphen) with UnknownArgumentError", () => {
+    let caught: unknown;
+    try {
+      parseArgs(["--dryrun"]);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UnknownArgumentError);
+    const err = caught as UnknownArgumentError;
+    expect(err.unknown).toEqual(["--dryrun"]);
+    expect(err.message).toContain("Unknown argument(s): --dryrun");
+    expect(err.message).toContain("Known flags: --dry-run");
+    expect(err.message).toContain(
+      "Usage: bun run discovery:process-queue [--dry-run]"
+    );
+  });
+
+  it("rejects --dry_run typo (underscore) with UnknownArgumentError", () => {
+    expect(() => parseArgs(["--dry_run"])).toThrow(UnknownArgumentError);
+  });
+
+  it("rejects unknown flag mixed with valid --dry-run", () => {
+    let caught: unknown;
+    try {
+      parseArgs(["--dry-run", "--force"]);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UnknownArgumentError);
+    expect((caught as UnknownArgumentError).unknown).toEqual(["--force"]);
+  });
+
+  it("rejects multiple unknown args (reports all in message)", () => {
+    let caught: unknown;
+    try {
+      parseArgs(["--foo", "--bar", "--baz"]);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UnknownArgumentError);
+    expect((caught as UnknownArgumentError).unknown).toEqual([
+      "--foo",
+      "--bar",
+      "--baz",
+    ]);
+    expect((caught as Error).message).toContain("--foo, --bar, --baz");
+  });
+
+  it("rejects positional arguments (no positional flags supported)", () => {
+    expect(() => parseArgs(["queue_id_001"])).toThrow(UnknownArgumentError);
+  });
+});
 
 describe("pendingSnapshot", () => {
   it("returns zero counts when discovery_queue is empty", () => {

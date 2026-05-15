@@ -98,6 +98,47 @@ export interface PendingSummary {
   staleProcessing: number;
 }
 
+// ---------------------------------------------------------------------------
+// Argument parsing — fail-fast on unknown flags (Codex PR #45 P2 fix).
+//
+// Bug: the previous `process.argv.includes("--dry-run")` check silently
+// accepted ANY non-`--dry-run` argument as a real processing run. A typo
+// like `--dryrun` or `--dry_run` would skip the dry-run intent and execute
+// fetch + Neo4j + R2 writes — mutating queue state when the operator
+// believed they were doing a preview. For an operator-facing CLI that
+// mutates production state, permissive argv handling is a footgun.
+//
+// Fix: parse argv against an allowlist; unknown tokens raise UnknownArgumentError
+// with the offending arguments + known-flag list + usage line. Exported so
+// tests/ can verify the rejection contract without spawning a subprocess.
+// ---------------------------------------------------------------------------
+
+export interface ParsedArgs {
+  dryRun: boolean;
+}
+
+const KNOWN_FLAGS = new Set(["--dry-run"]);
+const USAGE_LINE = "Usage: bun run discovery:process-queue [--dry-run]";
+
+export class UnknownArgumentError extends Error {
+  constructor(public readonly unknown: ReadonlyArray<string>) {
+    super(
+      `Unknown argument(s): ${unknown.join(", ")}\n` +
+        `Known flags: ${[...KNOWN_FLAGS].join(", ")}\n` +
+        USAGE_LINE
+    );
+    this.name = "UnknownArgumentError";
+  }
+}
+
+export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
+  const unknown = argv.filter((a) => !KNOWN_FLAGS.has(a));
+  if (unknown.length > 0) {
+    throw new UnknownArgumentError(unknown);
+  }
+  return { dryRun: argv.includes("--dry-run") };
+}
+
 export function pendingSnapshot(): PendingSummary {
   const db = getDb();
   const total = (db
@@ -132,7 +173,9 @@ export function pendingSnapshot(): PendingSummary {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<number> {
-  const dryRun = process.argv.includes("--dry-run");
+  // Argv slice(2) drops `bun` + script path. parseArgs raises
+  // UnknownArgumentError on typos / stray args (Codex PR #45 P2 fix).
+  const { dryRun } = parseArgs(process.argv.slice(2));
 
   if (dryRun) {
     const summary = pendingSnapshot();
