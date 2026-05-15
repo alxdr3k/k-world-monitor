@@ -107,6 +107,53 @@ export class BootstrapPreflightError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// Bootstrap row resolution — full SQLite slug_map coverage.
+//
+// Codex review PR #44 P1 (2026-05-15): `seedSources()` is upsert-only and
+// never deletes historical slug_map rows. If a source was previously seeded
+// then later removed from `data/sources_seed.yaml`, its source_id remains
+// in `source_registry_slug_map` (and in `source_material_policy`). Preflight
+// validates against the FULL slug_map set, so if bootstrap only touches the
+// current-YAML rows, historical IDs are forever missing-in-Neo4j and
+// preflight fails permanently — blocking the recovery flow the CLI was
+// designed for. `loadBootstrapRowsFromSqlite()` reads the FULL slug_map set
+// and resolves `name` from the current-YAML rows when available, falling
+// back to `slug` when a source is no longer present in YAML (graph node
+// display name remains human-readable instead of an opaque ULID).
+// ---------------------------------------------------------------------------
+
+export interface BootstrapRow {
+  source_id: string;
+  slug: string;
+  name: string;
+}
+
+export function loadBootstrapRowsFromSqlite(
+  yamlRows: ReadonlyArray<Pick<SeedRow, "source_id" | "slug" | "name">>
+): BootstrapRow[] {
+  const yamlByIdMap = new Map<string, { slug: string; name: string }>(
+    yamlRows.map((r) => [r.source_id, { slug: r.slug, name: r.name }])
+  );
+  const slugMapRows = getDb()
+    .query<{ slug: string; source_id: string }, []>(
+      "SELECT slug, source_id FROM source_registry_slug_map"
+    )
+    .all();
+  return slugMapRows.map((r) => {
+    const yaml = yamlByIdMap.get(r.source_id);
+    return {
+      source_id: r.source_id,
+      slug: yaml?.slug ?? r.slug,
+      // Fallback: when a source is no longer present in YAML, use slug as
+      // name so the graph node has a human-readable label. The slug remains
+      // stable across YAML edits (slug_map is keyed on slug), so this
+      // fallback is deterministic.
+      name: yaml?.name ?? r.slug,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Bootstrap — create / refresh Neo4j Source nodes for the given SQLite rows.
 // ---------------------------------------------------------------------------
 

@@ -62,6 +62,7 @@ mock.module("../../src/storage/neo4j/connection", () => neo4j.module);
 import { getDb, closeDb } from "../../src/storage/sqlite/connection";
 import {
   bootstrapNeo4jSourceNodes,
+  loadBootstrapRowsFromSqlite,
   preflightSourceRegistry,
   assertSourceRegistryAligned,
   BootstrapPreflightError,
@@ -284,6 +285,72 @@ describe("assertSourceRegistryAligned", () => {
     await expect(assertSourceRegistryAligned()).rejects.toThrow(
       /orphan in Neo4j \(1\).*src_GHOST/s
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadBootstrapRowsFromSqlite — full slug_map coverage with name fallback
+// (Codex PR #44 P1 regression coverage)
+// ---------------------------------------------------------------------------
+
+describe("loadBootstrapRowsFromSqlite — full slug_map coverage", () => {
+  it("returns all slug_map rows (NOT just current YAML rows) — historical sources covered", () => {
+    // Simulate: YAML currently has slug 'a' but SQLite has historical slug
+    // 'b' that was removed from YAML. Bootstrap must still cover 'b' so
+    // preflight does not fail permanently.
+    insertSqliteRow("a", "src_A");
+    insertSqliteRow("b-historical", "src_B");
+
+    const yamlRows = [{ source_id: "src_A", slug: "a", name: "A Name" }];
+    const rows = loadBootstrapRowsFromSqlite(yamlRows);
+
+    expect(rows).toHaveLength(2);
+    const idMap = new Map(rows.map((r) => [r.source_id, r]));
+    // YAML row uses YAML's authoritative name
+    expect(idMap.get("src_A")).toEqual({ source_id: "src_A", slug: "a", name: "A Name" });
+    // Historical row uses slug as name fallback (no YAML data available)
+    expect(idMap.get("src_B")).toEqual({
+      source_id: "src_B",
+      slug: "b-historical",
+      name: "b-historical",
+    });
+  });
+
+  it("prefers YAML name + slug over slug_map when both are present", () => {
+    // slug_map has slug 'old-slug' for src_A, but YAML provides slug 'new-slug'
+    // + name 'Renamed'. YAML wins. (Note: in production seedSources() updates
+    // the slug_map row via INSERT OR IGNORE, so this scenario is degenerate —
+    // but the function's resolution rule must still be deterministic.)
+    insertSqliteRow("old-slug", "src_A");
+    const yamlRows = [{ source_id: "src_A", slug: "new-slug", name: "Renamed" }];
+
+    const rows = loadBootstrapRowsFromSqlite(yamlRows);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({ source_id: "src_A", slug: "new-slug", name: "Renamed" });
+  });
+
+  it("returns empty array when slug_map is empty (degenerate input)", () => {
+    const rows = loadBootstrapRowsFromSqlite([]);
+    expect(rows).toEqual([]);
+  });
+
+  it("integration with bootstrapNeo4jSourceNodes — historical rows are bootstrapped end-to-end", async () => {
+    // The Codex P1 recovery flow: bootstrap full slug_map → preflight aligned.
+    insertSqliteRow("a", "src_A");
+    insertSqliteRow("b-historical", "src_B");
+    const yamlRows = [{ source_id: "src_A", slug: "a", name: "A Name" }];
+
+    const bootstrapRows = loadBootstrapRowsFromSqlite(yamlRows);
+    expect(bootstrapRows).toHaveLength(2);
+
+    mergeBehavior = "all-create";
+    const result = await bootstrapNeo4jSourceNodes(bootstrapRows);
+    expect(result.total).toBe(2);
+
+    // Verify the UNWIND query received BOTH source_ids — not just the YAML one.
+    const run = neo4j.runs.find((r) => r.query.includes("UNWIND $rows"))!;
+    const params = run.params as { rows: Array<{ source_id: string }> };
+    expect(params.rows.map((r) => r.source_id).sort()).toEqual(["src_A", "src_B"]);
   });
 });
 

@@ -23,11 +23,13 @@
 import { seedSources } from "../src/storage/source-registry/seed";
 import {
   bootstrapNeo4jSourceNodes,
+  loadBootstrapRowsFromSqlite,
   preflightSourceRegistry,
   assertSourceRegistryAligned,
   BootstrapPreflightError,
   type PreflightResult,
 } from "../src/storage/source-registry/neo4j-bootstrap";
+import { closeDriver } from "../src/storage/neo4j/connection";
 
 function printPreflight(label: string, r: PreflightResult): void {
   console.log(
@@ -35,7 +37,7 @@ function printPreflight(label: string, r: PreflightResult): void {
   );
 }
 
-async function main(): Promise<void> {
+async function main(): Promise<number> {
   const dryRun = process.argv.includes("--dry-run");
   const neo4j = process.argv.includes("--neo4j");
   const preflightOnly = process.argv.includes("--preflight");
@@ -46,9 +48,9 @@ async function main(): Promise<void> {
     printPreflight("Preflight", result);
     if (!result.aligned) {
       console.error(BootstrapPreflightError.formatMessage(result));
-      process.exit(1);
+      return 1;
     }
-    process.exit(0);
+    return 0;
   }
 
   // SQLite seed (always runs unless preflight-only)
@@ -66,20 +68,29 @@ async function main(): Promise<void> {
   );
 
   if (!neo4j) {
-    process.exit(0);
+    return 0;
   }
 
-  // --neo4j: bootstrap Source nodes from the rows we just seeded.
+  // --neo4j: bootstrap Source nodes for the FULL SQLite slug_map set (not
+  // just current YAML rows). seedSources() is upsert-only and does not
+  // delete historical slug_map rows when a source is removed from YAML;
+  // preflight validates against the full slug_map, so bootstrap must cover
+  // the same set to keep the recovery flow useful (Codex PR #44 P1 fix).
   if (dryRun) {
     console.log(
-      `\nNeo4j bootstrap (dry-run): would MERGE ${result.rows.length} Source nodes (source_id + slug + name + bootstrap_at + updated_at). No graph writes.`
+      `\nNeo4j bootstrap (dry-run): would MERGE ${result.rows.length} Source nodes (source_id + slug + name + bootstrap_at + updated_at). No graph writes. (Non-dry-run resolves the full SQLite slug_map set, including historical sources removed from YAML.)`
     );
-    process.exit(0);
+    return 0;
   }
 
-  const bootstrap = await bootstrapNeo4jSourceNodes(result.rows);
+  const bootstrapRows = loadBootstrapRowsFromSqlite(result.rows);
+  const bootstrap = await bootstrapNeo4jSourceNodes(bootstrapRows);
+  const historical = bootstrapRows.length - result.rows.length;
   console.log(
-    `\nNeo4j bootstrap done. created=${bootstrap.created} matched=${bootstrap.matched} total=${bootstrap.total}`
+    `\nNeo4j bootstrap done. created=${bootstrap.created} matched=${bootstrap.matched} total=${bootstrap.total}` +
+      (historical > 0
+        ? ` (full slug_map coverage: ${result.rows.length} YAML rows + ${historical} historical rows whose slugs are no longer in YAML — name fallback = slug)`
+        : "")
   );
 
   // Auto-preflight after bootstrap — fail-fast if anything is off so the
@@ -88,17 +99,32 @@ async function main(): Promise<void> {
   try {
     const aligned = await assertSourceRegistryAligned();
     printPreflight("Preflight (post-bootstrap)", aligned);
+    return 0;
   } catch (err) {
     if (err instanceof BootstrapPreflightError) {
       printPreflight("Preflight (post-bootstrap)", err.result);
       console.error(err.message);
-      process.exit(1);
+      return 1;
     }
     throw err;
   }
 }
 
-main().catch((err) => {
-  console.error((err as Error).message);
-  process.exit(1);
-});
+// Codex PR #44 P2 fix: close Neo4j driver in CLI cleanup. The neo4j-driver
+// keeps pooled network resources alive until driver.close(), so without
+// this `bun run seed-sources --neo4j` hangs the process after a successful
+// run (or leaks pool resources in automation). Mirrors scripts/migrate.ts.
+async function run(): Promise<void> {
+  let exitCode = 0;
+  try {
+    exitCode = await main();
+  } catch (err) {
+    console.error((err as Error).message);
+    exitCode = 1;
+  } finally {
+    await closeDriver();
+  }
+  process.exit(exitCode);
+}
+
+run();
