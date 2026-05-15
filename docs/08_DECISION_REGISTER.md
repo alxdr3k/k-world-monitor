@@ -66,3 +66,4 @@ validator는 legacy entry를 ID 추적만 하고 invariant scope에서 제외 (w
 | [DEC-021](decisions/DEC-021.md) | accepted | Q-049 | 재방문 정책 + canonical_text_hash semantic diff + ADR-0010 snapshot_diff 정의 |
 | [DEC-022](decisions/DEC-022.md) | accepted | Q-051 (#6 UI stack partial) | Research App `/ops` UI stack — Astro + React island + shadcn/Radix + Tailwind + TanStack + SSE |
 | [DEC-023](decisions/DEC-023.md) | accepted | Q-051 (Round 1 routing default 5항) | no-context error / classifier deferred / advisory-only / fork inheritance / .kwm deferred |
+| [DEC-024](decisions/DEC-024.md) | accepted | Q-052 / Q-053 / Q-054 / Q-056 / Q-058 / Q-059 (resolve) + Q-055 / Q-057 (defer) | 2026-05-15 adversarial review action decisions — PR-only main branch + chunker archive_policy gate + SQLite source_profile canonical + dataset MVP timing 유지 + DEC-005/009/011 유지 + source_role 흡수 + hybrid prioritization |

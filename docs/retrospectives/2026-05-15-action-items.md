@@ -4,7 +4,11 @@
 
 상태: `Status: PROPOSED — retrospective artifact, not canonical register.`
 
-**Q-052~Q-059 ID 는 이미 open placeholder Q file 로 등록됨** (`docs/questions/Q-NNN.md` + `docs/07_QUESTIONS_REGISTER.md` Open TOC — 본 PR scope 안 후속 follow-up commit 에서). 즉 Q ID 자체는 canonical placeholder 상태 — `status: open / resolution: null` 로 운영자 결정 pending.
+**Q-052~Q-059 모두 [DEC-024](../decisions/DEC-024.md) 로 resolution / deferred lock**:
+- **Resolved (6)** = Q-052 / Q-053 / Q-054 / Q-056 / Q-058 / Q-059
+- **Deferred (2)** = Q-055 (re-entry: PUB-1A.5 retrospective) / Q-057 (re-entry: ADR-NNNN (다음 가용 ID) 가칭, EXTR-1A.1 진입 직전)
+
+defer 자체가 명시 결정 (re-entry gate + 조건 lock) — doc drift 방지. 본 PR scope 안 commit 으로 Q files / register / DEC register / action-items 모두 갱신.
 
 **slice ID (`INFRA-1B.3.h1-policy-fix` 등) 는 candidate identifier** — `docs/04_IMPLEMENTATION_PLAN.md` slice 표에 아직 미등록. 본격 canonical 등록은 별도 후속 PR (`PR-canonical-register-2026-05-15` 가칭) 에서:
 
@@ -12,15 +16,15 @@
 - `docs/context/current-state.md` next action = `INFRA-1B.3.h1-policy-fix` 반영
 - 신규 slice 진입 시점 또는 lock 결정 시점에 별도 commit
 
-본 PR (#40) 의 scope = retrospective artifact + Q register Open TOC 갱신 + 운영자 결정 항목 placeholder. 코드 변경 0건.
+본 PR (#40) 의 scope = retrospective artifact + Q-052~Q-059 decision package (DEC-024) + register 갱신. 코드 변경 0건.
 
 ## Execution rule (운영자 attention budget 보호)
 
-본 review 가 발견한 208 + ~80 finding 의 backlog explosion 회피 의무. **Q-059 의 운영자 결정 전까지** 다음 rule 적용:
+본 review 가 발견한 208 + ~80 finding 의 backlog explosion 회피 의무. **[DEC-024 D8 lock](../decisions/DEC-024.md#d8--q-059-attention-budget--p2p3-backlog-처리-정책) 에 따라** 다음 rule 적용:
 
 1. **engineering deliverables (즉시 진행 가능)** = `AI-P0-1` (R2 archive_policy guard) ~ `AI-P1-7` (policy_decisions DB enum + upload_attempt_id) — P0-M2 hardening 핵심.
 2. **engineering doc-sync 보조 (Week 1 안 함께 진행 가능)** = `AI-P1-8` (frontmatter parse fix) ~ `AI-P1-12` (RUNBOOK setup hygiene) — Codex review 2026-05-15 inline #21 feedback: rule #1 의 boundary 와 Week 1 sequence 정합. 두 group 모두 engineering queue 안 active, P0-M2 gate evidence 조건.
-3. **운영자 admin task (병렬)** = Q-052 결정 / SPIKE-001 실행 / Doppler secret rotation cadence — engineering queue 와 별도.
+3. **운영자 admin task (병렬)** = DEC-024 D1 의 GH branch protection 등록 + CLAUDE.md global 갱신 / SPIKE-001 실행 / Doppler secret rotation cadence — engineering queue 와 별도.
 4. **`AI-P2-*` (~22 항목) / `AI-P3-batch-*` (3 batch ~80 finding)** = backlog only. P0-M2 gate accept 전까지 진입 금지. 운영자가 Q-059 resolve 시점 또는 PUB-1A.5 첫 발행 retrospective 시점 promotion 가능.
 5. **L2-* batch (Claude 자체 governance / glossary)** = `INFRA-1A.9-validator-extension` + `INFRA-1A.10-glossary-backfill` slice 안에 묶음 — engineering queue 후반부 또는 P0-M3 entry 직전.
 
@@ -102,7 +106,7 @@
 
 | Task | source | priority |
 |---|---|---|
-| Q-052 결정 후 main branch protection 등록 또는 후퇴 (admin task) | AI-P0-2 | P0 |
+| DEC-024 D1 후속 — GH branch protection 등록 (`gh api -X PUT /repos/.../branches/main/protection ...`) + CLAUDE.md global 의 k-world-monitor 직접 push 예외 제거 또는 break-glass 만 허용 으로 축소 | AI-P0-2 | P0 |
 | SPIKE-001 Neo4j Community local docker setup + bench 실행 + 결과 commit | AI-P1-10 | P1 |
 | Doppler secret rotation cadence 명시 + 4 vendor + Neo4j password rotation procedure RUNBOOK 추가 | Claude L10-K | P2 |
 | `.env` pre-commit hook (env scrub) | AI-P1-12 의 일부 | P2 |
@@ -110,10 +114,10 @@
 
 ## E. 다음 4주 권고 sequence (GPT 4부 + Claude L9-A + Claude L1/L2 우선)
 
-**Week 1 — P0 unlock** (engineering queue 우선, Q-052 는 운영자 admin task 로 병렬):
+**Week 1 — P0 unlock** (engineering queue 우선, DEC-024 D1 admin task 는 운영자 병렬):
 
 운영자 admin task (병렬, engineering queue 비의존):
-- **Q-052 결정** — main branch protection 정책 충돌 resolve. 모든 향후 governance baseline anchor — engineering queue 와 별도로 즉시 진행.
+- **DEC-024 D1 admin task** — GH branch protection 등록 + CLAUDE.md global 갱신. 모든 향후 governance baseline anchor — engineering queue 와 별도로 즉시 진행. (Q-052 자체는 이미 DEC-024 D1 으로 resolved.)
 
 Engineering queue (순서대로):
 1. **AI-P0-1** — `INFRA-1B.3.h1-policy-fix` slice (R2 archive_policy guard + 6 regression tests). **legal-safety P0 — 가장 먼저**.
