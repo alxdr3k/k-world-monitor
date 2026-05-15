@@ -187,6 +187,14 @@ describe("bootstrapNeo4jSourceNodes", () => {
     expect(run.query).toContain("s.bootstrap_at = $now");
     expect(run.query).toContain("ON MATCH SET");
     expect(run.query).toContain("s.updated_at   = $now");
+    // Codex PR #44 review: created/matched attribution must come from a
+    // query-local variable (OPTIONAL MATCH + existing IS NULL), NOT a
+    // permanent `s.created` Source node property. Source node schema
+    // remains minimal (source_id / slug / name / bootstrap_at / updated_at).
+    expect(run.query).toContain("OPTIONAL MATCH (existing:Source");
+    expect(run.query).toContain("existing IS NULL AS was_created");
+    expect(run.query).toContain("RETURN s.source_id AS source_id, was_created AS created");
+    expect(run.query).not.toContain("s.created");
   });
 });
 

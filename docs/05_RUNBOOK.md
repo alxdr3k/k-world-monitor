@@ -326,6 +326,73 @@ RETENTION_PROTECTED_KINDS 항목은 tombstone 생성 단계에서 batch job이 r
 - 적용 중: `bun run migrate` (양쪽 동시), 오류 시 SQLite → WAL checkpoint 후 파일 복구, Neo4j → dump 복구
 - 적용 후: `bun test` 통과 확인
 
+### Source Registry Bootstrap / Preflight (AI-P1-2, INFRA-1B.1.h1-source-bootstrap-neo4j)
+
+`bun run discovery:run` 직전 의무 sequence. snapshot-fingerprint 의
+`MATCH (src:Source {source_id: $sourceId})` runtime guard 가 fail 하면
+큐 row 가 `error_code='source_not_found_in_graph'` 또는 `'runtime_error'`
+로 마크된다 — Source 노드 부재 시 discovery → snapshot E2E 가 실행
+불가. 본 bootstrap sequence 는 그 baseline 을 만든다.
+
+표준 순서 (운영자 manual, 새 환경 또는 schema 변경 후 1회):
+
+```bash
+# 1. SQLite + Neo4j schema apply (idempotent)
+bun run migrate:sqlite
+bun run migrate:neo4j
+
+# 2. Source Registry bootstrap — SQLite policy + slug_map + Neo4j Source 동시화
+#    (default 'bun run seed-sources' 는 SQLite 만 — backward compat)
+bun run seed-sources:neo4j
+
+# 3. discovery → snapshot E2E 실행
+bun run discovery:run
+```
+
+`bun run seed-sources:neo4j` 동작:
+
+- `data/sources_seed.yaml` validate → SQLite seed (slug_map 신규 ULID INSERT + source_material_policy UPSERT)
+- **전체 SQLite `source_registry_slug_map` set** 을 Neo4j Source node 로 UNWIND MERGE — 현재 YAML rows + historical rows (YAML 에서 제거된 slug 도 graph 에 보존, name fallback = slug). Source node properties = `source_id` / `slug` / `name` / `bootstrap_at` / `updated_at` 의 5 필드만 (graph traversal 최소).
+- 자동 preflight: SQLite policy / SQLite slug_map / Neo4j Source 3-way 집합 alignment + null source_id 검출 + duplicate source_id 검출 → mismatch 시 `BootstrapPreflightError` throw + CLI exit 1.
+
+`bun run seed-sources:preflight` (writes 없음, 진단 only):
+
+```
+Preflight: SQLite policy=72, slug_map=72, Neo4j Source=72 → aligned ✓
+```
+
+mismatch 출력 예 (실제 fail 시):
+
+```
+Source registry preflight mismatch (SQLite policy=72, slug_map=72, Neo4j=70):
+  missing in Neo4j (2): src_01ABC..., src_01DEF... — bootstrap 누락
+  ...
+Run `bun run seed-sources --neo4j` to bootstrap missing Source nodes;
+manual investigation required for orphans / null source_id / duplicates.
+```
+
+운영자 failure mode 대응:
+
+| mismatch axis | 원인 | 대응 |
+|---|---|---|
+| `missingInNeo4j` | `seed-sources:neo4j` 미실시 또는 part-runs | `bun run seed-sources:neo4j` 1회 재실행 (idempotent, MERGE) |
+| `orphanInNeo4j` | Neo4j 에 registry 외 Source 노드 존재 (manual Cypher 또는 legacy fixture) | manual investigation — `MATCH (s:Source {source_id: '<id>'}) DETACH DELETE s` 또는 SQLite slug_map 에 누락 entry 추가 |
+| `policyVsSlugMap.{onlyInPolicy, onlyInSlugMap}` | SQLite 상태 corruption (분리된 INSERT 또는 partial migration) | DB 백업 확보 후 diff 분석 — 정상 운영 중 발생 X (seed.ts upsert 가 두 table 을 동시 채움) |
+| `neo4jNodesMissingSourceId` | pre-constraint historical data 또는 manual Cypher mistake — `:Source` 노드에 `source_id` 미설정 | `MATCH (s:Source) WHERE s.source_id IS NULL RETURN s` → manual delete 또는 source_id 보정 |
+| `neo4jDuplicateSourceIds[]` | pre-constraint historical data (v1 schema `source_unique` 적용 BEFORE 노드가 만들어진 경우) | manual dedupe — `MATCH (s:Source) WITH s.source_id AS id, collect(s) AS dups WHERE size(dups) > 1 RETURN id, dups` 후 1개 survivor 유지, 나머지 DETACH DELETE. `migrate:neo4j` 재실행으로 `source_unique` 재검증 |
+| `bun run migrate:sqlite` 미실시 (table not found error) | `source_material_policy` 또는 `source_registry_slug_map` table 부재 | `bun run migrate:sqlite` 후 재실행 |
+| Neo4j password / connectivity | `NEO4J_PASSWORD` env 또는 daemon 미기동 | `.env.example` 참조 + Neo4j Community 데몬 기동 확인 |
+
+향후 `data/sources_seed.yaml` 변경 시 (신규 source 추가 / 기존 source 정책 변경):
+
+```bash
+bun run seed-sources:neo4j   # 신규 source = MERGE created, 기존 = MERGE matched (idempotent)
+```
+
+본 bootstrap 은 single-operator 가정 (v0 turn-key). multi-worker race 가
+도입되면 별도 hardening slice (`INFRA-1B.3.x` P1-M2-hardening) 의 worker_id
+CAS 패턴과 함께 재검토 의무.
+
 ### 복구 절차
 
 **Neo4j 복구:**

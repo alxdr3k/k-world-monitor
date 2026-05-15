@@ -195,24 +195,28 @@ export async function bootstrapNeo4jSourceNodes(
 
   return withSession(async (session) => {
     // Single UNWIND batch: keeps the round-trip count to 1 for typical 72-row
-    // seeds. Returns the per-row `created` boolean so we can report
-    // created-vs-matched counts (operator confidence that idempotent re-runs
-    // do not silently inflate the graph).
+    // seeds. `was_created` is computed as a query-local variable via
+    // OPTIONAL MATCH BEFORE the MERGE, so we can report created-vs-matched
+    // counts WITHOUT storing the boolean as a Source node property (Codex
+    // PR #44 review: transient reporting flag must not become a permanent
+    // graph property — keeps Source node properties minimal per the slice
+    // contract: source_id, slug, name, bootstrap_at, updated_at). The CLI
+    // is single-operator so no race between OPTIONAL MATCH and MERGE.
     const result = await session.run(
       `UNWIND $rows AS row
+       OPTIONAL MATCH (existing:Source {source_id: row.source_id})
+       WITH row, existing IS NULL AS was_created
        MERGE (s:Source {source_id: row.source_id})
        ON CREATE SET
          s.slug         = row.slug,
          s.name         = row.name,
          s.bootstrap_at = $now,
-         s.updated_at   = $now,
-         s.created      = true
+         s.updated_at   = $now
        ON MATCH SET
          s.slug         = row.slug,
          s.name         = row.name,
-         s.updated_at   = $now,
-         s.created      = false
-       RETURN s.source_id AS source_id, s.created AS created`,
+         s.updated_at   = $now
+       RETURN s.source_id AS source_id, was_created AS created`,
       { rows: rows.map((r) => ({ source_id: r.source_id, slug: r.slug, name: r.name })), now }
     );
 

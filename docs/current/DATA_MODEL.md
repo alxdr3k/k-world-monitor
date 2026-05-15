@@ -103,7 +103,10 @@ The **logical Source Registry** spans two stores. GPT round 1 review on PR #37 (
 
 1. `data/sources_seed.yaml` (72 Tier A sources, INFRA-1A.6) 가 seed input.
 2. `bun run seed-sources` (= `scripts/seed-sources.ts` → `src/storage/source-registry/seed.ts` `seedSources()`) 는 **SQLite 만** 채운다: `source_registry_slug_map` 에 slug 마다 `src_<ULID>` INSERT + `source_material_policy` UPSERT (INFRA-1B.1).
-3. Neo4j `Source` 노드 생성은 **현재 코드 미구현** — `src/discovery/worker/snapshot-fingerprint.ts` 의 `createDocumentAndSnapshot()` 안 P1-3 guard 가 `MATCH (src:Source {source_id: $sourceId})` 결과 0건이면 plain `Error("Source not found in graph: <source_id>")` 로 throw, `processOneRow()` 가 비-typed exception 을 받아 큐 row 를 `error_code='runtime_error'` 로 마크한다 (`createDocumentAndSnapshot` 은 `TypedQueueError` 를 던지지 않음). 단 dedup link path 의 `ensureSourceLinkage()` 가 missing Source 를 발견했을 때만 `TypedQueueError('source_not_found_in_graph')` 를 던져 `error_code='source_not_found_in_graph'` 로 마크된다 (Codex round 2 P2 review). 따라서 두 경로 가 서로 다른 error_code 로 관찰되며, 운영자 alert 설정 시 두 코드 모두 cover 의무. 디스커버리 실행 전 Neo4j Source 노드는 별도 path 로 bootstrap 되어 있어야 한다 — 후속 슬라이스 (INFRA-1B.2+ 안에서 추가 예정, 현재 slice 표 미등록) 또는 운영자 manual Cypher 가 필요. `seedSources()` 가 SQLite 쪽 슬러그 매핑만 채우고 Neo4j 측 노드는 채우지 않는다는 사실은 idempotent dry-run 운용 의도이지 design oversight 가 아님 (DEC-015).
+3. **Neo4j `Source` 노드 bootstrap** — `bun run seed-sources:neo4j` (`scripts/seed-sources.ts --neo4j` → `src/storage/source-registry/neo4j-bootstrap.ts`) 가 SQLite seed 후 **모든 `source_registry_slug_map` row** (현재 YAML rows + historical rows whose slugs are no longer in YAML — Codex PR #44 P1 fix) 를 단일 UNWIND MERGE 로 Neo4j Source nodes 로 bootstrap. Source node properties 의도적 최소: `source_id` (UNIQUE, v1 `source_unique` constraint), `slug`, `name` (YAML name 우선, historical rows 는 slug fallback), `bootstrap_at` (ON CREATE), `updated_at` (ON CREATE + ON MATCH). 전체 source profile metadata (`publisher_name` / `urls_root[]` / `reliability_tier` / `collectability_score{}` / `access_method` / `source_perspective` / `meta_category` / `subtopic_tags[]`) 는 **AI-P1-4** (`INFRA-1B.1.h2-source-profile`, Q-054 D3 + Q-058 D7 — SQLite `source_profile` canonical store + Neo4j projection) slice 영역 — 본 slice 에서 pre-empt 금지. 슬라이스 = `INFRA-1B.1.h1-source-bootstrap-neo4j` (AI-P1-2, PR #44 landed 2026-05-15).
+   - `bun run seed-sources:preflight` — SQLite policy / SQLite slug_map / Neo4j Source 3-way 집합 alignment 검증. `missingInNeo4j` / `orphanInNeo4j` / `policyVsSlugMap.{onlyInPolicy, onlyInSlugMap}` 4 axis + `neo4jNodesMissingSourceId` (null source_id 노드 카운트, Codex PR #44 P2) + `neo4jDuplicateSourceIds[]` (pre-constraint historical duplicates, Codex PR #44 P2) 검출. fail 시 `BootstrapPreflightError` throw → CLI exit 1 + actionable repair hint.
+   - **runtime guard 잔존 의의**: bootstrap 단계 누락 시 `src/discovery/worker/snapshot-fingerprint.ts` 의 `createDocumentAndSnapshot()` P1-3 guard 가 `MATCH (src:Source {source_id: $sourceId})` 결과 0건이면 plain `Error("Source not found in graph: <source_id>")` throw, `processOneRow()` 가 비-typed exception 을 받아 큐 row 를 `error_code='runtime_error'` 로 마크한다. 단 dedup link path 의 `ensureSourceLinkage()` 는 `TypedQueueError('source_not_found_in_graph')` 를 던져 `error_code='source_not_found_in_graph'` 로 마크. **두 경로 의 error_code 통일은 별도 slice** `INFRA-1B.3.h2-queue-cli` (AI-P1-3) 영역.
+   - `seedSources()` default (no `--neo4j` flag) 는 SQLite seed only — backward compat 유지 (idempotent dry-run / migration 적용 전 plan-print 용). Neo4j bootstrap 은 명시 flag 의무.
 4. `data/sources_seed.yaml` 은 의도적으로 Neo4j fixture loader 가 **아니다**. YAML 은 2-store seam 의 bootstrap input 이지 canonical store 자체가 아니다.
 
 ### FK seam contract
@@ -148,11 +151,15 @@ All prefixes enforced at Neo4j (UNIQUE constraint) and in TEST-005 (`tests/lint/
   decisions.ts` + v7 ALTER intended_action + snapshot-fingerprint 2 call
   site hooks + 16 unit tests + 8 integration tests + audit hard gate
   policy via auditR2UploadOrThrow).
-- INFRA-1B.2-source-bootstrap (planned) — Neo4j `Source` 노드 자동 생성
-  CLI 또는 bootstrap migration. 현재 seedSources() 는 SQLite 만 채우고
-  discovery worker 는 Source 부재 시 throw 하므로 운영자가 별도 Cypher
-  로 bootstrap 필요 (PR #38 reviewer 권고). discovery:run preflight 에
-  SQLite source_id 중 Neo4j Source 누락 건수 fail-fast check 도 함께.
+- ~~INFRA-1B.2-source-bootstrap (planned)~~ — **closed by
+  `INFRA-1B.1.h1-source-bootstrap-neo4j` / PR #44** (AI-P1-2, 2026-05-15).
+  Neo4j `Source` 노드 bootstrap CLI (`bun run seed-sources:neo4j`) +
+  3-way preflight (`bun run seed-sources:preflight` / auto-after-bootstrap)
+  + `BootstrapPreflightError` fail-fast all landed. `src/storage/source-
+  registry/neo4j-bootstrap.ts` + `tests/unit/neo4j_bootstrap_test.ts`
+  (23 tests). canonical slice 등록 (slice ID rename `INFRA-1B.2-source-
+  bootstrap` → `INFRA-1B.1.h1-source-bootstrap-neo4j`, IMPL_PLAN slice
+  표 row) 는 별도 PR `PR-canonical-register-2026-05-15` 가칭 영역.
 - `set_r2_key_failed_neo4j` repair job (planned) — INFRA-1B.3.x-audit
   의 후속. audit ledger 의 `set_r2_key_failed_neo4j` row 를 스캔해 r2
   object 가 존재하지만 Snapshot.r2_key=null 인 케이스에 대해 SET
