@@ -33,12 +33,24 @@ const SQLITE_MIGRATIONS: Array<{ version: string; file: string }> = [
   { version: "v7", file: "migrations/sqlite/v7_policy_decisions_intended_action.sql" },
 ];
 
+// Parse "v<N>" → integer for numeric comparison. Lexicographic string compare
+// ("v10" < "v2") breaks once v10 lands; align all version arithmetic on the
+// numeric SUBSTR pattern that getMigrationVersion() already uses (Codex PR
+// #39 reviewer P2/P3).
+function versionNum(v: string | null): number {
+  if (!v) return 0;
+  const n = Number(v.replace(/^v/, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
 async function migrateSqlite(): Promise<void> {
   const { getDb, getMigrationVersion } = await import("../src/storage/sqlite/connection");
 
   if (dryRun) {
     const current = getMigrationVersion();
-    const pending = SQLITE_MIGRATIONS.filter((m) => m.version > (current ?? ""));
+    const pending = SQLITE_MIGRATIONS.filter(
+      (m) => versionNum(m.version) > versionNum(current)
+    );
     if (pending.length === 0) {
       console.log("[SQLite] --dry-run: already at latest version.");
     } else {
@@ -51,7 +63,7 @@ async function migrateSqlite(): Promise<void> {
 
   for (const migration of SQLITE_MIGRATIONS) {
     const current = getMigrationVersion();
-    if (current !== null && current >= migration.version) {
+    if (current !== null && versionNum(current) >= versionNum(migration.version)) {
       console.log(`[SQLite] Already at ${current} — skipping ${migration.version}.`);
       continue;
     }

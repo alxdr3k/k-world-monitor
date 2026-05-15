@@ -41,6 +41,17 @@ function registerHandlers() {
     ok({ doc_id: mergeDocIdOverride ?? (params["docId"] as string) })
   );
 
+  // SET s.r2_key handler registered BEFORE the broader Snapshot handler so it
+  // wins the first-match dispatch in createNeo4jMock. Throws when
+  // neo4jSetShouldThrow=true so audit-hook tests can exercise the
+  // set_r2_key_failed_neo4j branch deterministically.
+  neo4j.session.on(/SET s\.r2_key/, () => {
+    if (neo4jSetShouldThrow) {
+      throw new Error("simulated Neo4j SET s.r2_key failure");
+    }
+    return ok({});
+  });
+
   neo4j.session.on(/collect\(DISTINCT src\.source_id\)/, () => {
     allLinkedSourcesCallCount++;
     // First call = pre-r2Put check (always allowed). Subsequent calls =
@@ -73,9 +84,14 @@ const neo4jRuns = neo4j.runs as ReadonlyArray<{ query: string; params: Record<st
 // ---------------------------------------------------------------------------
 
 const r2Puts: Array<{ key: string }> = [];
+let r2PutShouldThrow = false;
+let neo4jSetShouldThrow = false;
 
 mock.module("../../src/storage/r2/client", () => ({
   r2Put: async (key: string, _data: ArrayBuffer) => {
+    if (r2PutShouldThrow) {
+      throw new Error("simulated r2Put failure");
+    }
     r2Puts.push({ key });
     return { key, sha256: "mock-sha256", byteSize: 4 };
   },
@@ -199,8 +215,42 @@ beforeEach(() => {
   mergeDocIdOverride = null;
   policyRevertsAfterR2Put = false;
   allLinkedSourcesCallCount = 0;
+  r2PutShouldThrow = false;
+  neo4jSetShouldThrow = false;
   setupDb();
 });
+
+// ---------------------------------------------------------------------------
+// Audit row inspector for INFRA-1B.3.x-audit integration tests.
+// ---------------------------------------------------------------------------
+
+interface AuditRow {
+  decision: string;
+  source_id: string | null;
+  url: string | null;
+  trigger_type: string;
+  policy_gate_mode: string;
+  intended_action: string | null;
+  rationale: string | null;
+}
+
+function readAuditRows(): AuditRow[] {
+  // require() typing flattens to any, which breaks .query<T,P>() generics;
+  // use an explicit cast so the returned rows keep their AuditRow shape.
+  const conn = require("../../src/storage/sqlite/connection") as {
+    getDb: () => import("bun:sqlite").Database;
+  };
+  return conn
+    .getDb()
+    .query<AuditRow, []>(
+      `SELECT decision, source_id, url, trigger_type, policy_gate_mode,
+              intended_action, rationale
+       FROM policy_decisions
+       WHERE intended_action = 'r2_upload'
+       ORDER BY decision_id`
+    )
+    .all();
+}
 
 // ---------------------------------------------------------------------------
 // createSnapshotFingerprint — new snapshot
@@ -577,5 +627,123 @@ describe("createSnapshotFingerprint — r2 orphan back-fill", () => {
     expect(setPatch).toBeUndefined();
     // Result reflects no r2 association from the caller's perspective.
     expect(result.r2Key).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// INFRA-1B.3.x-audit caller-hook integration tests.
+//
+// Audit module unit tests (tests/unit/audit_policy_decisions_test.ts) verify
+// recordR2UploadDecision INSERT shape. These tests verify the OTHER half of
+// the contract: that every r2Put call site in snapshot-fingerprint emits the
+// right audit row sequence under each operational scenario (Codex PR #39
+// reviewer P2 — caller hook tests).
+// ---------------------------------------------------------------------------
+
+describe("createSnapshotFingerprint — audit hook integration (INFRA-1B.3.x-audit)", () => {
+  it("new snapshot + allowed policy → attempted + uploaded audit rows", async () => {
+    const db = setupDb();
+    seedQueue(db, "dq_audit_new");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_audit_new"));
+
+    expect(result.deduplicated).toBe(false);
+    expect(r2Puts).toHaveLength(1);
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "uploaded"]);
+    for (const row of audit) {
+      expect(row.intended_action).toBe("r2_upload");
+      expect(row.trigger_type).toBe("r2_upload");
+      expect(row.policy_gate_mode).toBe("batch_report");
+      expect(row.source_id).toBe("src-1");
+    }
+  });
+
+  it("dedup back-fill + allowed policy → attempted + uploaded audit rows", async () => {
+    findExistingResult = { snapId: "snap_dedup_audit", r2Key: null };
+    const db = setupDb();
+    seedQueue(db, "dq_audit_dedup");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_audit_dedup"));
+
+    expect(result.deduplicated).toBe(true);
+    expect(r2Puts).toHaveLength(1);
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "uploaded"]);
+    expect(audit[0]!.rationale).toContain("dedup back-fill");
+  });
+
+  it("dedup back-fill TOCTOU rejected → attempted + skipped_toctou, no SET r2_key", async () => {
+    findExistingResult = { snapId: "snap_audit_toctou", r2Key: null };
+    policyRevertsAfterR2Put = true;
+    const db = setupDb();
+    seedQueue(db, "dq_audit_toctou");
+
+    await createSnapshotFingerprint(baseInput("dq_audit_toctou"));
+
+    expect(r2Puts).toHaveLength(1);
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
+    const setPatch = neo4j.runs.find(
+      (r) => r.via === "session" && /SET s\.r2_key/.test(r.query)
+    );
+    expect(setPatch).toBeUndefined();
+  });
+
+  it("archive_policy=metadata_only → no r2Put + no audit rows (audit-by-absence)", async () => {
+    const db = setupDb();
+    seedQueue(db, "dq_audit_meta");
+
+    await createSnapshotFingerprint({
+      ...baseInput("dq_audit_meta"),
+      archivePolicy: "metadata_only",
+    });
+
+    expect(r2Puts).toHaveLength(0);
+    expect(readAuditRows()).toHaveLength(0);
+  });
+
+  it("raw_cloud_policy=always_prohibited → no r2Put + no audit rows", async () => {
+    const db = setupDb();
+    seedQueue(db, "dq_audit_prohibited");
+
+    await createSnapshotFingerprint({
+      ...baseInput("dq_audit_prohibited"),
+      rawCloudPolicy: "always_prohibited",
+    });
+
+    expect(r2Puts).toHaveLength(0);
+    expect(readAuditRows()).toHaveLength(0);
+  });
+
+  it("r2Put throw → only attempted audit row, queue marked error", async () => {
+    r2PutShouldThrow = true;
+    const db = setupDb();
+    seedQueue(db, "dq_audit_r2_throw");
+
+    await expect(
+      createSnapshotFingerprint(baseInput("dq_audit_r2_throw"))
+    ).rejects.toThrow(/simulated r2Put failure/);
+
+    expect(r2Puts).toHaveLength(0); // pushed only on success
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted"]);
+  });
+
+  it("Neo4j SET r2_key throw → attempted + set_r2_key_failed_neo4j audit rows", async () => {
+    neo4jSetShouldThrow = true;
+    const db = setupDb();
+    seedQueue(db, "dq_audit_set_throw");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_audit_set_throw"));
+
+    expect(r2Puts).toHaveLength(1); // r2Put succeeded
+    expect(result.r2Key).toBeNull(); // SET failed → r2Key stays null
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual([
+      "attempted",
+      "set_r2_key_failed_neo4j",
+    ]);
+    expect(audit[1]!.rationale).toContain("simulated Neo4j SET");
   });
 });

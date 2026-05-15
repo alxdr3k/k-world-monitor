@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: eb283e9 (2026-05-14) — INFRA-1B.3.x-audit landed (R2 upload audit ledger, v7 migration, +16 audit unit tests = 490 → 506 tests total, AC-032 / NFR-008 evidence). Previous code baseline = 0a76d31 (2026-05-13). Thin-doc edits since 0a76d31 → this commit chain: 5aa70ac → ceaa17c → 38b846d → c7b9088 (PR #37 squash-merged as 18abf8f) → eb283e9 (Option C INFRA-1B.3.x-audit code commit: +tests/unit/audit_policy_decisions_test.ts 16 tests + tests/unit/snapshot_fingerprint_test.ts setup 갱신, PR #39 doc-freshness check 응답).
+> Last verified against code: e029d51 (2026-05-14) — INFRA-1B.3.x-audit landed + PR #39 reviewer P1+P2 batch (R2 upload audit ledger, v7 migration, +16 audit unit tests + 7 audit-hook integration tests = 490 → 513 tests total, AC-032 / NFR-008 evidence). Previous code baseline = 0a76d31 (2026-05-13). Thin-doc edits since 0a76d31 → this commit chain: 5aa70ac → ceaa17c → 38b846d → c7b9088 (PR #37 squash-merged as 18abf8f) → e029d51 (Option C INFRA-1B.3.x-audit + reviewer P1 new-path TOCTOU fix + reviewer P2 numeric version compare + reviewer P2 set_r2_key_failed_neo4j comment 정정 + reviewer P2 caller-hook integration tests + reviewer P2 Q-044 closed + INFRA-1B.2-source-bootstrap planned).
 
 ## Testing policy
 
@@ -55,7 +55,7 @@ bun run invariant:write
 |---|---|---|---|---|
 | install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
 | typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
-| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 19 file / 506 cases — Bun native runner (INFRA-1B.3.x-audit landed: +tests/unit/audit_policy_decisions_test.ts 16 tests) |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 19 file / 513 cases — Bun native runner (INFRA-1B.3.x-audit landed: +tests/unit/audit_policy_decisions_test.ts 16 tests + 7 integration tests in snapshot_fingerprint_test.ts) |
 | migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v7 schema files parse (v7 = policy_decisions ADD COLUMN intended_action, INFRA-1B.3.x-audit) |
 | invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
@@ -109,8 +109,8 @@ advisory).
 - PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
   으로 (1) workflow exists stage 진입.
-- 코드 테스트 (`bun test`) 는 19 file / 506 케이스 — Bun native runner
-  1 분 이내 expected (INFRA-1B.3.x-audit landed 2026-05-14: +audit_policy_decisions_test.ts 16 tests).
+- 코드 테스트 (`bun test`) 는 19 file / 513 케이스 — Bun native runner
+  1 분 이내 expected (INFRA-1B.3.x-audit landed 2026-05-14: +audit_policy_decisions_test.ts 16 tests + 7 audit hook integration tests in snapshot_fingerprint_test.ts).
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR

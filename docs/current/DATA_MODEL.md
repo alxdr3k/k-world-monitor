@@ -1,6 +1,6 @@
 # Data Model
 
-> Last verified against code: eb283e9647a7ca77ee18aacdfd6be41fb7f6113e (2026-05-14) — INFRA-1B.3.x-audit landed (R2 upload audit ledger, v7 migration ADD COLUMN intended_action, AC-032 / NFR-008 evidence, Q-044 → DEC-020 / TRACE-040). Previous code baseline = 0a76d31 (2026-05-13). Thin-doc edits since 0a76d31 → this commit chain: 5aa70ac → ceaa17c → 38b846d → c7b9088 (PR #37 squash-merged to main as 18abf8f) → fa90659 (PR #38 round 0) → 2c629dc (PR #38 Codex round 1 fix) → c61a752 (PR #38 Codex round 2 fix) → 0d92b3c (PR #38 Codex round 3 P2 fix — Source node properties → v0 landed schema) → 5b5351e (PR #38 Codex round 4 P2 fix — access_method 제거 + seedSources flatten 표현 → drop 정정) → d5554a8 (PR #38 Codex round 5 P2 fix — HLD Components row flatten 표현 통일) → this commit (Option C INFRA-1B.3.x-audit: 코드 변경 commit — `src/storage/audit/policy-decisions.ts` 신규, `src/utils/enums.ts` `INTENDED_ACTION` + `R2_UPLOAD_DECISION`, `src/discovery/worker/snapshot-fingerprint.ts` 2 call site audit hooks, `migrations/sqlite/v7_policy_decisions_intended_action.sql`, `scripts/migrate.ts` v7 등록, `tests/unit/audit_policy_decisions_test.ts` 16 tests + `tests/unit/snapshot_fingerprint_test.ts` policy_decisions setup 갱신).
+> Last verified against code: e029d5199a371699e54fd9399566e8c9bd4c3ae7 (2026-05-14) — INFRA-1B.3.x-audit landed (R2 upload audit ledger, v7 migration ADD COLUMN intended_action, AC-032 / NFR-008 evidence, Q-044 → DEC-020 / TRACE-040). Previous code baseline = 0a76d31 (2026-05-13). Thin-doc edits since 0a76d31 → this commit chain: 5aa70ac → ceaa17c → 38b846d → c7b9088 (PR #37 squash-merged to main as 18abf8f) → fa90659 (PR #38 round 0) → 2c629dc (PR #38 Codex round 1 fix) → c61a752 (PR #38 Codex round 2 fix) → 0d92b3c (PR #38 Codex round 3 P2 fix — Source node properties → v0 landed schema) → 5b5351e (PR #38 Codex round 4 P2 fix — access_method 제거 + seedSources flatten 표현 → drop 정정) → d5554a8 (PR #38 Codex round 5 P2 fix — HLD Components row flatten 표현 통일) → this commit (Option C INFRA-1B.3.x-audit: 코드 변경 commit — `src/storage/audit/policy-decisions.ts` 신규, `src/utils/enums.ts` `INTENDED_ACTION` + `R2_UPLOAD_DECISION`, `src/discovery/worker/snapshot-fingerprint.ts` 2 call site audit hooks, `migrations/sqlite/v7_policy_decisions_intended_action.sql`, `scripts/migrate.ts` v7 등록, `tests/unit/audit_policy_decisions_test.ts` 16 tests + `tests/unit/snapshot_fingerprint_test.ts` policy_decisions setup 갱신).
 
 ## Source of truth
 
@@ -143,5 +143,16 @@ All prefixes enforced at Neo4j (UNIQUE constraint) and in TEST-005 (`tests/lint/
 - Q-041 / DEPLOY-1A.2 — millis-bearing ISO timestamp 통일 + CHECK constraint
   적용 (현재 discovery_queue 는 strftime no-millis, crawl_state 는
   millis-bearing — 통일 전 단계)
-- Q-044 — policy_decisions 의 R2 upload audit row INSERT 위치 결정 후
-  recordR2UploadDecision() 도입 시 본 표 갱신
+- ~~Q-044 — recordR2UploadDecision() 도입~~ — **closed by INFRA-1B.3.x-audit
+  / PR #39** (R2 upload audit ledger landed: `src/storage/audit/policy-
+  decisions.ts` + v7 ALTER intended_action + snapshot-fingerprint 2 call
+  site hooks + 16 unit tests + 7 integration tests).
+- INFRA-1B.2-source-bootstrap (planned) — Neo4j `Source` 노드 자동 생성
+  CLI 또는 bootstrap migration. 현재 seedSources() 는 SQLite 만 채우고
+  discovery worker 는 Source 부재 시 throw 하므로 운영자가 별도 Cypher
+  로 bootstrap 필요 (PR #38 reviewer 권고). discovery:run preflight 에
+  SQLite source_id 중 Neo4j Source 누락 건수 fail-fast check 도 함께.
+- `set_r2_key_failed_neo4j` repair job (planned) — INFRA-1B.3.x-audit
+  의 후속. audit ledger 의 `set_r2_key_failed_neo4j` row 를 스캔해 r2
+  object 가 존재하지만 Snapshot.r2_key=null 인 케이스에 대해 SET
+  back-patch 를 재시도하는 CLI (`pipeline repair r2-orphan` 류).

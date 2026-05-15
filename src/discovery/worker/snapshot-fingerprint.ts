@@ -536,11 +536,16 @@ export async function createSnapshotFingerprint(
       }
       if (stillAllowed) {
         // SET r2_key is best-effort: if Neo4j is unavailable here the r2 object
-        // already exists, the Snapshot node still has r2_key=null, and a later
-        // retry will dedup-match and back-fill via the same idempotent path
-        // (r2Put overwrites by key). Treat the SET failure as a soft warning
-        // rather than escalating to markQueueItemError (which would inflate
-        // the failure counter and mislead operators about a real outage).
+        // already exists, the Snapshot node still has r2_key=null. Recovery is
+        // NOT automatic — the current queue row is marked done below, so
+        // back-fill only happens if a future dedup hit comes in for the same
+        // content_hash via the dedup back-fill path (r2Put overwrites by key)
+        // OR an operator runs a repair job that scans set_r2_key_failed_neo4j
+        // audit rows and replays the SET (TODO follow-up slice). Treat the
+        // SET failure as a soft warning rather than escalating to
+        // markQueueItemError (which would inflate the failure counter and
+        // mislead operators about a real outage), but record the
+        // set_r2_key_failed_neo4j audit row so the repair job has a worklist.
         //
         // The audit insert is intentionally OUTSIDE this try/catch so an
         // audit failure (e.g. transient SQLite lock) is not mis-attributed
@@ -559,7 +564,7 @@ export async function createSnapshotFingerprint(
         } catch (setErr) {
           console.warn(
             `[snapshot] dedup r2_key back-patch failed for ${existing.snapId}; ` +
-              `r2 object uploaded, retry will back-fill:`,
+              `r2 object exists, future dedup retry or repair job required:`,
             setErr instanceof Error ? setErr.message : setErr
           );
           setError = setErr;
@@ -624,21 +629,35 @@ export async function createSnapshotFingerprint(
   // P2-9 addendum: After Neo4j write, upload to R2 and then back-patch the
   // Snapshot node's r2_key so the stored graph reflects the actual R2 locator.
   //
-  // R5 P1 — MERGE race cross-source guard: when `actualSnapId !== snapId`, the
-  // MERGE matched a Snapshot created by a concurrent worker that may have
-  // linked the node to a Source whose raw_cloud_policy is `always_prohibited`.
-  // Re-run the cross-source policy check (same guard as the dedup back-fill
-  // path) so we never grant an r2_key to a snapshot already shared with a
-  // prohibited source.
+  // INV-0012-3 TOCTOU close (Codex PR #39 reviewer P1): cross-source policy
+  // MUST be checked both BEFORE and AFTER r2Put, regardless of whether
+  // createDocumentAndSnapshot's MERGE matched an existing Snapshot. Even on
+  // the first-create branch (`actualSnapId === snapId`), the window between
+  // Neo4j commit and r2_key SET allows a concurrent worker to dedup-link a
+  // prohibited source — `existing.r2Key === null` during this window means
+  // the dedup path's `dedup_prohibited_source` guard does not fire, so a
+  // prohibited source can attach to a not-yet-r2-backed Snapshot, and our
+  // unconditional SET would retroactively give that source an r2_key.
+  // The previous `!mergeMatchedExisting → stillAllowed = true` short-circuit
+  // failed to close this window.
   let r2Key: string | null = null;
   if (
     input.archivePolicy === "full_snapshot_allowed" &&
     input.rawCloudPolicy === "allowed_public_data_only"
   ) {
     const mergeMatchedExisting = actualSnapId !== snapId;
-    const policyOk =
-      !mergeMatchedExisting ||
-      (await allLinkedSourcesAllowRawCloud(actualSnapId));
+    // Pre-r2Put cross-source check — always required. A recheck throw is
+    // treated as "not allowed" so we fail safe (no r2Put attempted).
+    let policyOk: boolean;
+    try {
+      policyOk = await allLinkedSourcesAllowRawCloud(actualSnapId);
+    } catch (preCheckErr) {
+      console.warn(
+        `[snapshot] new-path pre-r2Put policy check failed; skipping r2Put for safety:`,
+        preCheckErr instanceof Error ? preCheckErr.message : preCheckErr
+      );
+      policyOk = false;
+    }
     if (policyOk) {
       const key = `permitted_artifact/derived/snapshot/${actualSnapId}`;
       const bodyBuf = input.body.buffer.slice(
@@ -659,35 +678,37 @@ export async function createSnapshotFingerprint(
           : "new-path; first create",
       });
       await r2Put(key, bodyBuf);
-      // ADR-0012 INV-0012-3 TOCTOU close (MERGE-matched branch only): if our
-      // Snapshot CREATE collided with a concurrent worker, re-check policy
-      // after r2Put. If a linker attached a prohibited source between the
-      // first check and now, skip the SET so r2_key stays null. See the
-      // dedup-backfill path above for the rationale on NOT r2Delete'ing here
-      // (avoids wiping a concurrent legitimate re-upload of the same key).
-      // A re-check throw is treated as "not allowed" so we fail safe — the
-      // prohibited source must never see a SET back-patched r2_key.
+      // ADR-0012 INV-0012-3 TOCTOU close — Codex PR #39 reviewer P1 fix.
+      // Re-check linked-source policy after r2Put completes, REGARDLESS of
+      // mergeMatchedExisting. A prohibited source can be attached to either
+      // a MERGE-matched existing Snapshot (concurrent worker race) OR a
+      // freshly-created Snapshot (between Neo4j commit and r2_key SET window
+      // — dedup-link path skips its dedup_prohibited_source guard while
+      // r2_key is still null). The previous mergeMatchedExisting short-circuit
+      // failed to close the first-create case. If a re-check throws (transient
+      // Neo4j blip), fail safe — prohibited source must never see a SET-back-
+      // patched r2_key. r2Delete'ing the orphan object is intentionally NOT
+      // done here to avoid wiping a concurrent legitimate re-upload of the
+      // same idempotent key (the orphan is bounded — future retry back-fills).
       let stillAllowed: boolean;
-      if (!mergeMatchedExisting) {
-        stillAllowed = true;
-      } else {
-        try {
-          stillAllowed = await allLinkedSourcesAllowRawCloud(actualSnapId);
-        } catch (recheckErr) {
-          console.warn(
-            `[snapshot] new-path post-r2Put policy recheck failed; leaving r2_key=null for safety:`,
-            recheckErr instanceof Error ? recheckErr.message : recheckErr
-          );
-          stillAllowed = false;
-        }
+      try {
+        stillAllowed = await allLinkedSourcesAllowRawCloud(actualSnapId);
+      } catch (recheckErr) {
+        console.warn(
+          `[snapshot] new-path post-r2Put policy recheck failed; leaving r2_key=null for safety:`,
+          recheckErr instanceof Error ? recheckErr.message : recheckErr
+        );
+        stillAllowed = false;
       }
       if (stillAllowed) {
         // SET r2_key is best-effort (same rationale as the dedup back-fill
-        // path above): a Neo4j failure here is non-fatal because the r2 object
-        // exists and the next dedup-matched retry will back-fill via the same
-        // idempotent key. Escalating to markQueueItemError would inflate the
-        // failure counter for a transient Neo4j blip even though graph + r2
-        // are recoverable.
+        // path above): a Neo4j failure here leaves the r2 object orphaned
+        // relative to Neo4j (r2 has the bytes, Snapshot.r2_key=null). Recovery
+        // requires a future dedup hit for the same content_hash OR an operator-
+        // run repair job over set_r2_key_failed_neo4j audit rows. Escalating
+        // to markQueueItemError would inflate the failure counter for a
+        // transient Neo4j blip even though graph + r2 are recoverable via
+        // the audit ledger.
         //
         // The audit insert is intentionally OUTSIDE this try/catch so an
         // audit failure (e.g. transient SQLite lock) is not mis-attributed
@@ -706,7 +727,7 @@ export async function createSnapshotFingerprint(
         } catch (setErr) {
           console.warn(
             `[snapshot] new-path r2_key back-patch failed for ${actualSnapId}; ` +
-              `r2 object uploaded, retry will back-fill:`,
+              `r2 object exists, future dedup retry or repair job required:`,
             setErr instanceof Error ? setErr.message : setErr
           );
           setError = setErr;
