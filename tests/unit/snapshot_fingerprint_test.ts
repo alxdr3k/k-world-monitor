@@ -27,10 +27,22 @@ let sourceMissingOnGuard = false;
 // and returns this value — simulating Neo4j's ON MATCH branch where the
 // stored docId differs from the candidate (F-10 contract).
 let mergeDocIdOverride: string | null = null;
-// When true, allLinkedSourcesAllowRawCloud returns a prohibited source after
-// the r2Put has already succeeded — exercises the TOCTOU close branch.
+// When true, allLinkedSourcesAllowR2SnapshotUpload returns a prohibited source
+// after the r2Put has already succeeded — exercises the TOCTOU close branch.
+// The prohibited source is unregistered (no source_material_policy row) so the
+// length mismatch path in the policy function rejects.
 let policyRevertsAfterR2Put = false;
 let allLinkedSourcesCallCount = 0;
+
+// AI-P0-1 (INFRA-1B.3.h1-policy-fix) regression-test hooks: per-call linked
+// source_id lists returned by the Neo4j mock's `collect(DISTINCT src.source_id)`
+// handler. Defaults to ["src-1"] for both pre- and post-r2Put checks so
+// existing tests keep their current behavior. Tests that need to exercise
+// cross-source archive_policy enforcement override these arrays + INSERT
+// matching rows into source_material_policy. The TOCTOU `policyRevertsAfterR2Put`
+// flag (above) takes precedence on the recheck call when set.
+let linkedSourceIdsFirstCall: string[] = ["src-1"];
+let linkedSourceIdsRecheck: string[] = ["src-1"];
 
 const neo4j = createNeo4jMock();
 function registerHandlers() {
@@ -54,13 +66,16 @@ function registerHandlers() {
 
   neo4j.session.on(/collect\(DISTINCT src\.source_id\)/, () => {
     allLinkedSourcesCallCount++;
-    // First call = pre-r2Put check (always allowed). Subsequent calls =
-    // post-r2Put recheck. policyRevertsAfterR2Put flips the recheck result
-    // to "prohibited" so the SET back-patch is skipped per the TOCTOU close.
+    // First call = pre-r2Put check. Subsequent calls = post-r2Put recheck.
+    // policyRevertsAfterR2Put forces the recheck to return an unregistered
+    // source so the SET back-patch is skipped per the TOCTOU close.
     if (policyRevertsAfterR2Put && allLinkedSourcesCallCount > 1) {
       return ok({ source_ids: ["src-prohibited"] });
     }
-    return ok({ source_ids: ["src-1"] });
+    // AI-P0-1 regression-test hooks — see flag definitions above.
+    const ids =
+      allLinkedSourcesCallCount === 1 ? linkedSourceIdsFirstCall : linkedSourceIdsRecheck;
+    return ok({ source_ids: ids });
   });
   neo4j.session.on(/MATCH \(s:Snapshot/, () => {
     if (!findExistingResult) return { records: [] };
@@ -215,6 +230,8 @@ beforeEach(() => {
   mergeDocIdOverride = null;
   policyRevertsAfterR2Put = false;
   allLinkedSourcesCallCount = 0;
+  linkedSourceIdsFirstCall = ["src-1"];
+  linkedSourceIdsRecheck = ["src-1"];
   r2PutShouldThrow = false;
   neo4jSetShouldThrow = false;
   setupDb();
@@ -603,11 +620,11 @@ describe("createSnapshotFingerprint — r2 orphan back-fill", () => {
   });
 
   it("dedup back-fill skips SET r2_key when policy reverts after r2Put (INV-0012-3 TOCTOU close)", async () => {
-    // The pre-r2Put policy check passes (first allLinkedSourcesAllowRawCloud
-    // call returns allowed); a concurrent linker then attaches a prohibited
-    // source, so the post-r2Put recheck returns prohibited. The SET r2_key
-    // must NOT be issued — r2_key stays null in the graph so the prohibited
-    // source never observes an r2 reference.
+    // The pre-r2Put policy check passes (first
+    // allLinkedSourcesAllowR2SnapshotUpload call returns allowed); a concurrent
+    // linker then attaches a prohibited source, so the post-r2Put recheck
+    // returns prohibited. The SET r2_key must NOT be issued — r2_key stays null
+    // in the graph so the prohibited source never observes an r2 reference.
     findExistingResult = { snapId: "snap_TOCTOU", r2Key: null };
     policyRevertsAfterR2Put = true;
 
@@ -772,8 +789,8 @@ describe("createSnapshotFingerprint — audit hook integration (INFRA-1B.3.x-aud
     // branch (actualSnapId === snapId, no MERGE-match), a concurrent worker
     // can dedup-link a prohibited source between createDocumentAndSnapshot
     // commit and r2_key SET. The pre-r2Put cross-source check passes
-    // (allLinkedSourcesAllowRawCloud returns allowed), r2Put runs, but the
-    // post-r2Put recheck catches the now-prohibited link and skips SET.
+    // (allLinkedSourcesAllowR2SnapshotUpload returns allowed), r2Put runs, but
+    // the post-r2Put recheck catches the now-prohibited link and skips SET.
     // The previous `mergeMatchedExisting → stillAllowed=true` short-circuit
     // failed to close this window. Symmetric to the dedup TOCTOU test.
     findExistingResult = null; // force new-path, NOT dedup-match
@@ -793,5 +810,176 @@ describe("createSnapshotFingerprint — audit hook integration (INFRA-1B.3.x-aud
     const audit = readAuditRows();
     expect(audit.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
     expect(audit[0]!.rationale).toContain("new-path; first create");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI-P0-1 (INFRA-1B.3.h1-policy-fix) — R2 cross-source policy guard regression
+// tests for archive_policy enforcement.
+//
+// Bug (GPT P0-1, Claude L4-F miss): the previous guard
+// `allLinkedSourcesAllowRawCloud()` only inspected raw_cloud_policy and
+// ignored archive_policy. A Source with archive_policy in
+// {metadata_only, excerpt_only, do_not_collect} but
+// raw_cloud_policy='allowed_public_data_only' (data-entry skew or future
+// policy_learning relaxation) could be linked to an R2-backed Snapshot
+// through cross-source dedup, violating ADR-0012 INV-0012-3 permitted-
+// artifact gate (legal-safety P0).
+//
+// Fix: renamed to `allLinkedSourcesAllowR2SnapshotUpload()`, the SQL now
+// SELECTs both archive_policy and raw_cloud_policy, and every linked source
+// must satisfy archive_policy='full_snapshot_allowed' AND
+// raw_cloud_policy='allowed_public_data_only'.
+// ---------------------------------------------------------------------------
+
+describe("createSnapshotFingerprint — cross-source archive_policy guard (AI-P0-1)", () => {
+  function insertPolicy(
+    sourceId: string,
+    archivePolicy: string,
+    rawCloudPolicy: string,
+  ): void {
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    getDb()
+      .prepare(
+        `INSERT OR REPLACE INTO source_material_policy
+         (source_id, archive_policy, raw_cloud_policy, external_llm_policy)
+         VALUES (?, ?, ?, 'allowed')`,
+      )
+      .run(sourceId, archivePolicy, rawCloudPolicy);
+    // The snapshot-fingerprint test mock's MATCH (src:Source ...) handler
+    // returns count=1 regardless of source_id, so registration of the source
+    // node itself is not needed for these unit tests.
+  }
+
+  it("dedup back-fill: linked source with archive_policy=metadata_only is rejected (raw_cloud_policy alone is not enough)", async () => {
+    // Pre-fix behavior: the guard only saw raw_cloud_policy='allowed_public_data_only'
+    // and let R2 back-fill proceed. Post-fix: archive_policy='metadata_only'
+    // disqualifies the linked source even though raw_cloud_policy is open.
+    findExistingResult = { snapId: "snap_ARCHIVE_META_DEDUP", r2Key: null };
+    linkedSourceIdsFirstCall = ["src-meta"];
+    linkedSourceIdsRecheck = ["src-meta"];
+
+    const db = setupDb();
+    insertPolicy("src-meta", "metadata_only", "allowed_public_data_only");
+    seedQueue(db, "dq_archive_meta_dedup");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_archive_meta_dedup"));
+
+    expect(result.deduplicated).toBe(true);
+    expect(r2Puts).toHaveLength(0);
+    expect(result.r2Key).toBeNull();
+    // audit-by-absence: blocked-by-policy never writes a runtime row.
+    expect(readAuditRows()).toHaveLength(0);
+    // No SET r2_key write either.
+    const setPatch = neo4j.runs.find(
+      (r) => r.via === "session" && /SET s\.r2_key/.test(r.query),
+    );
+    expect(setPatch).toBeUndefined();
+  });
+
+  it("dedup back-fill: linked source with archive_policy=excerpt_only is rejected", async () => {
+    findExistingResult = { snapId: "snap_ARCHIVE_EXCERPT_DEDUP", r2Key: null };
+    linkedSourceIdsFirstCall = ["src-excerpt"];
+    linkedSourceIdsRecheck = ["src-excerpt"];
+
+    const db = setupDb();
+    insertPolicy("src-excerpt", "excerpt_only", "allowed_public_data_only");
+    seedQueue(db, "dq_archive_excerpt_dedup");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_archive_excerpt_dedup"));
+
+    expect(result.deduplicated).toBe(true);
+    expect(r2Puts).toHaveLength(0);
+    expect(result.r2Key).toBeNull();
+    expect(readAuditRows()).toHaveLength(0);
+  });
+
+  it("dedup back-fill: linked source with archive_policy=do_not_collect is rejected", async () => {
+    findExistingResult = { snapId: "snap_ARCHIVE_DNC_DEDUP", r2Key: null };
+    linkedSourceIdsFirstCall = ["src-dnc"];
+    linkedSourceIdsRecheck = ["src-dnc"];
+
+    const db = setupDb();
+    insertPolicy("src-dnc", "do_not_collect", "allowed_public_data_only");
+    seedQueue(db, "dq_archive_dnc_dedup");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_archive_dnc_dedup"));
+
+    expect(result.deduplicated).toBe(true);
+    expect(r2Puts).toHaveLength(0);
+    expect(result.r2Key).toBeNull();
+    expect(readAuditRows()).toHaveLength(0);
+  });
+
+  it("new-path: linked source with archive_policy=metadata_only blocks r2Put + writes no audit rows (audit-by-absence)", async () => {
+    // First-create branch (not dedup). Input itself is
+    // full_snapshot_allowed + allowed_public_data_only so the input gate
+    // passes; the pre-r2Put cross-source guard must still reject because
+    // the linked source's archive_policy is metadata_only.
+    linkedSourceIdsFirstCall = ["src-meta-newpath"];
+    linkedSourceIdsRecheck = ["src-meta-newpath"];
+
+    const db = setupDb();
+    insertPolicy("src-meta-newpath", "metadata_only", "allowed_public_data_only");
+    seedQueue(db, "dq_archive_meta_newpath");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_archive_meta_newpath"));
+
+    expect(result.deduplicated).toBe(false);
+    expect(r2Puts).toHaveLength(0);
+    expect(result.r2Key).toBeNull();
+    expect(readAuditRows()).toHaveLength(0);
+  });
+
+  it("cross-source mixed: one full_snapshot_allowed source + one metadata_only source → group rejected", async () => {
+    // Even when most linked sources are policy-compliant, a SINGLE
+    // restrictive source disqualifies the whole back-fill — the permitted-
+    // artifact gate is an AND across all linked sources.
+    findExistingResult = { snapId: "snap_MIXED_LINKED", r2Key: null };
+    linkedSourceIdsFirstCall = ["src-ok", "src-meta-mixed"];
+    linkedSourceIdsRecheck = ["src-ok", "src-meta-mixed"];
+
+    const db = setupDb();
+    insertPolicy("src-ok", "full_snapshot_allowed", "allowed_public_data_only");
+    insertPolicy("src-meta-mixed", "metadata_only", "allowed_public_data_only");
+    seedQueue(db, "dq_mixed_linked");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_mixed_linked"));
+
+    expect(result.deduplicated).toBe(true);
+    expect(r2Puts).toHaveLength(0);
+    expect(result.r2Key).toBeNull();
+    expect(readAuditRows()).toHaveLength(0);
+  });
+
+  it("TOCTOU close on archive_policy: pre-check OK but post-r2Put recheck finds metadata_only source → skipped_toctou, no SET r2_key", async () => {
+    // Symmetric to the existing raw_cloud_policy TOCTOU test, but driven by
+    // archive_policy on the post-check. Pre-check sees only src-ok
+    // (full_snapshot_allowed + allowed_public_data_only). After r2Put runs,
+    // a concurrent linker attaches src-meta-toctou (metadata_only); the
+    // post-r2Put recheck must reject and skip SET r2_key. Audit ledger
+    // records attempted + skipped_toctou (Codex P2 invariant).
+    findExistingResult = { snapId: "snap_TOCTOU_ARCHIVE", r2Key: null };
+    linkedSourceIdsFirstCall = ["src-ok-toctou"];
+    linkedSourceIdsRecheck = ["src-ok-toctou", "src-meta-toctou"];
+
+    const db = setupDb();
+    insertPolicy("src-ok-toctou", "full_snapshot_allowed", "allowed_public_data_only");
+    insertPolicy("src-meta-toctou", "metadata_only", "allowed_public_data_only");
+    seedQueue(db, "dq_toctou_archive");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_toctou_archive"));
+
+    expect(result.deduplicated).toBe(true);
+    // r2Put DID run — pre-check passed before the concurrent linker arrived.
+    expect(r2Puts).toHaveLength(1);
+    // But the SET r2_key back-patch was rejected by the post-check.
+    expect(result.r2Key).toBeNull();
+    const setPatch = neo4j.runs.find(
+      (r) => r.via === "session" && /SET s\.r2_key/.test(r.query),
+    );
+    expect(setPatch).toBeUndefined();
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
   });
 });
