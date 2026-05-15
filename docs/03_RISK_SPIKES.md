@@ -61,18 +61,29 @@
 
 ### SPIKE-002: auto-confirm threshold (extraction_confidence ≥ 0.85) 보정
 
-- Hypothesis: ADR-0006 INV-0006-4의 auto-confirm threshold 0.85는 reliability_tier=
-  high 출처에서 false-positive 비율 ≤ 5%를 유지한다 (수용 가능 fp율).
+- Hypothesis: ADR-0023 INV-0023-* + DEC-010 lock 의 multi-vendor 라우팅 위에서
+  auto-confirm threshold 0.85 는 `reliability_tier=high` 출처에서 false-positive
+  비율 ≤ 5% 를 유지한다. (ADR-0006 INV-0006-4 의 Haiku 1차 + Sonnet escalate 단일
+  vendor 라우팅은 ADR-0023 / DEC-010 으로 supersede — 본 SPIKE 의 대상도 multi-
+  vendor 4-tier 라우팅 (Tier 2 default GPT-5 mini / 한국어 long-context 시 Sonnet
+  4.6 standard override / Tier 1 escalate GPT-5.5 Pro) 로 갱신.)
 - Owner: user
 - Time-box: 1일 + 50건 reviewer 비교
 - Start / End: TBD
 - Status: open
+- Note: ADR-0006 INV-0006-4 anchor 는 ADR-0023 / DEC-010 mapping table 로
+  supersede 됐다. 본 SPIKE 의 측정 baseline 도 multi-vendor 호출 (vendor /
+  tier / domain_override_reason 별 분리) 단위로 갱신.
 
 **Experiment**
 
-- 첫 50건 LLM 추출 결과를 reviewer가 직접 검증
-- 각 claim에 대해: 자동 confirm 됐을 때 정확/오류 라벨링
+- 첫 50건 LLM 추출 결과를 reviewer가 직접 검증 — Tier 2 default (GPT-5 mini)
+  + 한국어 long-context override (Sonnet 4.6 standard) 두 분기 별도 측정
+- 각 claim에 대해: 자동 confirm 됐을 때 정확/오류 라벨링 + vendor / tier /
+  domain_override_reason 기록 (run_ledger ADR-0023 INV-0023-7 필드)
 - threshold 0.80 / 0.85 / 0.90 시뮬레이션 (false-positive vs reviewer queue 부담)
+- vendor 별 (GPT-5 mini / Sonnet 4.6 standard) fp 비교 — 한 vendor 가 다른
+  vendor 대비 fp 가 유의하게 높으면 mapping table 재검토 trigger
 
 **Result**
 
@@ -80,29 +91,44 @@
 
 **Decision / Next Step**
 
-- fp ≤ 5% 충족: 0.85 lock, ADR-0006 INV-0006-4 그대로
-- fp > 5%: threshold 상향(0.90) → reviewer 부담 증가 trade-off 평가, ADR-0006
-  supersede 검토
+- fp ≤ 5% 충족: 0.85 lock, ADR-0023 INV-0023-* mapping table + DEC-010
+  routing default 그대로
+- fp > 5%: threshold 상향(0.90) → reviewer 부담 증가 trade-off 평가, ADR-0023
+  + DEC-010 routing default 재검토 (예 Tier 2 default 를 Sonnet 4.6 standard
+  로 promote 또는 한국어 override 적용 범위 확장)
 - fp ≪ 5%: threshold 하향(0.80) 검토
-- Follow-up: Slice `INFRA-1B.1` (extractor 1차 구현 직후)
+- Follow-up: Slice `EXTR-1A.2` (Article extractor, Tier 2 default + 한국어
+  override 구현 직후 — ADR-0023 / DEC-010 anchor)
 
 ---
 
 ### SPIKE-003: prompt caching cache hit rate가 비용 모델 유지
 
-- Hypothesis: Anthropic prompt caching이 system prompt + extractor schema를
-  cache prefix로 잡았을 때 cache hit rate ≥ 70% (claim 추출 일일 batch 기준)
-  으로 NFR-004 비용 상한을 만족한다.
+- Hypothesis: ADR-0023 + DEC-010 의 multi-vendor prompt caching (OpenAI 5분 /
+  Anthropic 5분 / batch 1시간 sync) 이 system prompt + extractor schema 를
+  cache prefix 로 잡았을 때 cache hit rate ≥ 70% (claim 추출 일일 batch
+  기준) 으로 NFR-004 일일 cost ceiling soft $5 / hard $7.5 / 주간 $25 /
+  Tier 0 cap 5회 / backfill bucket 분리 (DEC-010 lock) 를 만족한다.
 - Owner: user
-- Time-box: 1일 (batch 1회 측정)
+- Time-box: 1일 (batch 1회 측정, vendor 별 분리)
 - Start / End: TBD
 - Status: open
+- Note: ADR-0006 single-vendor (Anthropic) prompt caching anchor 는 ADR-0023
+  / DEC-010 의 multi-vendor 로 supersede. SPIKE 측정도 vendor 별 (OpenAI /
+  Anthropic) cache hit rate 분리 + batch API 의 1 시간 sync 동작 검증
+  포함.
 
 **Experiment**
 
-- system prompt + extractor schema (≥ 1024 tokens)을 cached prefix로 구성
-- 100~500 snapshot batch 1회 실행
-- run ledger의 cached_tokens / tokens_in 비율 측정
+- system prompt + extractor schema (≥ 1024 tokens) 을 cached prefix 로 구성
+  — OpenAI (`response_format: json_schema`) + Anthropic (`strict: true` +
+  `anthropic-beta: structured-outputs-2025-11-13`) 두 vendor 별 동일 prefix
+- 100~500 snapshot batch 1회 실행 (vendor 별 분리)
+- run ledger 의 `cached_tokens / tokens_in` 비율 측정 — vendor 별 (ADR-0023
+  INV-0023-7 의 `vendor` / `tier` / `cached_tokens` 필드)
+- Tier 0 cross-vendor review (GPT-5.5 Pro xthink → Opus 4.7 xhigh) 의
+  cache hit rate 도 별도 측정 (cross-vendor 호출 시 reviewer 의 cache 가
+  prompt 변경에 민감한지 확인)
 
 **Result**
 
@@ -110,7 +136,11 @@
 
 **Decision / Next Step**
 
-- ≥ 70%: ADR-0006 prompt caching 정책 lock
+- ≥ 70%: ADR-0023 INV-0023-8 prompt caching 의무 + DEC-010 cost ceiling lock
 - < 70%: prompt 구조 재설계 (system 더 크게 / extractor 안정화) 또는 cache TTL
-  내 batch 빈도 조정
-- Follow-up: Slice `INFRA-1B.2`
+  내 batch 빈도 조정 — vendor 별 prefix 정합 재검토 (OpenAI vs Anthropic
+  cache 동작 차이가 root cause 가능)
+- vendor 간 cache hit rate 가 크게 다르면: routing default (Tier 2 = GPT-5
+  mini default, 한국어 override = Sonnet 4.6 standard) 재검토 trigger
+- Follow-up: Slice `EXTR-1A.3` (Tier 1 escalate + multi-vendor prompt
+  caching layering + batch API vendor 추상화)

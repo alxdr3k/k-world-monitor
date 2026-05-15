@@ -35,7 +35,7 @@ injection containment / discovery worker concurrency / research app stack)
 
 ## Current roadmap position
 
-- current milestone: `P0-M2` (Source Registry & Collection Queue) — M2 슬라이스 일괄 landed, 게이트 검증 단계 진입. P0-M1 게이트도 별도 통과 필요 (SPIKE-001 미실시 + AC-032 audit ledger 미구현 — Q-044 는 이미 DEC-020 으로 resolved, R2 upload audit code enforcement 신규 slice 미진입 — TRACE-040 anchor).
+- current milestone: `P0-M2` (Source Registry & Collection Queue) — M2 슬라이스 일괄 landed, 게이트 검증 단계 진입. P0-M2-hardening sub-phase 도 진행 중 (`INFRA-1B.3.x-audit` PR #39 landed [R2 upload audit ledger, AC-032 / NFR-008] + `INFRA-1B.3.h1-policy-fix` PR #41 landed [R2 cross-source archive_policy guard, AI-P0-1 legal-safety P0]). P0-M1 게이트도 별도 통과 필요 (SPIKE-001 미실시 — AC-032 audit ledger 코드 enforcement 는 INFRA-1B.3.x-audit 로 landed, Q-044 는 DEC-020 으로 resolved, TRACE-040 anchor → landed).
 - active tracks: `INFRA` (primary — INFRA-1B collection pipeline 슬라이스 일괄 landed), `OPS` (cross-cutting — OPS-1A.1 run ledger landed)
 - active phase: `INFRA-1B` (게이트 검증 단계); `OPS-1A` (게이트 검증 단계)
 - active slice: **M2 own slices INFRA-1B.1 ~ INFRA-1B.5 landed** (P0-M2 gate accept evidence 대상) + **cross-milestone early landed** (P0-M3 slices, M2 phase 안에서 흡수): INFRA-1B.6 (feedback CLI) + OPS-1A.1 (run ledger). Landed PR 목록: #15 (INFRA-1B.1 source registry seed + 1B.1.x hotfix, c51b2ce — busy_timeout / slug-map migration / URL 파싱 / Neo4j pool env), #16 (INFRA-1B.2a safe-fetch, ed09aa5), #17 (INFRA-1B.2b scheduler, 0eec962), #18 (INFRA-1B.2 discovery worker, 896ddf2), #19 (INFRA-1B.3 snapshot fingerprint, 4dfa94f), #20 (INFRA-1B.4 chunker, 06c49d7), #21 (INFRA-1B.5 access-intervention, c3b19c4), #22 (INFRA-1B.6 feedback CLI early-land, 7f4e980), #23 (OPS-1A.1 run ledger early-land, 23de14c). M2 게이트 검증 미실시 evidence: SPIKE-001 (NFR-001 1만 graph object < 1s p95), AC-022/023/024 evidence 확정. 2026-05-13 comprehensive review 가 식별한 doc-code drift 일괄 backfill 됨 (본 retro entry 참조).
@@ -51,9 +51,11 @@ injection containment / discovery worker concurrency / research app stack)
   object model + ADR-0012 + ADR-0013); `AC-002` (Neo4j FTS p95 <1s,
   SPIKE-001 미실시 — INFRA-1A.2 소스 코드 위에서 검증 대기); `AC-005`
   (ID prefix lint, TEST-005 통과 ✓); `AC-032` (R2 upload audit ledger
-  신규 slice 미진입 — slice ID TBD, 진입 직전 lock — TRACE-040 anchor,
-  Q-044 는 이미 DEC-020 으로 resolved. Implementation Plan 의 Risks
-  Q-042~Q-048 entry 와 일치)
+  **code enforcement landed** — INFRA-1B.3.x-audit PR #39 + cross-source
+  archive_policy guard INFRA-1B.3.h1-policy-fix PR #41; TRACE-040 anchor →
+  landed; Q-044 는 DEC-020 으로 resolved. 잔여 hardening = OPS-1B.h1
+  runtime invariant scanner + INFRA-1B.3.h3-audit-hardening v8 trigger
+  (planned). Implementation Plan 의 Risks Q-042~Q-048 entry 와 일치)
 - next gate (P0-M2 portion): `AC-001`, `AC-020` (P0 fallback only —
   raw_body_hash diff; canonical_text_hash primary 는 P1+), `AC-022`,
   `AC-023`, `AC-024` (P0-M2 게이트 — INFRA-1B 슬라이스 일괄 landed 후
@@ -181,12 +183,17 @@ injection containment / discovery worker concurrency / research app stack)
    포함하지 않음** (각 slice 의 milestone row 에서 별도 평가).
 2. **SPIKE-001 실행** — Neo4j Community + native FTS, 1만 graph object 시점
    p95 < 1초 (NFR-001 / AC-002). M1 gate accept 차단 risk.
-3. **Q-044 R2 upload audit code enforcement** (DEC-020 partial) — 신규
-   slice (slice ID TBD, 진입 직전 lock — TRACE-040 anchor, INFRA-1B.3 의
-   follow-up) 진입 — `src/storage/audit/policy-decisions.ts` + IntendedAction
-   enum + snapshot-fingerprint r2Put 전후 INSERT. AC-032 / NFR-008 audit
-   evidence 차단. (Slice ID 표현은 IMPL_PLAN Risks Q-042~Q-048 entry 의
-   TBD wording 과 align — 두 문서 모두 lock 시점 동일하게 갱신 의무).
+3. ~~**Q-044 R2 upload audit code enforcement**~~ — **landed (PR #39
+   `INFRA-1B.3.x-audit` + PR #41 `INFRA-1B.3.h1-policy-fix`)**. 두 slice 모두
+   TRACE-040 anchor 갱신 완료. `src/storage/audit/policy-decisions.ts` +
+   `INTENDED_ACTION` + `R2_UPLOAD_DECISION` 4 lifecycle values + snapshot-
+   fingerprint r2Put 2 call site 전후 INSERT + cross-source archive_policy
+   guard (AI-P0-1, 6 regression tests). 잔여 P0-M2-hardening = (a) OPS-1B.h1
+   runtime invariant scanner (`Snapshot.r2_key ↔ policy ↔ audit ledger`
+   consistency scan) + (b) INFRA-1B.3.h3-audit-hardening (v8 trigger
+   `policy_decisions.intended_action` enum + `upload_attempt_id` correlation)
+   — 둘 다 planned. AC-032 / NFR-008 evidence 는 두 hardening slice 완료
+   후 accept.
 4. **Q-050 운영자 결정 7 항목** (open) — AI search + repo 통합 architecture
    resolution 의 사용자 결정 잔여 (parent_round_id branching semantics /
    mode='mixed' validation profile / termination defaults / migration v8 ALTER
@@ -232,6 +239,31 @@ injection containment / discovery worker concurrency / research app stack)
 - ~~Q-039~~ **resolved by DEC-019** — chunked allSettled 채택, INFRA-1B.2.x 슬라이스에서 implement
 - ~~Q-040~~ **resolved by DEC-019** — v0 pre-deploy contract 명문화(docs/05_RUNBOOK.md) + P1-MVP-prep milestone + backfill 위치 lock; framework implement는 DEPLOY-1A.1
 - ~~Q-041~~ **resolved by DEC-019** — millis-bearing 일관 통일 채택, DEPLOY-1A.2 슬라이스에서 implement
+- ~~Q-042~Q-048~~ **resolved by DEC-020** — NFR-003 5-hop trace path / evidence_role /
+  NFR-008 R2 audit code enforcement / invariant validator coverage extension / quota
+  module / Doppler secret store / CI required check + branch protection. Implement
+  slices: AGG-1A.1 (evidence_role 자동 검증) + **INFRA-1B.3.x-audit landed (PR #39)**
+  + OPS-1A.2 (quota module, planned) + INFRA-1A.9-validator-extension (TRACE-041
+  anchor, planned) + CI admin task (운영자, pending).
+- ~~Q-049~~ **resolved by DEC-021** — revisit policy = TTL + event-driven hybrid;
+  snapshot_diff = canonical_text_hash primary + raw_body_hash fallback. Implement
+  slices: INFRA-1B.8/9/10.
+- Q-050 AI 검색 + repo 통합 architecture — 7 운영자 결정 항목 pending
+  (parent_round_id branching / mode='mixed' validation / termination defaults /
+  v8 ALTER 범위 / ScenarioRevision FK 위치 / EditorialIntent.purpose lock /
+  신규 ADR 발급). Implement slices: INFRA-1B.7a~e + AGG-1A.6 + DISCOVERY-EXT.1
+  + EXTR-1A.7 (대부분 P1+; INFRA-1B.7a 만 P0-M6 흡수).
+- ~~Q-051~~ **resolved by DEC-022 + DEC-023** — UI stack lock (Astro shell +
+  React island + shadcn/Radix + Tailwind + TanStack + SSE) + Round 1 routing
+  default 5 항목 lock. Implement slices: RESEARCH-1A.0/API0 (P0-M6) +
+  RESEARCH-1A.1~5 (P1+). ADR-0031 accepted.
+- ~~Q-052~Q-059~~ **resolved (6) + deferred (2) by DEC-024** — 2026-05-15 12-layer
+  adversarial review + GPT cross-review 종합. Resolved: Q-052 (main branch protection
+  3중 충돌) / Q-053 (chunker archive_policy gate) / Q-054 (Source profile canonical
+  store) / Q-056 (첫 publishable format) / Q-058 (source_role multi-dim) / Q-059
+  (attention budget). Deferred (re-entry gate 명시): Q-055 (dataset MVP timing,
+  PUB-1A.5 retro) / Q-057 (claim promotion ADR, EXTR-1A.1 entry). Engineering
+  AI-P0-1 + AI-P1-8 landed (PR #41 + #42).
 - SPIKE-001 Neo4j Community + native FTS가 1만 graph object 시점 검색 < 1초
   NFR-001을 만족하는지 (SQLite+FTS5에서 대상 갱신)
 
@@ -247,9 +279,12 @@ injection containment / discovery worker concurrency / research app stack)
 - `docs/05_RUNBOOK.md`: Pre-deploy schema migration contract 섹션 (DEC-019) +
   Backup/Retention 섹션 (INFRA-1A.8) + Doppler integration (DEC-020 Q-047) 모두
   landed. publish pipeline (PUB-1A.*) 은 P0-M6 진입 시 추가.
-- `docs/current/{CODE_MAP,DATA_MODEL,TESTING}.md`: 2026-05-13 comprehensive
-  review backfill 로 13d61af 기준 갱신 완료. RUNTIME.md, OPERATIONS.md 는
-  다음 thin-doc 갱신 사이클 (P0-M2 게이트 검증 후) 에 대상.
+- `docs/current/{CODE_MAP,DATA_MODEL}.md`: 2026-05-13 comprehensive review
+  backfill 로 13d61af 기준 갱신 완료. RUNTIME.md, OPERATIONS.md 는 다음
+  thin-doc 갱신 사이클 (P0-M2 게이트 검증 후) 에 대상.
+- `docs/current/TESTING.md`: 2026-05-15 갱신 완료 — test count 515 → 521
+  (post-AI-P0-1 PR #41), Last verified SHA 75706c4 → 327f4b2 (AI-P1-9
+  DOC-SYNC-2026-05-15 안에서 갱신).
 - `docs/06_ACCEPTANCE_TESTS.md`: AC-001/018/020 본문이 Round 1~25 reflow
   이후 일부 stale 표현 (9-stage anchor / content_hash sha256 단일 hash)
   잔존 — 본 PR (claude/fix-doc-drift-5UskX) 에서 일괄 갱신.

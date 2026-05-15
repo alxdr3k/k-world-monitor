@@ -193,6 +193,15 @@ Storage seams:
 
 ## Data Model (요약)
 
+본 표는 **target design** — 모든 entity 의 의도된 schema. **Current implemented
+subset** (코드가 실제 persist 하는 필드) 는 별도 섹션 (이 표 아래) 에 명시된다.
+Migration 파일은 INFRA-1A.2 / INFRA-1B.* slices 에서 commit 됨 (Neo4j Cypher
+schema + SQLite migration v1~v7 + Neo4j v1 schema). Target design 의 모든
+필드가 v0 코드에 들어있는 것은 아니다 — 자세한 차이는 표 아래 "Current
+implemented subset" 참조 + `docs/current/DATA_MODEL.md` 참조.
+
+### Target design (canonical schema, all entities)
+
 | Entity | 주요 필드 | 저장소 |
 |---|---|---|
 | Source | src_id, publisher_name, urls_root[], reliability_tier, collectability_score{automation_reliability, legal_policy_clarity, anti_bot_friction, preferred_mode}, access_method, source_perspective, source_policy_fk | Neo4j Source + Markdown hub |
@@ -218,9 +227,30 @@ Storage seams:
 | evaluation_runs / evaluation_cases / retrieval_pack_metrics | (ADR-0020 schema) | SQLite |
 | research_session / raw_cache_items | (ADR-0021 schema) | SQLite |
 
-세부 스키마는 `docs/current/DATA_MODEL.md`(코드 도입 후 갱신) 참조.
-마이그레이션 파일은 INFRA-1A.2 slice에서 commit 예정 (Neo4j Cypher schema +
-SQLite migration).
+### Current implemented subset (v0 코드 위에서 실제 persist 되는 필드)
+
+P0-M2 게이트 검증 단계 (2026-05-15 기준) 에서 코드가 실제 persist 하는
+subset 만 명시. target design 와의 차이는 후속 slice 에서 보강 의무.
+
+| Entity | Current implemented 필드 | Gap (target design 대비) | 후속 slice |
+|---|---|---|---|
+| Source (SQLite `source_material_policy`) | `source_id` (src_<ULID>), `archive_policy`, `raw_cloud_policy`, `external_llm_policy`, `checked_at` | `publisher_name`, `urls_root[]`, `reliability_tier`, `collectability_score{}`, `access_method`, `source_perspective`, `meta_category`, `subtopic_tags[]` 모두 미저장 (`data/sources_seed.yaml` validate 만, persist 안 함) | `INFRA-1B.1.h2-source-profile` (AI-P1-4 / Q-054 D3 + Q-058 D7 — SQLite `source_profile` table 신설, canonical metadata store) |
+| Source (Neo4j) | (미생성 — INFRA-1B.2+ 진입 전) | Neo4j Source node 자체 bootstrap 부재 — snapshot-fingerprint 가 reference 하는 Source node 가 graph 에 없음. 현재 discovery → snapshot 까지 가도 graph link 실패 | `INFRA-1B.1.h1-source-bootstrap-neo4j` (AI-P1-2 — seed-sources 후 Neo4j Source node bootstrap + preflight) |
+| Document, Snapshot | snapshot-fingerprint 가 MERGE 로 생성 (`doc_id`, `source_id`, `url`, `canonical_url`, `title`, `published_at`, `created_at`; Snapshot 은 `snap_id`, `content_hash`, `url`, `accessed_at`, `mime`, `byte_size`, `r2_key`) | `raw_body_hash` / `canonical_text_hash` 분리 (현 코드 = `content_hash` 단일 alias to raw bytes hash) | `INFRA-1B.9` (canonical_text_hash 분리, P1+) |
+| Snapshot.r2_key | R2 upload 후 SET (permitted_artifact prefix only). cross-source archive_policy guard 적용 (INFRA-1B.3.h1-policy-fix landed) + audit ledger (INFRA-1B.3.x-audit landed) | runtime invariant scanner 부재 — `Snapshot.r2_key ↔ policy ↔ audit ledger` cross-check 불가 | `OPS-1B.h1-runtime-invariant-scanner` (AI-P1-6) |
+| Claim | (미생성 — EXTR-1A.* 미진입) | 전체 entity 미구현 | `EXTR-1A.1` (article extractor) + 후속 |
+| Dossier, Scenario, EditorialIntent, Thesis, ContentDraft, Publication | (미생성 — P0-M3+ 미진입) | 전체 entity 미구현 | `AGG-1A.*` + `PUB-1A.*` |
+| policy_decisions (SQLite) | v7 schema (intended_action column landed, INFRA-1B.3.x-audit). `r2_upload` 시 r2Put 전후 INSERT (attempted + uploaded / skipped_toctou / set_r2_key_failed_neo4j) | DB-level enum trigger 부재 — `intended_action` / `decision` 값이 TypeScript enum 만 보호, raw SQL 우회 가능. `upload_attempt_id` correlation 부재 | `INFRA-1B.3.h3-audit-hardening` (v8 trigger + upload_attempt_id, AI-P1-7) |
+| discovery_queue (SQLite v6) | landed — `queue_id`, `source_id`, `url`, `title`, `published_at`, `status`, `snap_id`, `content_hash`, `error_code`, `error_detail`, `updated_at` | (v0 single-worker 한정) `worker_id` CAS 컬럼 부재 — v0 single-worker safe, multi-worker 진입 시 race | `INFRA-1B.3.x` (P1-M2-hardening, post-MVP) |
+| run_ledger (SQLite v4) | landed — `vendor`, `tier`, `cross_vendor_review_of`, `domain_override_reason`, `prompt_version`, `system_prompt_sha256`, `cached_tokens`, `batch_id` (ADR-0023 INV-0023-7) | quota enforcement 모듈 (`src/ops/quota-enforcement.ts`) 미구현 — daily/weekly cost cap + Tier 0 cap + backfill bucket 분리 enforce 안 됨 | `OPS-1A.2` (quota module, P0-M3) |
+| dataset_vintage, derived_metric_ledger (SQLite v1) | schema landed | 실제 Data Science Module 구현 미진입 (EXTR-1A.5) | `EXTR-1A.5` (Polars + DuckDB + statsmodels + scipy stack) |
+| AccessIntervention (Neo4j) | landed — recordIntervention, severity 산정, batch_report mode (INFRA-1B.5) | multi-reviewer race 미닫음 (v0 single-operator) | `INFRA-1B.6.x` (P1-M3-hardening) |
+| ManualClaimEntry (Neo4j) | landed — feedback CLI add/bulk/link/from-report (INFRA-1B.6) | whitespace / attribution.url / retry idempotency 약함 | `INFRA-1B.6.h1-feedback-hardening` (AI-P2-3) |
+| AGG-1A.* / PUB-1A.* / RESEARCH-1A.* | (미구현) | P0-M3 이후 milestone slices | (각 milestone) |
+
+세부 스키마는 `docs/current/DATA_MODEL.md`(코드 도입 후 갱신) 참조. Target
+design 와의 차이가 발생한 entity 는 위 "Current implemented subset" 표의
+**후속 slice** 열에서 follow-up trace 가능.
 
 ## Key Interfaces
 
