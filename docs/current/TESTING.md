@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: 4aa38da (2026-05-15) — AI-P1-1 / `INFRA-1B.4.h1-chunker-policy-gate` landed (chunker archive_policy gate per Q-053 D2 / DEC-024 D2 — `chunkSnapshot(input)` 의무 `sourceId` + `archivePolicy` + `ChunkRejected` 4 reasons: metadata_only / excerpt_only / do_not_collect / empty_text; +7 tests = 561 → 568 tests total). Tests breakdown: 4 policy gate cases (3 reject + 1 allow) + 1 policy-reject-preserves-prior-chunks + 1 empty-text-preserves-prior-chunks (3 whitespace variants) + 1 policy-gate-before-empty-check layering. Existing 22 chunker tests adapted via `baseInput()` helper. Empty-text contract changed: previously chunkSnapshot({text:""}) returned chunkCount=0 + ran stale-cleanup (wiping prior chunks); now throws `ChunkRejected("empty_text")` BEFORE opening Neo4j tx — fixes the latent regression where transient empty re-extraction destroyed prior successful chunks. Previous code baseline = a719a49 / 090ca5b (AI-P1-3 INFRA-1B.3.h2-queue-cli PR #45 — 544 → 561). Earlier baselines: 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). Pre-merge SHA refreshes as the branch evolves — canonical post-squash-merge SHA settles in the next slice's baseline header.
+> Last verified against code: 4aa38da (2026-05-15) — AI-P1-1 / `INFRA-1B.4.h1-chunker-policy-gate` code commit on branch `claude/chunker-archive-policy-gate`. Following commits are doc-only (TESTING SHA refresh) and do NOT advance the code baseline — this SHA is the latest CODE-touching commit on the branch. AI-P1-1 = chunker archive_policy gate per Q-053 D2 / DEC-024 D2 — `chunkSnapshot(input)` 의무 `sourceId` + `archivePolicy` + `ChunkRejected` 5 reasons: metadata_only / excerpt_only / do_not_collect / **unknown_archive_policy (fail-closed default, Codex PR #47 P1 fix)** / empty_text; +8 tests = 561 → 569 tests total. Tests breakdown: 4 policy gate cases (3 reject + 1 allow) + 1 unknown_archive_policy fail-closed (Codex P1, iterates 6 invalid values) + 1 policy-reject-preserves-prior-chunks + 1 empty-text-preserves-prior-chunks (3 whitespace variants) + 1 policy-gate-before-empty-check layering. Existing 22 chunker tests adapted via `baseInput()` helper. Empty-text contract changed: previously chunkSnapshot({text:""}) returned chunkCount=0 + ran stale-cleanup (wiping prior chunks); now throws `ChunkRejected("empty_text")` BEFORE opening Neo4j tx — fixes latent regression where transient empty re-extraction destroyed prior successful chunks. Previous code baseline = 090ca5b (AI-P1-3 INFRA-1B.3.h2-queue-cli PR #45 squash — 544 → 561). Earlier baselines: 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). **Pre-merge SHA reachability**: branch-local commits (`4aa38da`, ...) ARE reachable while the branch exists but will NOT survive squash-merge to main; the merge commit on main is the post-merge canonical reference and the next slice's baseline header advances to that SHA. For reproducibility while the PR is open, `git fetch origin <branch>` + `git checkout 4aa38da` resolves correctly.
 
 ## Testing policy
 
@@ -55,7 +55,7 @@ bun run invariant:write
 |---|---|---|---|---|
 | install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
 | typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
-| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 21 file / **568 cases** — Bun native runner (post-AI-P1-1 INFRA-1B.4.h1-chunker-policy-gate landed: +7 tests in chunker_test.ts for archive_policy gate (4 policy values: metadata_only / excerpt_only / do_not_collect reject, full_snapshot_allowed allow) + empty-text reject preserves prior chunks + policy reject preserves prior chunks + policy-gate-before-empty-check layering; previous baseline 561 = AI-P1-3 INFRA-1B.3.h2-queue-cli) |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 21 file / **569 cases** — Bun native runner (post-AI-P1-1 INFRA-1B.4.h1-chunker-policy-gate landed: +8 tests in chunker_test.ts for archive_policy gate (4 policy values: metadata_only / excerpt_only / do_not_collect reject, full_snapshot_allowed allow) + unknown_archive_policy fail-closed (Codex PR #47 P1 fix, iterates 6 invalid values) + empty-text reject preserves prior chunks + policy reject preserves prior chunks + policy-gate-before-empty-check layering; previous baseline 561 = AI-P1-3 INFRA-1B.3.h2-queue-cli) |
 | migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v7 schema files parse (v7 = policy_decisions ADD COLUMN intended_action, INFRA-1B.3.x-audit) |
 | invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
@@ -73,7 +73,7 @@ Workflow files (활성):
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
 | `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
-| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (568 cases) + migrate dry-run |
+| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (569 cases) + migrate dry-run |
 | `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
 | `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
@@ -109,16 +109,17 @@ advisory).
 - PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
   으로 (1) workflow exists stage 진입.
-- 코드 테스트 (`bun test`) 는 21 file / **568 케이스** — Bun native runner
+- 코드 테스트 (`bun test`) 는 21 file / **569 케이스** — Bun native runner
   1 분 이내 expected. History: 490 → 515 (INFRA-1B.3.x-audit landed 2026-05-14
   PR #39) → 521 (INFRA-1B.3.h1-policy-fix landed 2026-05-15 PR #41: +6
   cross-source archive_policy guard, AI-P0-1) → 544 (INFRA-1B.1.h1-source-
   bootstrap-neo4j landed 2026-05-15 PR #44: +23 tests, AI-P1-2) → 561
   (INFRA-1B.3.h2-queue-cli landed 2026-05-15 PR #45: +17 tests, AI-P1-3) →
-  **568** (INFRA-1B.4.h1-chunker-policy-gate landed 2026-05-15: +7 tests for
-  archive_policy gate (4 policy values + empty-text reject) + empty-text-
-  preserves-prior-chunks + policy-reject-preserves-prior-chunks + policy-
-  gate-before-empty-check layering, AI-P1-1).
+  **569** (INFRA-1B.4.h1-chunker-policy-gate landed 2026-05-15: +8 tests for
+  archive_policy gate (4 policy values + unknown_archive_policy fail-closed
+  Codex PR #47 P1 + empty-text reject) + empty-text-preserves-prior-chunks
+  + policy-reject-preserves-prior-chunks + policy-gate-before-empty-check
+  layering, AI-P1-1).
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR

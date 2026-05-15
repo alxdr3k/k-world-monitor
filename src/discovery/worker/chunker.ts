@@ -46,11 +46,18 @@ export interface ChunkResult {
  * Reasons for chunkSnapshot rejection. Operator-observable typed error —
  * lets callers distinguish policy rejection from network / DB failures
  * in error reporting + metrics.
+ *
+ * `unknown_archive_policy` is the fail-closed default for any archivePolicy
+ * value that is NOT one of the 4 known ArchivePolicy enum members. This
+ * defends against runtime drift (DB corruption / deserialization mismatch /
+ * JS callers bypassing TypeScript types) — the gate is allow-only-when-
+ * explicit-full_snapshot_allowed (Codex PR #47 P1 fix).
  */
 export type ChunkRejectReason =
   | "metadata_only"
   | "excerpt_only"
   | "do_not_collect"
+  | "unknown_archive_policy"
   | "empty_text";
 
 export class ChunkRejected extends Error {
@@ -289,12 +296,21 @@ export async function chunkSnapshot(input: ChunkInput): Promise<ChunkResult> {
   // gate observable + fast-fail, and preserves any existing chunks on the
   // Snapshot from a prior successful run (the operator may have manually
   // restricted the source policy after a clean extraction).
-  if (
-    input.archivePolicy === "metadata_only" ||
-    input.archivePolicy === "excerpt_only" ||
-    input.archivePolicy === "do_not_collect"
-  ) {
-    throw new ChunkRejected(input.archivePolicy, input.snapId, input.sourceId);
+  //
+  // Codex PR #47 P1 fix: gate is allow-only-when-explicit-full_snapshot_allowed
+  // (NOT reject-only-when-explicit-restrictive). Defense in depth against
+  // archivePolicy values that escape the TypeScript ArchivePolicy union
+  // at runtime (DB corruption, JSON deserialization drift, JS callers
+  // bypassing TS types). Any unrecognized value falls into
+  // `unknown_archive_policy` instead of silently passing the gate.
+  if (input.archivePolicy !== "full_snapshot_allowed") {
+    const reason: ChunkRejectReason =
+      input.archivePolicy === "metadata_only" ||
+      input.archivePolicy === "excerpt_only" ||
+      input.archivePolicy === "do_not_collect"
+        ? input.archivePolicy
+        : "unknown_archive_policy";
+    throw new ChunkRejected(reason, input.snapId, input.sourceId);
   }
 
   // Gate 2: empty text guard (AI-P1-1 action-items "empty text 가 chunk

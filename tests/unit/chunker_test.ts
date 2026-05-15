@@ -512,6 +512,35 @@ describe("chunkSnapshot — archive_policy gate (AI-P1-1)", () => {
     expect(deleteQueries).toHaveLength(0);
   });
 
+  it("rejects unknown archive_policy values (fail-closed, Codex PR #47 P1)", async () => {
+    // Defense in depth: any archivePolicy value that is NOT one of the 4
+    // known enum members must reject with `unknown_archive_policy` reason.
+    // Cast through unknown so TypeScript doesn't reject the test inputs —
+    // this simulates the runtime drift scenarios the fail-closed gate
+    // defends against (DB corruption, JSON deserialization mismatch, JS
+    // callers bypassing TS types).
+    resetNeo4jState();
+    const unknownValues = ["", "FULL_SNAPSHOT_ALLOWED", "allow", "deny", "null", "undefined"];
+    for (const badPolicy of unknownValues) {
+      let caught: unknown;
+      try {
+        await chunkSnapshot({
+          snapId: "snap_UNK",
+          sourceId: "src_UNK",
+          archivePolicy: badPolicy as unknown as "full_snapshot_allowed",
+          text: "some text content",
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(ChunkRejected);
+      expect((caught as ChunkRejected).reason).toBe("unknown_archive_policy");
+    }
+    // No Neo4j tx for any of the unknown-policy invocations.
+    expect(neo4jRuns).toHaveLength(0);
+    expect(neo4j.tx.commitCount).toBe(0);
+  });
+
   it("policy gate fires BEFORE empty-text check — metadata_only with empty text reports metadata_only reason", async () => {
     // Layering order matters: a policy reject is more semantically specific
     // than the empty-text guard, so the policy reason wins. This makes
