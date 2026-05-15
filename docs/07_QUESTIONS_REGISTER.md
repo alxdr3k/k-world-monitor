@@ -54,6 +54,15 @@ validator는 legacy entry를 ID 추적만 하고 invariant scope에서 제외 (w
 | [Q-035](questions/Q-035.md) | Google Gemini 사용 scope 확장 시점 (v1+ 메인/리뷰 포함 검토) | v1+ EXTR |
 | [Q-050](questions/Q-050.md) | AI 웹 검색 + repo 통합 architecture — 7 operator decisions pending | INFRA-1B.7b~e / AGG-1A.6 |
 
+### Deferred (defer = `status: open` + resolution: DEC-024 + re-entry gate 명시)
+
+> frontmatter `status` enum (`open | in_progress | resolved | dropped`) 에 `deferred` 가 없어 본 Q 들은 `status: open` 유지. defer semantics 는 `resolution: DEC-024` + Resolution body 의 re-entry gate 안에 prose 로 명시.
+
+| ID | Resolution | Re-entry gate | Title |
+|---|---|---|---|
+| [Q-055](questions/Q-055.md) | [DEC-024](decisions/DEC-024.md) | PUB-1A.5 retrospective + RSS-only output quality evidence | Dataset ingestion MVP timing — keep ADR-0024 / EXTR-1A.5 lock |
+| [Q-057](questions/Q-057.md) | [DEC-024](decisions/DEC-024.md) | 신규 ADR-NNNN (가칭, Claim promotion + semantic dedup + claim_direction) accepted + EXTR-1A.1 진입 직전 | Claim promotion / semantic dedup 정책 |
+
 ### Resolved (audit anchor)
 
 | ID | Resolution | Title |
@@ -81,3 +90,9 @@ validator는 legacy entry를 ID 추적만 하고 invariant scope에서 제외 (w
 | [Q-048](questions/Q-048.md) | [DEC-020](decisions/DEC-020.md) | CI branch protection — invariant-check / ci workflow 를 advisory → required check |
 | [Q-049](questions/Q-049.md) | [DEC-021](decisions/DEC-021.md) | revisit policy + canonical_text_hash semantic diff |
 | [Q-051](questions/Q-051.md) | [DEC-022](decisions/DEC-022.md) + [DEC-023](decisions/DEC-023.md) | Research App UI stack + Round 1 routing default 5항 |
+| [Q-052](questions/Q-052.md) | [DEC-024](decisions/DEC-024.md) (D1) | main branch protection 3중 정책 충돌 → PR-only canonical + admin task pending |
+| [Q-053](questions/Q-053.md) | [DEC-024](decisions/DEC-024.md) (D2) | chunker raw text persistence → archive_policy gate (no local_storage_policy v0) |
+| [Q-054](questions/Q-054.md) | [DEC-024](decisions/DEC-024.md) (D3) | Source Registry canonical = SQLite source_profile table (Neo4j projection) |
+| [Q-056](questions/Q-056.md) | [DEC-024](decisions/DEC-024.md) (D5) | 첫 publishable format → DEC-005/009/011 유지 + Weekly Scenario Watch internal prototype |
+| [Q-058](questions/Q-058.md) | [DEC-024](decisions/DEC-024.md) (D7) | Source reliability multi-dim → source_role 흡수 into Q-054 slice |
+| [Q-059](questions/Q-059.md) | [DEC-024](decisions/DEC-024.md) (D8) | 운영자 attention budget → hybrid prioritization (P0/P1 only + 인접 P2 흡수) |
