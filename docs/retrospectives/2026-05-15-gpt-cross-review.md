@@ -118,6 +118,8 @@ dedup path 는 `TypedQueueError("source_not_found_in_graph")` 를 던지지만, 
 
 → 별도 slice `INFRA-1B.2-source-bootstrap` (또는 `seed-sources --neo4j`) 신설. preflight 검사 (source_material_policy count / source_registry_slug_map count / Neo4j Source count / mismatch) 동시 도입. discovery/fingerprint 시작 시 fail-fast.
 
+> **Mapping note**: GPT 원문이 권고한 slice ID `INFRA-1B.2-source-bootstrap` 가 본 review 종합 단계 (Claude 자체 review 와 합산) 에서 `INFRA-1B.1.h1-source-bootstrap-neo4j` 로 canonical normalize 됨 — INFRA-1B.1 (Source Registry Bootstrap, landed) 의 hardening suffix 정합. 위 raw body 의 ID 는 GPT 원문 보존, action-items + Finding index 의 canonical mapping 은 후자.
+
 **P1-2. Source Registry 가 PRD/HLD 가 요구한 핵심 필드를 persist 하지 않음**
 
 PRD REQ-017 = Tier A-D / collectability_score / access_method / source_perspective. REQ-022/AC-027 도 source_perspective 분포를 bidirectional framing 의 핵심 invariant 로 봄.

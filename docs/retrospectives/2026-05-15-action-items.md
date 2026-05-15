@@ -4,7 +4,7 @@
 
 상태: `Status: PROPOSED — retrospective artifact, not canonical register.`
 
-**Q-052~Q-059 ID 는 이미 open placeholder Q file 로 등록됨** (`docs/questions/Q-NNN.md`, commit 241476e + `docs/07_QUESTIONS_REGISTER.md` Open TOC). 즉 Q ID 자체는 canonical placeholder 상태 — `status: open / resolution: null` 로 운영자 결정 pending.
+**Q-052~Q-059 ID 는 이미 open placeholder Q file 로 등록됨** (`docs/questions/Q-NNN.md` + `docs/07_QUESTIONS_REGISTER.md` Open TOC — 본 PR scope 안 후속 follow-up commit 에서). 즉 Q ID 자체는 canonical placeholder 상태 — `status: open / resolution: null` 로 운영자 결정 pending.
 
 **slice ID (`INFRA-1B.3.h1-policy-fix` 등) 는 candidate identifier** — `docs/04_IMPLEMENTATION_PLAN.md` slice 표에 아직 미등록. 본격 canonical 등록은 별도 후속 PR (`PR-canonical-register-2026-05-15` 가칭) 에서:
 
@@ -117,8 +117,8 @@
 
 Engineering queue (순서대로):
 1. **AI-P0-1** — `INFRA-1B.3.h1-policy-fix` slice (R2 archive_policy guard + 6 regression tests). **legal-safety P0 — 가장 먼저**.
-2. **AI-P1-9** — `DOC-SYNC-2026-05-15` slice 의 current-state + Risks fix 부분 (post-43c8178 + AI-P0-1 결과 반영).
-3. **AI-P1-8** — ADR-0023/24/27 + DEC-009/10/11 frontmatter parse fix (1 commit, invariant validator 안 6 decision INV 자동 등록 회복).
+2. **AI-P1-8** — ADR-0023/24/27 + DEC-009/10/11 frontmatter parse fix (1 commit, invariant validator 안 6 decision INV 자동 등록 회복). **DOC-SYNC 의 baseline — 먼저**.
+3. **AI-P1-9** — `DOC-SYNC-2026-05-15` slice 의 current-state + Risks fix 부분 (post-43c8178 + AI-P0-1 결과 + AI-P1-8 의 effective_invariant_policy regen 반영).
 
 **Week 2 — P1 blocker resolution**:
 5. **AI-P1-2** — `INFRA-1B.1.h1-source-bootstrap-neo4j` slice
