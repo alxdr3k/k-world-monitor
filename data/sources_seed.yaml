@@ -3,7 +3,19 @@
 # 72 sources × 4 meta-categories (economy/policy/society/pop_culture)
 # AC-027 distribution: risk_observer 19% ≤50% / opportunity_observer 29% ≥25% / neutral 42% ≥15% ✓
 # Canonical location: data/sources_seed.yaml (this repo)
-# Import: INFRA-1B.1 Source Registry bootstrap (creates src_<ULID> IDs)
+# Import: INFRA-1B.1 seedSources() — bootstraps SQLite source_material_policy
+#         + source_registry_slug_map (slug → source_id with `src_<ULID>` value
+#         format, stable mapping, DEC-015).
+#         This YAML is the bootstrap input for the 2-store Source Registry seam;
+#         Neo4j Source nodes are NOT created here AND **are not auto-created by
+#         the discovery worker** — `src/discovery/worker/snapshot-fingerprint.ts`
+#         P1-3 guard throws when a Source node is missing (Codex round 2 P1
+#         review). Operators must bootstrap Neo4j Source nodes via a follow-up
+#         slice (INFRA-1B.2+ 안 미등록) or manual Cypher before running discovery.
+#         See docs/02_HLD.md Components 표 "Source Registry (Neo4j ↔ SQLite
+#         2-store seam)" + docs/current/DATA_MODEL.md "Source Registry —
+#         2-store logical seam" section for the full composition / bootstrap
+#         order / FK seam contract.
 # collectability_score initial values — subject to revision after first collection run
 #
 # Fields:
