@@ -20,7 +20,7 @@ scope:
 
 invariants:
   - id: INV-0027-1
-    statement: Dossier 합성 시 각 promoted Claim 은 thesis 후보 별로 `evidence_role` 분류 의무 — enum 6 종: `supporting_evidence` / `opposing_evidence` / `mitigating_factor` / `amplifying_factor` / `monitoring_signal` / `base_rate_context`. 동일 Claim 이 thesis A 에서는 `supporting`, thesis B 에서는 `opposing` 가능 — evidence_role 은 (Claim, Thesis_candidate) 쌍 의 속성.
+    statement: "Dossier 합성 시 각 promoted Claim 은 thesis 후보 별로 `evidence_role` 분류 의무 — enum 6 종: `supporting_evidence` / `opposing_evidence` / `mitigating_factor` / `amplifying_factor` / `monitoring_signal` / `base_rate_context`. 동일 Claim 이 thesis A 에서는 `supporting`, thesis B 에서는 `opposing` 가능 — evidence_role 은 (Claim, Thesis_candidate) 쌍 의 속성."
     status: active
   - id: INV-0027-2
     statement: source-level `source_perspective` (ADR-0019, REQ-022) 와 claim-level `evidence_role` 은 **독립 차원**. source_perspective = seed 분포 균형 metric (REQ-022 / AC-027) 용, evidence_role = Dossier 합성 + EvidencePack 구조 용. 동일 source (예 IMF, opportunity_observer) 도 claim 단위로 supporting / opposing / monitoring 모두 낼 수 있음.
@@ -29,13 +29,14 @@ invariants:
     statement: EvidencePack v0 4-section (REQ-023, ADR-0019) 는 evidence_role 의 grouping — section 1 = supporting_evidence, section 2 = opposing_evidence, section 3 = mitigating_factor + amplifying_factor 합집합, section 4 = monitoring_signal. base_rate_context 는 EvidencePack 시작부 컨텍스트 section 으로 (REQ-023 본문은 4-section 그대로, base_rate_context 는 EvidencePack header 의 context blob 으로).
     status: active
   - id: INV-0027-4
-    statement: Dossier composer 가 각 thesis 후보에 대해 **minimum coverage 의무**: supporting_evidence ≥ 3 claim + opposing_evidence ≥ 2 claim + monitoring_signal ≥ 3 claim. 미달 시 Dossier reject (manual review queue 진입). polarity-symmetric counterclaim (ADR-0009 INV-0009-1) 의 운영자 강제 UX 구현.
+    statement: "Dossier composer 가 각 thesis 후보에 대해 **minimum coverage 의무**: supporting_evidence ≥ 3 claim + opposing_evidence ≥ 2 claim + monitoring_signal ≥ 3 claim. 미달 시 Dossier reject (manual review queue 진입). polarity-symmetric counterclaim (ADR-0009 INV-0009-1) 의 운영자 강제 UX 구현."
     status: active
   - id: INV-0027-5
     statement: evidence_role 분류는 Dossier composer LLM (Tier 2 default GPT-5 mini, ADR-0023 / DEC-010) 이 propose + 운영자 manual review (Dossier curated view) 로 lock. LLM 자동 분류는 운영자 review 없이 promoted claim 으로 진입 X.
     status: active
   - id: INV-0027-6
-    statement: evidence_role enum 의 의미:
+    statement: |
+      evidence_role enum 의 의미:
       - `supporting_evidence`: thesis 의 핵심 주장을 직접 뒷받침
       - `opposing_evidence`: thesis 와 반대 방향의 증거 (counterclaim, polarity-symmetric)
       - `mitigating_factor`: thesis 의 effect 를 완화 / 약화 (예 정부 개입, 자동 stabilizer)

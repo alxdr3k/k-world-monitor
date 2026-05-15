@@ -41,7 +41,7 @@ preconditions:
   - id: PRE-0024-1
     statement: Python 3.12+ runtime (Polars / DuckDB / statsmodels / scipy / pandas / numpy) 또는 bun + DuckDB native 가 self-host 가능. v0 entry stack 선택은 INFRA-1A.2 시점에 commit.
   - id: PRE-0024-2
-    statement: `dataset_vintage` SQLite 테이블 (ADR-0011 R9/Q4, ADR-0012) 이 모든 fetched dataset 에 대해 vintage_date + observation_date + source_id + checksum 을 기록. Data Science Module 이 이를 입력으로 사용.
+    statement: "`dataset_vintage` SQLite 테이블 (ADR-0011 R9/Q4, ADR-0012) 이 모든 fetched dataset 에 대해 vintage_date + observation_date + source_id + checksum 을 기록. Data Science Module 이 이를 입력으로 사용."
   - id: PRE-0024-3
     statement: derived_metric ledger 테이블 (SQLite) 신규 — `metric_id`, `spec_sha256`, `dataset_vintage_id`, `library_version_lock_sha256`, `computed_at`, `value_json`, `claim_id_fk` 컬럼. INFRA-1A.2 schema migration 에 포함.
 
