@@ -26,6 +26,10 @@ process.env["SQLITE_PATH"] = ":memory:";
 // ---------------------------------------------------------------------------
 
 let neo4jSourceIds: string[] = [];
+// AI-P1-2 Codex PR #44 P2 fix: separate raw count from source_ids collection
+// so tests can drive null-source_id detection (count > source_ids.length) and
+// duplicate detection (source_ids contains repeats).
+let neo4jTotalNodesOverride: number | null = null;
 let mergeBehavior: "all-create" | "all-match" | "mixed" = "all-create";
 
 const neo4j = createNeo4jMock();
@@ -43,10 +47,18 @@ function registerHandlers() {
     });
     return { records };
   });
-  neo4j.session.on(/MATCH \(s:Source\)[\s\S]*RETURN collect\(s\.source_id\)/, () => ({
+  neo4j.session.on(/MATCH \(s:Source\)[\s\S]*count\(s\) AS total_nodes/, () => ({
     records: [
       {
-        get: (key: string) => (key === "source_ids" ? neo4jSourceIds : null),
+        get: (key: string) => {
+          if (key === "source_ids") return neo4jSourceIds;
+          if (key === "total_nodes") {
+            // When override is set, simulate null-source_id nodes by
+            // returning a count larger than source_ids.length.
+            return neo4jTotalNodesOverride ?? neo4jSourceIds.length;
+          }
+          return null;
+        },
       },
     ],
   }));
@@ -108,6 +120,7 @@ beforeEach(() => {
   neo4j.reset();
   registerHandlers();
   neo4jSourceIds = [];
+  neo4jTotalNodesOverride = null;
   mergeBehavior = "all-create";
   setupDb();
 });
@@ -192,6 +205,8 @@ describe("preflightSourceRegistry — counts + alignment", () => {
     expect(result.counts).toEqual({ sqlitePolicy: 2, sqliteSlugMap: 2, neo4jSource: 2 });
     expect(result.mismatch.missingInNeo4j).toHaveLength(0);
     expect(result.mismatch.orphanInNeo4j).toHaveLength(0);
+    expect(result.mismatch.neo4jNodesMissingSourceId).toBe(0);
+    expect(result.mismatch.neo4jDuplicateSourceIds).toHaveLength(0);
   });
 
   it("returns aligned=true for an empty registry (degenerate but valid)", async () => {
@@ -242,6 +257,81 @@ describe("preflightSourceRegistry — counts + alignment", () => {
     expect(result.aligned).toBe(false);
     expect(result.mismatch.policyVsSlugMap.onlyInPolicy).toEqual(["src_ROGUE"]);
     expect(result.mismatch.policyVsSlugMap.onlyInSlugMap).toEqual(["src_A"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// preflightSourceRegistry — malformed graph detection (Codex PR #44 P2 fixes)
+// ---------------------------------------------------------------------------
+
+describe("preflightSourceRegistry — null source_id detection (Codex P2-1)", () => {
+  it("detects :Source nodes with null source_id via count vs collect diff", async () => {
+    // 3 :Source nodes exist but only 2 have source_id (one is null).
+    // Cypher collect() drops nulls, so source_ids array has length 2 but
+    // count(s) = 3. Preflight must detect this 1-node gap as malformed.
+    insertSqliteRow("a", "src_A");
+    insertSqliteRow("b", "src_B");
+    neo4jSourceIds = ["src_A", "src_B"];
+    neo4jTotalNodesOverride = 3; // 1 extra node with null source_id
+
+    const result = await preflightSourceRegistry();
+    expect(result.aligned).toBe(false);
+    expect(result.mismatch.neo4jNodesMissingSourceId).toBe(1);
+    // Other axes still aligned — only null detection fails.
+    expect(result.mismatch.missingInNeo4j).toEqual([]);
+    expect(result.mismatch.orphanInNeo4j).toEqual([]);
+    expect(result.counts.neo4jSource).toBe(3); // raw count, not Set size
+  });
+
+  it("aligned=true when no null source_id (count == collect length)", async () => {
+    insertSqliteRow("a", "src_A");
+    neo4jSourceIds = ["src_A"];
+    neo4jTotalNodesOverride = 1; // matches array length
+
+    const result = await preflightSourceRegistry();
+    expect(result.aligned).toBe(true);
+    expect(result.mismatch.neo4jNodesMissingSourceId).toBe(0);
+  });
+});
+
+describe("preflightSourceRegistry — duplicate source_id detection (Codex P2-2)", () => {
+  it("detects duplicate source_id appearing on multiple :Source nodes", async () => {
+    // Pre-constraint historical data: 2 :Source nodes share source_id 'src_A'.
+    // The raw collect() array contains the duplicate; previous Set-collapse
+    // logic would have silently treated this as one node. Preflight must
+    // surface the duplicate to alert the operator.
+    insertSqliteRow("a", "src_A");
+    neo4jSourceIds = ["src_A", "src_A"]; // duplicate!
+    neo4jTotalNodesOverride = 2;
+
+    const result = await preflightSourceRegistry();
+    expect(result.aligned).toBe(false);
+    expect(result.mismatch.neo4jDuplicateSourceIds).toEqual(["src_A"]);
+    // The Set-based missingInNeo4j check still works (Set sees src_A once).
+    expect(result.mismatch.missingInNeo4j).toEqual([]);
+    expect(result.counts.neo4jSource).toBe(2); // raw count exposes the dup
+  });
+
+  it("BootstrapPreflightError message surfaces duplicate + null counts with remediation hint", async () => {
+    insertSqliteRow("a", "src_A");
+    insertSqliteRow("b", "src_B");
+    neo4jSourceIds = ["src_A", "src_A", "src_B"]; // dup src_A
+    neo4jTotalNodesOverride = 4; // 1 null source_id node
+
+    let caught: unknown;
+    try {
+      await assertSourceRegistryAligned();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(BootstrapPreflightError);
+    const err = caught as BootstrapPreflightError;
+    expect(err.message).toContain(":Source nodes missing source_id (1)");
+    expect(err.message).toContain("duplicate source_id in Neo4j (1)");
+    expect(err.message).toContain("src_A");
+    expect(err.message).toContain("apply CONSTRAINT source_unique");
+    expect(err.result.mismatch.neo4jDuplicateSourceIds).toEqual(["src_A"]);
+    expect(err.result.mismatch.neo4jNodesMissingSourceId).toBe(1);
   });
 });
 

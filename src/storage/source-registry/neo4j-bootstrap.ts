@@ -60,6 +60,24 @@ export interface PreflightMismatch {
     onlyInPolicy: string[];
     onlyInSlugMap: string[];
   };
+  /**
+   * Count of `:Source` nodes whose `source_id` is null (Codex PR #44 P2 fix).
+   * Cypher `collect(s.source_id)` silently drops nulls, so without explicit
+   * detection a malformed graph (Source node missing source_id) would pass
+   * preflight. snapshot-fingerprint's `MATCH (src:Source {source_id: $id})`
+   * would never find these nodes, but they would still consume graph storage
+   * and could fan out via other relationships.
+   */
+  neo4jNodesMissingSourceId: number;
+  /**
+   * source_id values that appear on multiple `:Source` nodes (Codex PR #44
+   * P2 fix). The v1 schema's `source_unique` CONSTRAINT prevents this on a
+   * properly-migrated DB, but pre-constraint historical data (constraint
+   * applied AFTER nodes were created) could surface duplicates. Without
+   * this check, `new Set(neo4jSourceIds)` collapses them silently and
+   * preflight returns aligned=true on a malformed graph.
+   */
+  neo4jDuplicateSourceIds: string[];
 }
 
 export interface PreflightResult {
@@ -99,8 +117,18 @@ export class BootstrapPreflightError extends Error {
         `  only in source_registry_slug_map (${r.mismatch.policyVsSlugMap.onlyInSlugMap.length}): ${r.mismatch.policyVsSlugMap.onlyInSlugMap.slice(0, 5).join(", ")}`
       );
     }
+    if (r.mismatch.neo4jNodesMissingSourceId > 0) {
+      parts.push(
+        `  :Source nodes missing source_id (${r.mismatch.neo4jNodesMissingSourceId}) — malformed graph; manual repair required`
+      );
+    }
+    if (r.mismatch.neo4jDuplicateSourceIds.length > 0) {
+      parts.push(
+        `  duplicate source_id in Neo4j (${r.mismatch.neo4jDuplicateSourceIds.length}): ${r.mismatch.neo4jDuplicateSourceIds.slice(0, 5).join(", ")}${r.mismatch.neo4jDuplicateSourceIds.length > 5 ? " ..." : ""} — pre-constraint historical data; manual dedupe + apply CONSTRAINT source_unique`
+      );
+    }
     parts.push(
-      "Run `bun run seed-sources --neo4j` to bootstrap missing Source nodes; manual investigation required for orphans."
+      "Run `bun run seed-sources --neo4j` to bootstrap missing Source nodes; manual investigation required for orphans / null source_id / duplicates."
     );
     return parts.join("\n");
   }
@@ -238,15 +266,41 @@ export async function preflightSourceRegistry(): Promise<PreflightResult> {
   const policySet = new Set(policyRows.map((r) => r.source_id));
   const slugMapSet = new Set(slugMapRows.map((r) => r.source_id));
 
-  const neo4jSourceIds = await withSession(async (session) => {
+  // Codex PR #44 P2 fix: return both `count(s)` (all :Source nodes, including
+  // those with null source_id) AND `collect(s.source_id)` (Cypher aggregation
+  // drops nulls). The difference exposes malformed nodes missing source_id
+  // that the previous query silently ignored.
+  const { neo4jTotalNodes, neo4jSourceIdsRaw } = await withSession(async (session) => {
     const result = await session.run(
-      `MATCH (s:Source) RETURN collect(s.source_id) AS source_ids`
+      `MATCH (s:Source)
+       RETURN count(s) AS total_nodes, collect(s.source_id) AS source_ids`
     );
     const rec = result.records[0];
-    return rec ? ((rec.get("source_ids") as string[]) ?? []) : [];
+    if (!rec) return { neo4jTotalNodes: 0, neo4jSourceIdsRaw: [] as string[] };
+    // Neo4j driver returns Integer for count — normalize via Number().
+    const total = Number(rec.get("total_nodes") ?? 0);
+    const ids = (rec.get("source_ids") as string[]) ?? [];
+    return { neo4jTotalNodes: total, neo4jSourceIdsRaw: ids };
   });
-  const neo4jSet = new Set(neo4jSourceIds);
 
+  // null source_id detection: collect() drops nulls, so any difference between
+  // count(s) and the array length is the null-source_id node count.
+  const neo4jNodesMissingSourceId = neo4jTotalNodes - neo4jSourceIdsRaw.length;
+
+  // Duplicate detection: track source_ids that appear more than once in the
+  // raw array BEFORE Set collapses them. The v1 schema's source_unique
+  // CONSTRAINT prevents this on a properly-migrated DB, but pre-constraint
+  // historical data may slip through.
+  const occurrenceCount = new Map<string, number>();
+  for (const id of neo4jSourceIdsRaw) {
+    occurrenceCount.set(id, (occurrenceCount.get(id) ?? 0) + 1);
+  }
+  const neo4jDuplicateSourceIds = [...occurrenceCount.entries()]
+    .filter(([_, n]) => n > 1)
+    .map(([id, _]) => id)
+    .sort();
+
+  const neo4jSet = new Set(neo4jSourceIdsRaw);
   const missingInNeo4j = [...slugMapSet].filter((id) => !neo4jSet.has(id)).sort();
   const orphanInNeo4j = [...neo4jSet].filter((id) => !slugMapSet.has(id)).sort();
   const onlyInPolicy = [...policySet].filter((id) => !slugMapSet.has(id)).sort();
@@ -256,18 +310,25 @@ export async function preflightSourceRegistry(): Promise<PreflightResult> {
     missingInNeo4j.length === 0 &&
     orphanInNeo4j.length === 0 &&
     onlyInPolicy.length === 0 &&
-    onlyInSlugMap.length === 0;
+    onlyInSlugMap.length === 0 &&
+    neo4jNodesMissingSourceId === 0 &&
+    neo4jDuplicateSourceIds.length === 0;
 
   return {
     counts: {
       sqlitePolicy: policySet.size,
       sqliteSlugMap: slugMapSet.size,
-      neo4jSource: neo4jSet.size,
+      // neo4jSource = total :Source node count (NOT deduplicated set size).
+      // If duplicates exist or null source_id nodes exist, this surfaces the
+      // raw graph state so the operator sees the actual node population.
+      neo4jSource: neo4jTotalNodes,
     },
     mismatch: {
       missingInNeo4j,
       orphanInNeo4j,
       policyVsSlugMap: { onlyInPolicy, onlyInSlugMap },
+      neo4jNodesMissingSourceId,
+      neo4jDuplicateSourceIds,
     },
     aligned,
   };
