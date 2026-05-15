@@ -71,7 +71,34 @@ async function migrateSqlite(): Promise<void> {
       db.exec("COMMIT");
     } catch (err) {
       try { db.exec("ROLLBACK"); } catch { /* ignore rollback failure */ }
-      throw err;
+      // Defense-in-depth for ADD COLUMN migrations: SQLite has no native
+      // "ADD COLUMN IF NOT EXISTS", so a re-run after a successful apply
+      // throws "duplicate column name". The primary guard is the version
+      // check above (now fixed in connection.ts getMigrationVersion to
+      // order by version, not applied_at second-precision). This catch
+      // handles the residual case where schema_migrations is missing or
+      // stale: strip all ALTER TABLE statements (which are intrinsically
+      // non-idempotent) and re-run the remainder of the file — CREATE
+      // TABLE/INDEX use IF NOT EXISTS and INSERT INTO schema_migrations
+      // uses OR IGNORE, so the rest is safely idempotent.
+      // Codex PR #39 P1 — v7 ADD COLUMN intended_action.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/duplicate column name/i.test(msg)) {
+        const idempotentSql = sql.replace(/^\s*ALTER\s+TABLE[^;]*;/gim, "");
+        db.exec("BEGIN");
+        try {
+          db.exec(idempotentSql);
+          db.exec("COMMIT");
+          console.log(
+            `[SQLite] ${migration.version}: ALTER skipped (column already exists) — applied idempotent remainder`
+          );
+        } catch (retryErr) {
+          try { db.exec("ROLLBACK"); } catch { /* ignore rollback failure */ }
+          throw retryErr;
+        }
+      } else {
+        throw err;
+      }
     }
     console.log(`[SQLite] ✓ Applied ${migration.file}`);
   }
