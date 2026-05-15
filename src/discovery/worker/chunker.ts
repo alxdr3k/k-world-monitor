@@ -7,12 +7,32 @@
 // Relationship: (Snapshot)-[:HAS_CHUNK]->(Chunk)
 //
 // INV-0030-2: no network I/O — caller provides pre-extracted text.
+//
+// AI-P1-1 (INFRA-1B.4.h1-chunker-policy-gate, Q-053 D2 / DEC-024 D2):
+// archive_policy gate at function entry. raw third-party text must NOT
+// be written to Chunk nodes when the source's archive_policy forbids it,
+// extending ADR-0012 INV-0012-3 (R2 raw text prohibition) spirit to the
+// Neo4j chunk storage. Gate logic (DEC-024 D2 lock):
+//   - full_snapshot_allowed → allow
+//   - metadata_only         → reject (no full-text chunking)
+//   - excerpt_only          → reject full-text chunking (excerpt-limited
+//                              chunking deferred to a future design slice)
+//   - do_not_collect        → reject (source-wide collection prohibition)
+// Additionally, empty text triggers reject (NOT silent chunk deletion) per
+// the AI-P1-1 action-items "empty text 가 chunk 삭제 안 하게" requirement —
+// a re-extraction that produced no text must not wipe a prior successful
+// run's chunks.
 
 import { ulid } from "ulid";
 import { withSession } from "../../storage/neo4j/connection";
+import type { ArchivePolicy } from "./snapshot-fingerprint";
 
 export interface ChunkInput {
   snapId: string;
+  /** AI-P1-1: required for policy gate trace + error message attribution. */
+  sourceId: string;
+  /** AI-P1-1: archive_policy gate per Q-053 D2 / DEC-024 D2. */
+  archivePolicy: ArchivePolicy;
   text: string;
 }
 
@@ -20,6 +40,30 @@ export interface ChunkResult {
   snapId: string;
   chunkCount: number;
   chunkIds: string[];
+}
+
+/**
+ * Reasons for chunkSnapshot rejection. Operator-observable typed error —
+ * lets callers distinguish policy rejection from network / DB failures
+ * in error reporting + metrics.
+ */
+export type ChunkRejectReason =
+  | "metadata_only"
+  | "excerpt_only"
+  | "do_not_collect"
+  | "empty_text";
+
+export class ChunkRejected extends Error {
+  constructor(
+    public readonly reason: ChunkRejectReason,
+    public readonly snapId: string,
+    public readonly sourceId: string
+  ) {
+    super(
+      `Chunk rejected for snap_id=${snapId} source_id=${sourceId}: reason=${reason}`
+    );
+    this.name = "ChunkRejected";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +283,38 @@ async function writeChunks(
 // ---------------------------------------------------------------------------
 
 export async function chunkSnapshot(input: ChunkInput): Promise<ChunkResult> {
+  // Gate 1: archive_policy enforcement (Q-053 D2 / DEC-024 D2, AI-P1-1).
+  // The reject branches throw BEFORE any Neo4j tx is opened — no Snapshot
+  // guard, no chunk MERGE, no stale-chunk DETACH DELETE. This makes the
+  // gate observable + fast-fail, and preserves any existing chunks on the
+  // Snapshot from a prior successful run (the operator may have manually
+  // restricted the source policy after a clean extraction).
+  if (
+    input.archivePolicy === "metadata_only" ||
+    input.archivePolicy === "excerpt_only" ||
+    input.archivePolicy === "do_not_collect"
+  ) {
+    throw new ChunkRejected(input.archivePolicy, input.snapId, input.sourceId);
+  }
+
+  // Gate 2: empty text guard (AI-P1-1 action-items "empty text 가 chunk
+  // 삭제 안 하게"). The previous implementation called writeChunks([]) on
+  // empty text, which triggered the stale-chunk DETACH DELETE WHERE
+  // chunk_index >= 0 — i.e. wiped ALL chunks for the snap_id. A failed
+  // re-extraction (network blip, parser change, transient policy block)
+  // would silently destroy a prior successful run's chunks. Reject the
+  // empty-text case here so the Snapshot's chunk state is preserved.
+  if (!input.text.trim()) {
+    throw new ChunkRejected("empty_text", input.snapId, input.sourceId);
+  }
+
   const chunks = splitIntoChunks(input.text);
+  // Defensive: splitIntoChunks should always return ≥ 1 chunk after the
+  // trim() guard above, but if a whitespace-only edge case slips through
+  // we still preserve existing chunks rather than wiping them.
+  if (chunks.length === 0) {
+    throw new ChunkRejected("empty_text", input.snapId, input.sourceId);
+  }
   const chunkIds = await writeChunks(input.snapId, chunks);
   return { snapId: input.snapId, chunkCount: chunks.length, chunkIds };
 }

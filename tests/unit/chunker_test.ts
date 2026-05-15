@@ -67,8 +67,25 @@ function resetNeo4jState() {
 import {
   splitIntoChunks,
   chunkSnapshot,
+  ChunkRejected,
   type TextChunk,
+  type ChunkInput,
 } from "../../src/discovery/worker/chunker";
+
+// AI-P1-1 (INFRA-1B.4.h1-chunker-policy-gate): chunkSnapshot now requires
+// sourceId + archivePolicy. Most existing tests exercise the
+// `full_snapshot_allowed` path — wrap the base input shape here so every
+// call site needs minimal edits and the test bodies stay focused on what
+// they're asserting (Neo4j tx behavior, stale-chunk cleanup, etc.).
+function baseInput(
+  overrides: Partial<ChunkInput> & Pick<ChunkInput, "snapId" | "text">
+): ChunkInput {
+  return {
+    sourceId: "src_TEST",
+    archivePolicy: "full_snapshot_allowed",
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // splitIntoChunks — pure function tests (no mocks needed).
@@ -174,32 +191,40 @@ describe("splitIntoChunks — basic splitting", () => {
 // ---------------------------------------------------------------------------
 
 describe("chunkSnapshot", () => {
-  it("returns chunkCount=0 and empty chunkIds for empty text, but still runs guard + stale cleanup", async () => {
+  // AI-P1-1 (INFRA-1B.4.h1-chunker-policy-gate): the previous contract
+  // (empty text → chunkCount=0 + stale cleanup wipes prior chunks) was
+  // changed because a transient empty re-extraction must not destroy a
+  // prior successful run's chunks. Empty text now throws ChunkRejected
+  // BEFORE the Neo4j tx is opened.
+  it("throws ChunkRejected('empty_text') for empty text + does NOT touch Neo4j (prior chunks preserved)", async () => {
     resetNeo4jState();
-    const result = await chunkSnapshot({ snapId: "snap_TEST001", text: "" });
-    expect(result.chunkCount).toBe(0);
-    expect(result.chunkIds).toHaveLength(0);
-    // Guard query must still run even for empty text (no silent success for invalid snapIds).
-    const guardQueries = neo4jRuns.filter((r) => r.query.includes("RETURN count(s) AS matched"));
-    expect(guardQueries).toHaveLength(1);
-    // Stale-chunk cleanup must also run with chunkCount=0 so prior chunks are deleted.
-    const cleanupQueries = neo4jRuns.filter(
-      (r) => r.query.includes("DETACH DELETE") && r.query.includes("chunk_index")
-    );
-    expect(cleanupQueries).toHaveLength(1);
-    expect(cleanupQueries[0]!.params["chunkCount"]).toBe(0);
-    // No Chunk MERGE or HAS_CHUNK writes.
-    const chunkCreates = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
-    expect(chunkCreates).toHaveLength(0);
+    let caught: unknown;
+    try {
+      await chunkSnapshot(baseInput({ snapId: "snap_TEST001", text: "" }));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ChunkRejected);
+    expect((caught as ChunkRejected).reason).toBe("empty_text");
+    expect((caught as ChunkRejected).snapId).toBe("snap_TEST001");
+    // No guard query, no cleanup, no Chunk MERGE — gate fires fast.
+    expect(neo4jRuns).toHaveLength(0);
   });
 
-  it("throws when Snapshot not found even for empty text (orphan guard not bypassed)", async () => {
+  it("throws ChunkRejected('empty_text') BEFORE Snapshot guard (Snapshot existence irrelevant on empty)", async () => {
     resetNeo4jState();
     snapshotMissing = true;
     try {
-      await expect(
-        chunkSnapshot({ snapId: "snap_EMPTYNOTEXIST", text: "" })
-      ).rejects.toThrow("Snapshot not found: snap_EMPTYNOTEXIST");
+      let caught: unknown;
+      try {
+        await chunkSnapshot(baseInput({ snapId: "snap_EMPTYNOTEXIST", text: "" }));
+      } catch (err) {
+        caught = err;
+      }
+      // Empty-text rejection now fires BEFORE the snapshot guard would run,
+      // so the error is ChunkRejected (not "Snapshot not found").
+      expect(caught).toBeInstanceOf(ChunkRejected);
+      expect((caught as ChunkRejected).reason).toBe("empty_text");
     } finally {
       snapshotMissing = false;
     }
@@ -208,10 +233,10 @@ describe("chunkSnapshot", () => {
   it("writes CREATE Chunk + HAS_CHUNK for each chunk", async () => {
     resetNeo4jState();
     const words = Array.from({ length: 10 }, (_, i) => `word${i}`);
-    const result = await chunkSnapshot({
+    const result = await chunkSnapshot(baseInput({
       snapId: "snap_TEST002",
       text: words.join(" "),
-    });
+    }));
     expect(result.chunkCount).toBe(1);
     expect(result.chunkIds).toHaveLength(1);
     expect(result.chunkIds[0]).toMatch(/^chk_/);
@@ -226,10 +251,10 @@ describe("chunkSnapshot", () => {
   it("stores correct snap_id and chunk_index in the Chunk node params", async () => {
     resetNeo4jState();
     const words = Array.from({ length: 600 }, (_, i) => `w${i}`);
-    const result = await chunkSnapshot({
+    const result = await chunkSnapshot(baseInput({
       snapId: "snap_TEST003",
       text: words.join(" "),
-    });
+    }));
     expect(result.chunkCount).toBeGreaterThanOrEqual(2);
 
     const createParams = neo4jRuns
@@ -243,10 +268,10 @@ describe("chunkSnapshot", () => {
 
   it("returns snapId matching the input", async () => {
     resetNeo4jState();
-    const result = await chunkSnapshot({
+    const result = await chunkSnapshot(baseInput({
       snapId: "snap_MYSNAP",
       text: "some text to chunk",
-    });
+    }));
     expect(result.snapId).toBe("snap_MYSNAP");
   });
 
@@ -254,7 +279,7 @@ describe("chunkSnapshot", () => {
     txShouldThrow = true;
     try {
       await expect(
-        chunkSnapshot({ snapId: "snap_ERR001", text: "some text" })
+        chunkSnapshot(baseInput({ snapId: "snap_ERR001", text: "some text" }))
       ).rejects.toThrow("Neo4j write failed");
     } finally {
       txShouldThrow = false;
@@ -266,7 +291,7 @@ describe("chunkSnapshot", () => {
     snapshotMissing = true;
     try {
       await expect(
-        chunkSnapshot({ snapId: "snap_NOTEXIST", text: "some text to chunk" })
+        chunkSnapshot(baseInput({ snapId: "snap_NOTEXIST", text: "some text to chunk" }))
       ).rejects.toThrow("Snapshot not found: snap_NOTEXIST");
       // Only the guard query should have been run — no Chunk CREATE.
       const chunkCreates = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
@@ -278,10 +303,10 @@ describe("chunkSnapshot", () => {
 
   it("uses MERGE (not CREATE) for Chunk nodes to support idempotent re-runs", async () => {
     resetNeo4jState();
-    await chunkSnapshot({
+    await chunkSnapshot(baseInput({
       snapId: "snap_IDEM001",
       text: "idempotent text check",
-    });
+    }));
     const mergeQueries = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
     expect(mergeQueries.length).toBeGreaterThanOrEqual(1);
     // Ensure no raw CREATE (c:Chunk …) without MERGE prefix.
@@ -293,10 +318,10 @@ describe("chunkSnapshot", () => {
 
   it("uses MERGE for HAS_CHUNK relationship to avoid duplicates on re-run", async () => {
     resetNeo4jState();
-    await chunkSnapshot({
+    await chunkSnapshot(baseInput({
       snapId: "snap_IDEM002",
       text: "some text for relationship test",
-    });
+    }));
     // Only the edge-creation queries (not the stale-chunk DETACH DELETE).
     const relQueries = neo4jRuns.filter(
       (r) => r.query.includes("HAS_CHUNK") && !r.query.includes("DETACH DELETE")
@@ -311,7 +336,7 @@ describe("chunkSnapshot", () => {
   it("runs stale-chunk cleanup in same transaction (P2 stale chunks)", async () => {
     resetNeo4jState();
     const words = Array.from({ length: 10 }, (_, i) => `w${i}`);
-    await chunkSnapshot({ snapId: "snap_STALE01", text: words.join(" ") });
+    await chunkSnapshot(baseInput({ snapId: "snap_STALE01", text: words.join(" ") }));
     // The cleanup query uses DETACH DELETE with chunk_index >= chunkCount.
     const cleanupQueries = neo4jRuns.filter(
       (r) => r.query.includes("DETACH DELETE") && r.query.includes("chunk_index")
@@ -327,7 +352,7 @@ describe("chunkSnapshot", () => {
     // observable behavior (no tautology).
     resetNeo4jState();
 
-    const result = await chunkSnapshot({ snapId: "snap_COMMIT01", text: "commit test" });
+    const result = await chunkSnapshot(baseInput({ snapId: "snap_COMMIT01", text: "commit test" }));
 
     expect(result.chunkCount).toBe(1);
     expect(neo4j.tx.commitCount).toBe(1);
@@ -347,7 +372,7 @@ describe("chunkSnapshot", () => {
 
     let caught: unknown;
     try {
-      await chunkSnapshot({ snapId: "snap_COMMITFAIL", text: "commit fail test" });
+      await chunkSnapshot(baseInput({ snapId: "snap_COMMITFAIL", text: "commit fail test" }));
     } catch (err) {
       caught = err;
     }
@@ -356,5 +381,156 @@ describe("chunkSnapshot", () => {
     expect((caught as Error).message).toBe("simulated commit failure");
     expect(neo4j.tx.commitCount).toBe(1);
     expect(neo4j.tx.rollbackCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI-P1-1 (INFRA-1B.4.h1-chunker-policy-gate, Q-053 D2 / DEC-024 D2):
+// archive_policy enforcement at chunkSnapshot entry. Each rejecting policy
+// must throw ChunkRejected BEFORE any Neo4j tx is opened so prior chunks
+// are preserved (no DETACH DELETE fired).
+// ---------------------------------------------------------------------------
+
+describe("chunkSnapshot — archive_policy gate (AI-P1-1)", () => {
+  it("rejects metadata_only — throws ChunkRejected + no Neo4j tx opened", async () => {
+    resetNeo4jState();
+    let caught: unknown;
+    try {
+      await chunkSnapshot({
+        snapId: "snap_META",
+        sourceId: "src_META",
+        archivePolicy: "metadata_only",
+        text: "this text has full content but the policy forbids chunking",
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ChunkRejected);
+    const err = caught as ChunkRejected;
+    expect(err.reason).toBe("metadata_only");
+    expect(err.snapId).toBe("snap_META");
+    expect(err.sourceId).toBe("src_META");
+    expect(err.message).toContain("snap_id=snap_META");
+    expect(err.message).toContain("source_id=src_META");
+    expect(err.message).toContain("reason=metadata_only");
+    // No Neo4j tx — no guard, no cleanup, no MERGE.
+    expect(neo4jRuns).toHaveLength(0);
+    expect(neo4j.tx.commitCount).toBe(0);
+    expect(neo4j.tx.rollbackCount).toBe(0);
+  });
+
+  it("rejects excerpt_only — throws ChunkRejected + no Neo4j tx opened (full-text chunking forbidden, excerpt-limited 미설계)", async () => {
+    resetNeo4jState();
+    let caught: unknown;
+    try {
+      await chunkSnapshot({
+        snapId: "snap_EXCERPT",
+        sourceId: "src_EXCERPT",
+        archivePolicy: "excerpt_only",
+        text: "full body text — but policy only allows excerpt-level quoting",
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ChunkRejected);
+    expect((caught as ChunkRejected).reason).toBe("excerpt_only");
+    expect(neo4jRuns).toHaveLength(0);
+  });
+
+  it("rejects do_not_collect — throws ChunkRejected + no Neo4j tx opened (source-wide collection prohibition)", async () => {
+    resetNeo4jState();
+    let caught: unknown;
+    try {
+      await chunkSnapshot({
+        snapId: "snap_DNC",
+        sourceId: "src_DNC",
+        archivePolicy: "do_not_collect",
+        text: "this should have been blocked upstream but defense in depth",
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ChunkRejected);
+    expect((caught as ChunkRejected).reason).toBe("do_not_collect");
+    expect(neo4jRuns).toHaveLength(0);
+  });
+
+  it("allows full_snapshot_allowed — proceeds to chunk creation", async () => {
+    resetNeo4jState();
+    const result = await chunkSnapshot({
+      snapId: "snap_ALLOW",
+      sourceId: "src_ALLOW",
+      archivePolicy: "full_snapshot_allowed",
+      text: "this body is allowed full chunking under the source policy",
+    });
+    expect(result.chunkCount).toBeGreaterThanOrEqual(1);
+    expect(result.chunkIds[0]).toMatch(/^chk_/);
+    // Tx opened + commit + chunk MERGE executed.
+    expect(neo4j.tx.commitCount).toBe(1);
+    const chunkCreates = neo4jRuns.filter((r) => r.query.includes("MERGE (c:Chunk"));
+    expect(chunkCreates.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("policy reject does NOT trigger stale-chunk cleanup — prior chunks preserved", async () => {
+    // Critical: a source that gets re-policied (e.g. operator tightens
+    // archive_policy from full_snapshot_allowed → metadata_only after a
+    // clean extraction) must not silently wipe the prior chunks via the
+    // empty-result DETACH DELETE path. Gate fires BEFORE writeChunks().
+    resetNeo4jState();
+    await expect(
+      chunkSnapshot({
+        snapId: "snap_PRESERVE",
+        sourceId: "src_PRESERVE",
+        archivePolicy: "metadata_only",
+        text: "some text",
+      })
+    ).rejects.toThrow(ChunkRejected);
+    // The crucial assertion: no DETACH DELETE … chunk_index >= 0 query.
+    const deleteQueries = neo4jRuns.filter(
+      (r) => r.query.includes("DETACH DELETE") && r.query.includes("chunk_index")
+    );
+    expect(deleteQueries).toHaveLength(0);
+  });
+
+  it("empty text reject does NOT trigger stale-chunk cleanup — prior chunks preserved (action-items 'empty text 가 chunk 삭제 안 하게')", async () => {
+    resetNeo4jState();
+    // Three empty / whitespace variants — all must reject + preserve.
+    for (const text of ["", "   ", "\n\t  \n"]) {
+      await expect(
+        chunkSnapshot({
+          snapId: "snap_EMPTY_PRESERVE",
+          sourceId: "src_EMPTY_PRESERVE",
+          archivePolicy: "full_snapshot_allowed",
+          text,
+        })
+      ).rejects.toThrow(ChunkRejected);
+    }
+    // No DETACH DELETE was ever issued — prior chunks intact.
+    const deleteQueries = neo4jRuns.filter(
+      (r) => r.query.includes("DETACH DELETE") && r.query.includes("chunk_index")
+    );
+    expect(deleteQueries).toHaveLength(0);
+  });
+
+  it("policy gate fires BEFORE empty-text check — metadata_only with empty text reports metadata_only reason", async () => {
+    // Layering order matters: a policy reject is more semantically specific
+    // than the empty-text guard, so the policy reason wins. This makes
+    // operator alerts attribute the rejection to the policy (correctable
+    // via source_material_policy update) rather than misleading them into
+    // chasing an extraction bug.
+    resetNeo4jState();
+    let caught: unknown;
+    try {
+      await chunkSnapshot({
+        snapId: "snap_BOTH",
+        sourceId: "src_BOTH",
+        archivePolicy: "metadata_only",
+        text: "", // empty AND policy-rejected
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ChunkRejected);
+    expect((caught as ChunkRejected).reason).toBe("metadata_only");
   });
 });
