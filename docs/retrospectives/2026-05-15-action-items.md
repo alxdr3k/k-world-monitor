@@ -63,9 +63,9 @@ defer 자체가 명시 결정 (re-entry gate + 조건 lock) — doc drift 방지
 | **P3** | AI-P3-batch-2 | Claude L1-C / L1-H / L1-K / L1-N / L1-O / L8-A 등 | doc inventory cleanup (AC row 순서 / TRACE-016/039 duplicate / IMPL_PLAN P0-M3 row codex review 회고 / TEST count stale 등) | **doc cleanup** |
 | **P3** | AI-P3-batch-3 | GPT 2부 P3 multiple | 잔여 P3 cleanup (lint alias / dry-run idempotency preview / RSS author/summary / DNS rebinding RUNBOOK / Markdown escaping / chunk hash 등) | **mixed** |
 
-## B. 신규 Q (operator decision required)
+## B. Q-052~Q-059 decision package (DEC-024 lock)
 
-본 review 가 발견한 운영자 결정 필요 항목 → `docs/questions/` 에 per-file Q 등록 의무.
+본 review 가 발견한 운영자 결정 항목. Q-052~Q-059 는 `docs/questions/` 에 per-file 등록되었고, [DEC-024](../decisions/DEC-024.md) 로 **resolved (6) + deferred (2)** 상태 lock. 아래 표는 historical anchor — 결정 본문은 DEC-024 D1~D8 참조.
 
 | Q ID | 제목 | source | blocks |
 |---|---|---|---|
@@ -143,8 +143,10 @@ Engineering queue (순서대로):
 16. **AI-P2-10** — `INFRA-1A.h1-supply-chain-audit` slice
 17. **AI-P2-5** — `INFRA-1A.9-validator-extension` + `INFRA-1A.10-glossary-backfill` slice batch (P1-8 + Q-057~058 일부 흡수)
 
-**Deferred to PUB-1A.5 후**:
-- Q-055 (dataset ingestion MVP timing) / Q-056 (format reflow) / Q-057 (claim promotion) — P0-M3 / M6 진입 직전 lock
+**Deferred (DEC-024 lock)**:
+- **Q-055** (dataset ingestion MVP timing) — re-entry gate: PUB-1A.5 retrospective + RSS-only output quality evidence (DEC-024 D4)
+- **Q-057** (claim promotion / semantic dedup) — re-entry gate: 신규 ADR (가칭, 다음 가용 ID) accepted + EXTR-1A.1 진입 직전 (DEC-024 D6)
+- Weekly Scenario Watch re-evaluation 은 PUB-1A.5 retrospective 시점 허용 — 단 Q-056 자체는 DEC-024 D5 로 resolved (DEC-005/009/011 유지)
 - P2/P3 batch (~120 finding) — PUB-1A.5 첫 발행 후 retrospective 안에 archive 또는 selective fix
 
 ## F. 종합 — Claude review 의 자아비판 + GPT review 의 약점 반영
