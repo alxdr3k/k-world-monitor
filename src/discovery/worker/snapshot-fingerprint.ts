@@ -54,6 +54,25 @@ function sha256HexBytes(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
 }
 
+// Best-effort wrapper around recordR2UploadDecision (INV-0012-3 audit ledger).
+// An audit insert failure (e.g. transient SQLite lock) MUST NOT escalate into
+// runtime_error and inflate the queue error counter, nor mis-attribute the
+// failure to Neo4j back-patch when the actual cause is the audit INSERT
+// itself. The structured warning preserves the failure for operator review
+// while letting the worker continue. Codex PR #39 round 2 P2.
+function bestEffortAuditR2Upload(
+  input: Parameters<typeof recordR2UploadDecision>[0]
+): void {
+  try {
+    recordR2UploadDecision(input);
+  } catch (auditErr) {
+    console.warn(
+      `[snapshot] audit insert failed (decision=${input.decision}, snap_id=${input.snapId}):`,
+      auditErr instanceof Error ? auditErr.message : auditErr
+    );
+  }
+}
+
 // discovery_queue.source_id is now canonical src_<ULID> at the producer
 // (rss-worker.enqueueDiscoveredItems resolves slug→canonical before INSERT,
 // enforced by the FK to source_material_policy(source_id)). Consumer-side
@@ -477,8 +496,9 @@ export async function createSnapshotFingerprint(
       ) as ArrayBuffer;
       // INV-0012-3 audit row 1/2 — record attempt BEFORE r2Put so a network
       // failure still leaves a recoverable audit trail (NFR-008 audit-by-absence
-      // proof requires every upload attempt accounted for).
-      recordR2UploadDecision({
+      // proof requires every upload attempt accounted for). Best-effort: an
+      // audit insert failure here must not block r2Put or fail the row.
+      bestEffortAuditR2Upload({
         sourceId: input.sourceId,
         snapId: existing.snapId,
         url: input.url,
@@ -521,6 +541,12 @@ export async function createSnapshotFingerprint(
         // (r2Put overwrites by key). Treat the SET failure as a soft warning
         // rather than escalating to markQueueItemError (which would inflate
         // the failure counter and mislead operators about a real outage).
+        //
+        // The audit insert is intentionally OUTSIDE this try/catch so an
+        // audit failure (e.g. transient SQLite lock) is not mis-attributed
+        // to Neo4j back-patch failure (Codex PR #39 round 2 P2).
+        let setSucceeded = false;
+        let setError: unknown = null;
         try {
           await withSession(async (session) => {
             await session.run(
@@ -529,39 +555,34 @@ export async function createSnapshotFingerprint(
             );
           });
           dedupR2Key = key;
-          // INV-0012-3 audit row 2/2 — successful upload + back-patch.
-          recordR2UploadDecision({
-            sourceId: input.sourceId,
-            snapId: existing.snapId,
-            url: input.url,
-            archivePolicy: input.archivePolicy,
-            rawCloudPolicy: input.rawCloudPolicy,
-            decision: "uploaded",
-            rationale: `dedup back-fill path; r2_key=${key}`,
-          });
+          setSucceeded = true;
         } catch (setErr) {
           console.warn(
             `[snapshot] dedup r2_key back-patch failed for ${existing.snapId}; ` +
               `r2 object uploaded, retry will back-fill:`,
             setErr instanceof Error ? setErr.message : setErr
           );
-          // INV-0012-3 audit row 2/2 — r2 object uploaded but Neo4j SET failed.
-          recordR2UploadDecision({
-            sourceId: input.sourceId,
-            snapId: existing.snapId,
-            url: input.url,
-            archivePolicy: input.archivePolicy,
-            rawCloudPolicy: input.rawCloudPolicy,
-            decision: "set_r2_key_failed_neo4j",
-            rationale: `dedup back-fill path; ${setErr instanceof Error ? setErr.message : String(setErr)}`,
-          });
+          setError = setErr;
         }
+        // INV-0012-3 audit row 2/2 — uploaded vs set_r2_key_failed_neo4j
+        // attribution decided strictly by the Neo4j SET outcome above.
+        bestEffortAuditR2Upload({
+          sourceId: input.sourceId,
+          snapId: existing.snapId,
+          url: input.url,
+          archivePolicy: input.archivePolicy,
+          rawCloudPolicy: input.rawCloudPolicy,
+          decision: setSucceeded ? "uploaded" : "set_r2_key_failed_neo4j",
+          rationale: setSucceeded
+            ? `dedup back-fill path; r2_key=${key}`
+            : `dedup back-fill path; ${setError instanceof Error ? setError.message : String(setError)}`,
+        });
       } else {
         // INV-0012-3 audit row 2/2 — TOCTOU recheck rejected (concurrent
         // prohibited source linker, or recheck itself threw). r2 object
         // remains orphaned by design (see rationale above for why we do
         // NOT r2Delete here).
-        recordR2UploadDecision({
+        bestEffortAuditR2Upload({
           sourceId: input.sourceId,
           snapId: existing.snapId,
           url: input.url,
@@ -624,8 +645,9 @@ export async function createSnapshotFingerprint(
         input.body.byteOffset,
         input.body.byteOffset + input.body.byteLength
       ) as ArrayBuffer;
-      // INV-0012-3 audit row 1/2 — new-path attempt BEFORE r2Put.
-      recordR2UploadDecision({
+      // INV-0012-3 audit row 1/2 — new-path attempt BEFORE r2Put. Best-effort
+      // (Codex PR #39 round 2 P2): audit failure must not block r2Put.
+      bestEffortAuditR2Upload({
         sourceId: input.sourceId,
         snapId: actualSnapId,
         url: input.url,
@@ -666,6 +688,12 @@ export async function createSnapshotFingerprint(
         // idempotent key. Escalating to markQueueItemError would inflate the
         // failure counter for a transient Neo4j blip even though graph + r2
         // are recoverable.
+        //
+        // The audit insert is intentionally OUTSIDE this try/catch so an
+        // audit failure (e.g. transient SQLite lock) is not mis-attributed
+        // to Neo4j back-patch failure (Codex PR #39 round 2 P2).
+        let setSucceeded = false;
+        let setError: unknown = null;
         try {
           await withSession(async (session) => {
             await session.run(
@@ -674,36 +702,31 @@ export async function createSnapshotFingerprint(
             );
           });
           r2Key = key;
-          // INV-0012-3 audit row 2/2 — successful new-path upload + back-patch.
-          recordR2UploadDecision({
-            sourceId: input.sourceId,
-            snapId: actualSnapId,
-            url: input.url,
-            archivePolicy: input.archivePolicy,
-            rawCloudPolicy: input.rawCloudPolicy,
-            decision: "uploaded",
-            rationale: `new-path; r2_key=${key}`,
-          });
+          setSucceeded = true;
         } catch (setErr) {
           console.warn(
             `[snapshot] new-path r2_key back-patch failed for ${actualSnapId}; ` +
               `r2 object uploaded, retry will back-fill:`,
             setErr instanceof Error ? setErr.message : setErr
           );
-          // INV-0012-3 audit row 2/2 — r2 object uploaded, Neo4j SET failed.
-          recordR2UploadDecision({
-            sourceId: input.sourceId,
-            snapId: actualSnapId,
-            url: input.url,
-            archivePolicy: input.archivePolicy,
-            rawCloudPolicy: input.rawCloudPolicy,
-            decision: "set_r2_key_failed_neo4j",
-            rationale: `new-path; ${setErr instanceof Error ? setErr.message : String(setErr)}`,
-          });
+          setError = setErr;
         }
+        // INV-0012-3 audit row 2/2 — uploaded vs set_r2_key_failed_neo4j
+        // attribution decided strictly by the Neo4j SET outcome above.
+        bestEffortAuditR2Upload({
+          sourceId: input.sourceId,
+          snapId: actualSnapId,
+          url: input.url,
+          archivePolicy: input.archivePolicy,
+          rawCloudPolicy: input.rawCloudPolicy,
+          decision: setSucceeded ? "uploaded" : "set_r2_key_failed_neo4j",
+          rationale: setSucceeded
+            ? `new-path; r2_key=${key}`
+            : `new-path; ${setError instanceof Error ? setError.message : String(setError)}`,
+        });
       } else {
         // INV-0012-3 audit row 2/2 — TOCTOU recheck rejected on MERGE-matched branch.
-        recordR2UploadDecision({
+        bestEffortAuditR2Upload({
           sourceId: input.sourceId,
           snapId: actualSnapId,
           url: input.url,
