@@ -34,10 +34,10 @@ invariants:
     statement: Tier 매핑 기준 = **capability (성능 / 분야 우위 / 특성)** (가격 단독 매핑 금지, INV-0023-5 강화). vendor 별 동 tier 모델은 quality benchmark + domain advantage 로 매핑되며 cost 는 보조 지표. **실제 model snapshot (정확한 model name / version / effort level) 은 `data/llm_routing.yaml` operational config 가 관리** — ADR 본문은 stable invariant (capability tier + vendor role), config 는 운영 catalog change 시 갱신. ADR 본문에 사용되는 model name 은 example snapshot (2026-05-11 시점, OpenAI API catalog 변경 시 config 만 update — ADR 본문 stable).
     status: active
   - id: INV-0023-4
-    statement: Cross-vendor review **강제 단계는 3 종으로 한정**: (1) publication preflight cite check overclaim LLM judge (Tier 3 cross-vendor — GPT-5 nano 생성 시 Claude Haiku 4.5 review), (2) scenario validate adversarial pass (Tier 0 cross-vendor — GPT-5.5 Pro xthink 생성 시 Opus 4.7 xhigh review), (3) 운영자 명시 high-stakes thesis (Tier 0 cross-vendor). 그 외 단계 (article extract / dossier 합성 / EvidencePack / 일반 thesis) 는 cross-vendor 의무 X — manual review + deterministic 검증 (quote substring 등) 만 적용.
+    statement: "Cross-vendor review **강제 단계는 3 종으로 한정**: (1) publication preflight cite check overclaim LLM judge (Tier 3 cross-vendor — GPT-5 nano 생성 시 Claude Haiku 4.5 review), (2) scenario validate adversarial pass (Tier 0 cross-vendor — GPT-5.5 Pro xthink 생성 시 Opus 4.7 xhigh review), (3) 운영자 명시 high-stakes thesis (Tier 0 cross-vendor). 그 외 단계 (article extract / dossier 합성 / EvidencePack / 일반 thesis) 는 cross-vendor 의무 X — manual review + deterministic 검증 (quote substring 등) 만 적용."
     status: active
   - id: INV-0023-5
-    statement: Google (Gemini API) 사용 scope = **Tier 3 + 탐색(Google Search grounding) 보조 + 동일 tier 비용효율 우위 시만**. 메인 generator (extract / dossier / scenario / thesis / publication) 의 default 또는 reviewer 로 사용 금지 (INV-0023-2 와 정합). 사용 가능한 경우: discovery layer 의 검색 grounding (Gemini Search grounding 기능) / 단순 structured 추출에서 GPT-5 nano 대비 비용효율 우위 입증 시 fallback.
+    statement: "Google (Gemini API) 사용 scope = **Tier 3 + 탐색(Google Search grounding) 보조 + 동일 tier 비용효율 우위 시만**. 메인 generator (extract / dossier / scenario / thesis / publication) 의 default 또는 reviewer 로 사용 금지 (INV-0023-2 와 정합). 사용 가능한 경우: discovery layer 의 검색 grounding (Gemini Search grounding 기능) / 단순 structured 추출에서 GPT-5 nano 대비 비용효율 우위 입증 시 fallback."
     status: active
   - id: INV-0023-6
     statement: 대형 dataset (1000+ rows 또는 50KB+ raw payload) 는 **ADR-0024 Data Science Module 을 통과 후 derived metric 으로만 LLM 입력**. dataset raw → LLM 직접 금지. LLM 호출에 raw dataset 발견 시 assertion fail.
@@ -53,7 +53,7 @@ preconditions:
   - id: PRE-0023-1
     statement: OpenAI API key + Anthropic API key + Google AI Studio API key 모두 self-host 가능 (Doppler / 환경 변수, `docs/05_RUNBOOK.md`).
   - id: PRE-0023-2
-    statement: 각 vendor 의 strict tool-use / structured outputs / prompt caching / batch API equivalent 가 v0 시점에 사용 가능. OpenAI = `response_format: json_schema`, Anthropic = `strict: true` + `anthropic-beta: structured-outputs-2025-11-13`, Google = `responseSchema`.
+    statement: "각 vendor 의 strict tool-use / structured outputs / prompt caching / batch API equivalent 가 v0 시점에 사용 가능. OpenAI = `response_format: json_schema`, Anthropic = `strict: true` + `anthropic-beta: structured-outputs-2025-11-13`, Google = `responseSchema`."
   - id: PRE-0023-3
     statement: vendor 별 cost API 가 run_ledger 에 cost / cached_tokens 기록 가능한 수준의 detail 제공. 미제공 vendor 는 Tier 3 fallback 만 허용.
   - id: PRE-0023-4
