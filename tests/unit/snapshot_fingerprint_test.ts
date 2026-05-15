@@ -522,6 +522,38 @@ describe("createSnapshotFingerprint — deduplication", () => {
     // No R2 upload occurs when linkage fails (early throw before r2Put).
     expect(r2Puts).toHaveLength(0);
   });
+
+  // AI-P1-3 (INFRA-1B.3.h2-queue-cli): error_code unification — new-path
+  // (createDocumentAndSnapshot) now throws TypedQueueError when the Source
+  // node is missing, matching the dedup-path behavior. Previously this site
+  // threw plain Error which processOneRow's catch bucketed as 'runtime_error',
+  // forcing operator alert configs to cover both error_codes for the same
+  // failure mode. Both paths now emit `source_not_found_in_graph`.
+  it("throws TypedQueueError(source_not_found_in_graph) on new-path when Source node is absent (AI-P1-3)", async () => {
+    findExistingResult = null; // force new-path (createDocumentAndSnapshot)
+    sourceMissingOnGuard = true; // count(src) returns 0
+
+    const db = setupDb();
+    const queueId = "dq_newpath_no_source";
+    seedQueue(db, queueId);
+
+    let caught: unknown;
+    try {
+      await createSnapshotFingerprint(baseInput(queueId));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(TypedQueueError);
+    expect((caught as TypedQueueError).errorCode).toBe("source_not_found_in_graph");
+    expect((caught as Error).message).toMatch(/new-path: source not found in graph/);
+    // The rollback happens inside createDocumentAndSnapshot's catch, so no
+    // partial Document or Snapshot is persisted (verifiable by counting
+    // MERGE writes — tx.rollback was called).
+    expect(neo4j.tx.rollbackCount).toBeGreaterThan(0);
+    // No R2 upload (the missing-Source guard fires inside the Neo4j tx,
+    // BEFORE the createSnapshotFingerprint reaches the R2 upload block).
+    expect(r2Puts).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
