@@ -1024,14 +1024,14 @@ L10 cross-cutting:
 
 ### Cross-review by GPT (2026-05-15)
 
-본 review 직후 GPT (운영자 cross-reviewer) 가 동일 repo 에 4 부 분할 review 수행. raw body + Claude 의 비판적 평가 + 두 review 의 합리적 종합 결과는 다음 파일에 분리 보존:
+본 review 직후 GPT (운영자 cross-reviewer) 가 동일 repo 에 4 부 분할 review 수행. curated summary + Claude 의 비판적 평가 + 두 review 의 합리적 종합 결과는 다음 파일에 분리 보존:
 
-- [`docs/retrospectives/2026-05-15-gpt-cross-review.md`](retrospectives/2026-05-15-gpt-cross-review.md) — GPT review raw body + Claude 비판적 평가 + commensurability table
+- [`docs/retrospectives/2026-05-15-gpt-cross-review.md`](retrospectives/2026-05-15-gpt-cross-review.md) — GPT review curated summary + Claude 비판적 평가 + commensurability table + Finding index (26 row)
 - [`docs/retrospectives/2026-05-15-action-items.md`](retrospectives/2026-05-15-action-items.md) — 종합 action items: 신규 Q-052~Q-059 + 신규 slice 16개 + 운영자 admin task + 다음 4주 sequence
 
 **가장 큰 종합 결과**:
-1. **GPT P0 (R2 cross-source policy guard 가 `archive_policy` 검사 안 함)** 정확 — Claude L4-F 의 "정합 robust ✓" 결론 후퇴. `allLinkedSourcesAllowRawCloud()` 가 raw_cloud_policy 만 봐서 cross-source dedup 시 `metadata_only` source 가 R2-backed Snapshot 에 link 가능. `INFRA-1B.3.x-policy-fix` slice 즉시 의무.
-2. **GPT Latent P1 (chunker raw text persistence 가 source policy 안 받음)** 정확 — Claude L3/L5/L6 chunker analysis 의 본질적 보강. `INFRA-1B.4.x-chunker-policy-gate` slice 의무 (Q-053 lock 후).
+1. **GPT P0 (R2 cross-source policy guard 가 `archive_policy` 검사 안 함)** 정확 — Claude L4-F 의 "정합 robust ✓" 결론 후퇴. `allLinkedSourcesAllowRawCloud()` 가 raw_cloud_policy 만 봐서 cross-source dedup 시 `metadata_only` source 가 R2-backed Snapshot 에 link 가능. `INFRA-1B.3.h1-policy-fix` candidate slice 즉시 의무.
+2. **GPT Latent P1 (chunker raw text persistence 가 source policy 안 받음)** 정확 — Claude L3/L5/L6 chunker analysis 의 본질적 보강. `INFRA-1B.4.h1-chunker-policy-gate` candidate slice 의무 (DEC-024 D2 lock 후).
 3. **Claude P0 (L9-A main branch protection 3중 mismatch)** 는 GPT 미커버 — Claude unique. Q-052 결정이 모든 향후 governance baseline anchor.
 4. 두 review 가 commensurable 하지 않음. Claude = governance/invariant/code/test angle systemic. GPT = product viability / operator UX / data quality / cross-source policy semantic angle systemic. 양쪽 blind spot 상호 cover.
 

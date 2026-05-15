@@ -25,7 +25,7 @@ defer 자체가 명시 결정 (re-entry gate + 조건 lock) — doc drift 방지
 1. **engineering deliverables (즉시 진행 가능)** = `AI-P0-1` (R2 archive_policy guard) ~ `AI-P1-7` (policy_decisions DB enum + upload_attempt_id) — P0-M2 hardening 핵심.
 2. **engineering doc-sync 보조 (Week 1 안 함께 진행 가능)** = `AI-P1-8` (frontmatter parse fix) ~ `AI-P1-12` (RUNBOOK setup hygiene) — Codex review 2026-05-15 inline #21 feedback: rule #1 의 boundary 와 Week 1 sequence 정합. 두 group 모두 engineering queue 안 active, P0-M2 gate evidence 조건.
 3. **운영자 admin task (병렬)** = DEC-024 D1 의 GH branch protection 등록 + CLAUDE.md global 갱신 / SPIKE-001 실행 / Doppler secret rotation cadence — engineering queue 와 별도.
-4. **`AI-P2-*` (~22 항목) / `AI-P3-batch-*` (3 batch ~80 finding)** = backlog only. P0-M2 gate accept 전까지 진입 금지. 운영자가 Q-059 resolve 시점 또는 PUB-1A.5 첫 발행 retrospective 시점 promotion 가능.
+4. **`AI-P2-*` (~22 항목) / `AI-P3-batch-*` (3 batch ~80 finding)** = standalone backlog only. P0-M2 gate accept 전까지 standalone 진입 금지. **단 DEC-024 D8 의 rule #2** ("각 P1 slice 가 인접 P2 finding 흡수 가능") 에 따라 인접 P2 가 P1 slice 안에 batch 진입 가능 — 예 Week 4 의 `AI-P2-1` (HLD Data Model fix) 가 `DOC-SYNC-2026-05-15` slice 안 흡수, `AI-P2-10` (supply chain audit) 가 별도 light slice. 잔여 standalone P3 batch 는 PUB-1A.5 retrospective 까지 archive.
 5. **L2-* batch (Claude 자체 governance / glossary)** = `INFRA-1A.9-validator-extension` + `INFRA-1A.10-glossary-backfill` slice 안에 묶음 — engineering queue 후반부 또는 P0-M3 entry 직전.
 
 위반 시 attention budget 초과 + PUB-1A.5 2주 목표 (DEC-005) 위협.
@@ -78,7 +78,7 @@ defer 자체가 명시 결정 (re-entry gate + 조건 lock) — doc drift 방지
 | **Q-058** | Source reliability 단일 축 vs multi-dim — primary_data / official_policy / wire_news / expert_analysis / market_commentary / local_observer / opposition_view / think_tank / academic 의 `source_role` 추가 여부 | GPT 3부 (데이터 품질) | AI-P1-4 Source Registry slice 안 흡수 가능 |
 | **Q-059** | 운영자 attention budget — Claude L12-H 의 "review 자체가 capacity 초과" + GPT 4부 의 PR-1~5 만 우선 path. P2/P3 batch (~120 finding) 의 처리 정책 (즉시 vs PUB-1A.5 후 archive) | Claude L12-H | 다음 4주 priority |
 
-## C. 신규 slice (IMPL_PLAN 등록 의무)
+## C. 신규 slice (IMPL_PLAN 등록 의무) + existing planned slice scope 확장
 
 본 review 가 발견한 새 slice — `docs/04_IMPLEMENTATION_PLAN.md` slice 표 (line 100~) 에 row 추가 의무.
 
@@ -97,7 +97,7 @@ defer 자체가 명시 결정 (re-entry gate + 조건 lock) — doc drift 방지
 | `DOC-SYNC-2026-05-15` | P0-M2-hardening | (cross-cut) | doc batch fix — current-state line 38/184-189/248 / Risks Q-042~Q-048 / TRACE-040/041 / IMPL_PLAN Risks / HLD Data Model 분리 / PRD Open Questions Q-035/Q-050 추가 / 03_RISK_SPIKES SPIKE-002/003 ADR-0023+DEC-010 reflow / Milestones P0-M2-hardening row 추가 / TEST count fix | AI-P1-9 + AI-P2-1 + Claude L1 batch | AI-P1-8 (frontmatter parse fix 선행) |
 | `INFRA-1B.2.h1-discovery-hardening` | P0-M2-hardening | INFRA | discovery scheduler / queue 8 finding batch (active_v0 validation / daily cap real-daily / scheduler rejected error / done URL re-enqueue / URL canonicalization / content_hash column 분리 / content-type rejection enum / backoff outcome 별 분리) | AI-P2-2 + AI-P2-8 | INFRA-1B.2 |
 | `INFRA-1B.6.h1-feedback-hardening` | P0-M2-hardening 또는 P1-M3-hardening | INFRA | ManualClaimEntry whitespace/url/retry idempotency 강화 + `:RESOLVES` edge UNIQUE constraint | AI-P2-3 | INFRA-1B.6 |
-| `OPS-1A.2` (existing planned) | P0-M3 | OPS | run ledger cost throttle + stale running run reaper + failure_code/detail (기존 planned slice 의 GPT P2-25/26 + Claude L6-B/C 흡수) | AI-P2-4 | OPS-1A.1 |
+| `OPS-1A.2` **(existing planned — scope 확장만, 신규 등록 아님)** | P0-M3 | OPS | 기존 planned OPS-1A.2 (cost throttling worker) scope 에 본 review 의 GPT P2-25/26 + Claude L6-B/C 흡수 — failure_code/detail 추가 + stale running run reaper. IMPL_PLAN slice 표 등록 신규 의무 없음 — 기존 row 의 evidence 갱신만. | AI-P2-4 | OPS-1A.1 |
 | `OPS-1A.5-unified-cli` | P0-M3 | OPS | `kwm status / sources validate / discovery run / queue process / interventions report / runtime-invariants check` unified CLI namespace | AI-P2-7 | INFRA-1B.* hardening 후 |
 | `INFRA-1A.h1-supply-chain-audit` | P0-M2-hardening | INFRA | `.github/dependabot.yml` + CI 에 `bun audit` step | AI-P2-10 | — |
 | `INFRA-1B.2.h2-end-to-end-test` | P0-M2-hardening | INFRA | seed → bootstrap → discovery → queue → snapshot → chunk e2e test | AI-P2-9 | 모든 P1 slice 완료 후 |
