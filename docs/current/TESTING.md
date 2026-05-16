@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: b660f46 (2026-05-16) — AI-P1-7 / `INFRA-1B.3.h3-audit-hardening` code commit on branch `claude/audit-hardening-v8`. Following commits are doc-only (TESTING SHA refresh) and do NOT advance the code baseline — this SHA is the latest CODE-touching commit on the branch. AI-P1-7 = v8 audit hardening (policy_decisions ADD COLUMN upload_attempt_id + 3 BEFORE INSERT triggers: intended_action enum / r2_upload decision enum / r2_upload upload_attempt_id required) + `newUploadAttemptId()` export + `R2UploadAuditInput.uploadAttemptId` required field + snapshot-fingerprint threads ONE upload_attempt_id per r2Put attempt through BEFORE/AFTER row pair; +12 tests = 609 → 621 tests total. Tests breakdown: 10 new in `audit_policy_decisions_test.ts` (newUploadAttemptId 2 + upload_attempt_id verbatim 1 + BEFORE/AFTER correlation isolated from concurrent attempts 1 + intended_action trigger reject+allow 2 + r2_upload decision trigger reject+operator-gate untouched 2 + upload_attempt_id required trigger reject+operator-gate NULL allowed 2) + 2 new in `snapshot_fingerprint_test.ts` (new-path attempted+uploaded share one uatt + dedup back-fill attempted+uploaded share one uatt distinct from new-path). All 16 existing audit-policy-decisions tests updated to pass `uploadAttemptId: freshAttemptId()` (v8 trigger requires it). Previous code baseline = (AI-P1-12 INFRA-1B.5.h1-runbook-setup-hygiene PR #48 squash — 569 → 609). Earlier baselines: AI-P1-1 PR #47 (561 → 569), 090ca5b (AI-P1-3 PR #45 — 544 → 561), 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). **Pre-merge SHA reachability**: branch-local commits (`b660f46`, ...) ARE reachable while the branch exists but will NOT survive squash-merge to main; the merge commit on main is the post-merge canonical reference and the next slice's baseline header advances to that SHA. For reproducibility while the PR is open, `git fetch origin <branch>` + `git checkout b660f46` resolves correctly.
+> Last verified against code: f96bbaa (2026-05-16) — AI-P1-6 / `OPS-1B.h1-runtime-invariant-scanner` code commit on branch `claude/r2-invariant-scanner`. Following commits are doc-only (TESTING SHA refresh) and do NOT advance the code baseline. AI-P1-6 = R2 invariant scanner — read-only 3-way reconciliation (Snapshot.r2_key Neo4j ↔ policy_decisions uploaded audit SQLite ↔ source_material_policy SQLite) with 3 violation axes: `r2_key_without_audit` / `audit_uploaded_without_r2_key` / `r2_key_with_restricted_source`. +24 tests = 623 → 647 tests total. Tests breakdown: 5 parseSnapIdFromRationale + 2 reconcile aligned + 2 Axis 1 + 1 Axis 2 + 4 Axis 3 + 1 combined + 3 fetchUploadedAuditRows + 2 fetchSourcePolicies + 2 fetchR2BackedSnapshots + 2 scanR2Invariants orchestrator. Previous code baseline = b660f46 (AI-P1-7 INFRA-1B.3.h3-audit-hardening PR #49 — 609 → 623). Earlier baselines: 31abe60 (AI-P1-12 PR #48 — 569 → 609), AI-P1-1 PR #47 (561 → 569), 090ca5b (AI-P1-3 PR #45 — 544 → 561), 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). **Pre-merge SHA reachability**: `git fetch origin <branch>` + `git checkout f96bbaa` resolves correctly while the PR is open; post-squash-merge, the merge commit on main is the canonical reference and the next slice's baseline advances.
 
 ## Testing policy
 
@@ -55,7 +55,7 @@ bun run invariant:write
 |---|---|---|---|---|
 | install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
 | typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
-| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 22 file / **621 cases** — Bun native runner (post-AI-P1-7 INFRA-1B.3.h3-audit-hardening landed: +12 tests — 10 in audit_policy_decisions_test.ts for v8 enum triggers + upload_attempt_id correlation + 2 in snapshot_fingerprint_test.ts for BEFORE/AFTER attempt id sharing; previous baseline 609 = AI-P1-12 INFRA-1B.5.h1-runbook-setup-hygiene) |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 23 file / **647 cases** — Bun native runner (post-AI-P1-6 OPS-1B.h1-runtime-invariant-scanner landed: +24 tests in r2_invariant_scanner_test.ts for 3-axis reconciliation Snapshot↔policy↔audit; previous baseline 623 = AI-P1-7 INFRA-1B.3.h3-audit-hardening). After PR #49 round 1 fix, audit-policy-decisions also gained 2 whitespace TRIM trigger tests → 623 baseline reflects that. |
 | migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v8 schema files parse (v7 = policy_decisions ADD COLUMN intended_action / INFRA-1B.3.x-audit; v8 = policy_decisions ADD COLUMN upload_attempt_id + 3 enum/required triggers / INFRA-1B.3.h3-audit-hardening AI-P1-7) |
 | invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
@@ -73,7 +73,7 @@ Workflow files (활성):
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
 | `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
-| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (621 cases) + migrate dry-run |
+| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (647 cases) + migrate dry-run |
 | `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
 | `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
@@ -109,19 +109,19 @@ advisory).
 - PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
   으로 (1) workflow exists stage 진입.
-- 코드 테스트 (`bun test`) 는 22 file / **621 케이스** — Bun native runner
+- 코드 테스트 (`bun test`) 는 23 file / **647 케이스** — Bun native runner
   1 분 이내 expected. History: 490 → 515 (INFRA-1B.3.x-audit PR #39) →
   521 (INFRA-1B.3.h1-policy-fix PR #41, AI-P0-1) → 544 (INFRA-1B.1.h1-
   source-bootstrap-neo4j PR #44, AI-P1-2) → 561 (INFRA-1B.3.h2-queue-cli
   PR #45, AI-P1-3) → 569 (INFRA-1B.4.h1-chunker-policy-gate PR #47,
   AI-P1-1) → 609 (INFRA-1B.5.h1-runbook-setup-hygiene PR #48, AI-P1-12)
-  → **621** (INFRA-1B.3.h3-audit-hardening landed 2026-05-16: +12 tests
-  for v8 audit hardening — 10 in audit_policy_decisions_test.ts
-  (newUploadAttemptId + upload_attempt_id correlation + 3 v8 trigger
-  enforcements: intended_action enum / r2_upload decision enum /
-  upload_attempt_id required) + 2 in snapshot_fingerprint_test.ts
-  (new-path + dedup back-fill BEFORE/AFTER share one upload_attempt_id),
-  AI-P1-7).
+  → 623 (INFRA-1B.3.h3-audit-hardening PR #49: +12 tests v8 audit
+  hardening + +2 Codex P2 round 1 whitespace TRIM trigger, AI-P1-7)
+  → **647** (OPS-1B.h1-runtime-invariant-scanner landed 2026-05-16:
+  +24 tests in r2_invariant_scanner_test.ts for 3-axis reconciliation
+  Snapshot↔policy↔audit — parseSnapIdFromRationale 5 + reconcile axes
+  9 + SQLite fetchers 5 + Neo4j fetcher 2 + scanR2Invariants
+  orchestrator 2 + combined 1, AI-P1-6).
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR
