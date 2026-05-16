@@ -11,11 +11,16 @@
 
 ### Defined sections
 
+- **Fresh worktree setup** (AI-P1-12, INFRA-1B.5.h1-runbook-setup-hygiene
+  — `bun install --frozen-lockfile` + Doppler boot + git hooks install)
 - How to Deploy / Doppler integration (DEC-020 Q-047, 이번 milestone 활성)
 - Publishing Site Deployment (ADR-0022 / Cloudflare Pages — P0-M6 진입 직전)
 - Data Operations (백업 / R2 lifecycle / retention batch / soft-delete /
   RETENTION_PROTECTED_KINDS — INFRA-1A.8 landed)
 - Pre-deploy schema migration contract (DEC-019 Q-040 — P1-MVP-prep entry)
+- **GitHub access token revoke** (AI-P1-12 — credential leak / role change /
+  rotation cadence)
+- **Pre-commit hook (env scrub)** (AI-P1-12 — `scripts/check-secrets.ts`)
 
 ### Pending sections (slice landing 시 채움)
 
@@ -24,6 +29,43 @@
 - Cost throttling worker runbook (OPS-1A.2 진입 시)
 - Metrics framework + evaluation harness runbook (OPS-1A.3 ~ 1A.4 진입 시)
 - Stale worker runbook (OPS-1B.1 진입 시)
+
+## Fresh worktree setup (AI-P1-12)
+
+새 clone 또는 새 worktree 에서 1회 실행. 운영자 / agent 가 환경을 동일
+상태로 만들기 위한 의무 sequence.
+
+```bash
+# 1. Lockfile-frozen install — bun.lock 의 정확한 version 만 사용 (drift 차단).
+#    fresh worktree 가 production / CI 와 동일 dependency tree 보장.
+bun install --frozen-lockfile
+
+# 2. Git hooks install — repo-managed pre-commit hook (env scrub) 활성화.
+#    `core.hooksPath` 설정 후 `scripts/git-hooks/*` 가 자동 적용된다.
+bun run hooks:install
+
+# 3. Secret store boot — Doppler primary, .env fallback.
+#    Doppler 가입 + project + service token 발급은 본 문서 "Doppler
+#    integration" 섹션 참조. fallback debugging 시:
+cp .env.example .env
+# .env 직접 편집 (값 채우기) — 절대 commit 하지 말 것 (.gitignore + pre-commit hook 이 차단)
+
+# 4. Schema apply (idempotent — 신규 worktree 가 처음 DB 작업 직전 1회).
+bun run migrate:sqlite
+bun run migrate:neo4j
+
+# 5. (선택) Source Registry bootstrap — Neo4j Source node 동기화 + preflight.
+bun run seed-sources:neo4j
+
+# 6. 검증 — 모든 setup 단계 정합 확인.
+bun run typecheck
+bun test
+bun run invariant:check
+```
+
+**중요**: `bun install` (frozen 없이) 는 lockfile 자동 갱신을 트리거할 수 있다.
+fresh worktree / CI / production 환경에서는 항상 `--frozen-lockfile` 의무.
+lockfile 의도적 update 시에만 plain `bun install` 사용 + commit 의무.
 
 ## How to Deploy
 
@@ -516,6 +558,97 @@ reclaim threshold = 1h (1h 넘게 'processing' 인 row 는 재기동 시점에
 - Escalation path: 없음 (1인 운영). 운영자가 부재 시 모든 worker는 정지 상태로
   진입 (cron disable).
 
+## GitHub access token revoke (AI-P1-12)
+
+GH PAT / fine-grained / OAuth token 의 revoke 시점 + 절차.
+
+**When to revoke** (의무):
+1. **Token leak 의심** — commit / log / chat / CI artifact 어디든 토큰이
+   redacted 안 된 형태로 노출. 즉시 revoke + rotate.
+2. **Role change** — 운영자가 권한 좁히거나 다른 워크플로우로 전환할 때.
+3. **Inactivity** — fine-grained PAT 의 max expiry 1년 도달 직전.
+4. **Rotation cadence** — 분기별 review (Doppler service token + GH PAT
+   동시 rotate). leak 의심 외에도 정기 rotate 가 정책 (DEC-020 Q-047
+   secret rotation cadence).
+5. **Personal-machine sign-out** — 운영자 personal device 분실 / 매각 /
+   양도 직전.
+
+**Revoke procedure (GitHub web UI primary)**:
+
+```text
+https://github.com/settings/tokens               # classic PAT
+https://github.com/settings/personal-access-tokens   # fine-grained
+```
+
+각 token row → "Delete" 또는 "Revoke" 클릭. immediate 효과.
+
+**Revoke procedure (gh CLI fallback)**:
+
+```bash
+# fine-grained 는 gh CLI 미지원 (2026-05 시점) — UI 만.
+# classic PAT 는 API 로 revoke 가능:
+gh api -X DELETE /authorizations/<id>
+# 단 본 token 자체가 admin scope 보유해야 호출 가능 (chicken-and-egg).
+# 보통 UI revoke 가 안전한 default.
+```
+
+**Post-revoke 의무 (rotate 가 아닌 경우)**:
+- Revoke 직후: `git push` / `gh pr create` / cron host workflow 등 모든
+  GH-token 의존 명령이 401 / 403 으로 fail 함을 확인. 즉 자동화가 stale
+  token 으로 계속 실행되지 않는지 검증.
+- repository secret (`GH_TOKEN`, `DOPPLER_TOKEN` 등) 도 동시 갱신 의무
+  if rotated, otherwise 즉시 GH Actions failure.
+- Doppler 에 stored 된 GH token 이면 Doppler `prd` config 도 갱신.
+
+**Audit trace**:
+- GitHub `https://github.com/settings/security-log` 에 revoke event 기록.
+- 운영자는 retrospective note 에 leak / revoke 시점 + sequence (revoke →
+  rotate → 의존 workflow 검증) 기록 (DEC-024 break-glass 절차 정합).
+
+## Pre-commit hook — env scrub (AI-P1-12)
+
+`scripts/git-hooks/pre-commit` shim 이 `bun run scripts/check-secrets.ts`
+를 실행. 2-layer defense:
+
+| Layer | 동작 |
+|---|---|
+| 1 (filename) | staged path 가 `.env` / `.env.local` / `.env.production` 등 secret container 면 reject. `.env.example` / `.env.sample` / `.env.template` 는 exempt (reference 파일) |
+| 2 (pattern) | staged file content 에 known API key 패턴 (OpenAI / Anthropic / Google / AWS / GitHub PAT / Doppler) 검출 시 reject. redacted preview (`first4...last4`) 만 stderr 출력 — leaked token 이 hook output 자체에 재유출 안 됨 |
+
+**Install** (fresh worktree 1회):
+
+```bash
+bun run hooks:install
+# 내부: git config core.hooksPath scripts/git-hooks + chmod +x scripts/git-hooks/*
+```
+
+**Test** (hook 동작 확인):
+
+```bash
+echo 'sk-proj-FAKE-TEST-KEY-PLACEHOLDER-1234567890123456' > /tmp/fake-test.txt
+git add /tmp/fake-test.txt && git commit -m test
+# → "secret pattern 'openai_api_key' matched: sk-p...3456" + exit 1
+```
+
+**Operator override** (false positive — 예 test fixture, glossary 인용 등):
+
+```bash
+git commit --no-verify
+# 의무: commit body 에 정당화 한 줄 ("hook bypass: legitimate test fixture ...")
+```
+
+**Disable** (NOT recommended):
+
+```bash
+git config --unset core.hooksPath
+# 본 명령 실행 시 retrospective note 기록 의무
+```
+
+본 hook 은 single-process operator 가정. CI 단계는 별도 secret scanning
+(`gh api .../code-scanning/alerts` 등) 으로 후처리 — 본 hook 은 첫 번째
+defense layer 만 담당. AI-P2-10 (`INFRA-1A.h1-supply-chain-audit` slice)
+가 dependabot + `bun audit` CI 추가 시 별도 통합 검토.
+
 ## Change Log
 
 | 날짜 | 변경 | By |
@@ -524,3 +657,4 @@ reclaim threshold = 1h (1h 넘게 'processing' 인 row 는 재기동 시점에
 | 2026-05-12 | Data Operations 섹션 전면 업데이트 — backup schedule (Neo4j 30d / SQLite 90d / JSONL audit monthly), R2 lifecycle rules (expire 3 + transition 6), retention batch jobs (daily/weekly/monthly), RETENTION_PROTECTED_KINDS 상수, soft-delete 2단계 패턴, 복구 절차, 연간 retention drill (INFRA-1A.8 / DEC-007 / AC-032) | Claude |
 | 2026-05-13 | "Pre-deploy schema migration contract" 섹션 추가 — v0 단계 base-schema in-place 재작성 + wipe-and-reseed default upgrade path 명문화. Codex auto-review 가 반복 지적해 온 in-place ALTER / forward migration 요구를 본 contract 로 일괄 처리 (DEC-019 / Q-040 lock) | Claude |
 | 2026-05-11 | Publishing Site Deployment 섹션 추가 (ADR-0022 + DEC-006 Build watch paths precondition) + Roll Back 섹션 publishing 우선 명시 (자체 사이트 + data backup) | user / Claude |
+| 2026-05-15 | AI-P1-12 / INFRA-1B.5.h1-runbook-setup-hygiene — 3 신규 섹션: "Fresh worktree setup" (`bun install --frozen-lockfile` + `hooks:install` + Doppler boot + migrate + seed-sources:neo4j + 검증 sequence) + "GitHub access token revoke" (when/how/post-revoke 의무) + "Pre-commit hook — env scrub" (2-layer defense: filename + pattern, operator override / disable 절차) | Claude |

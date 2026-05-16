@@ -22,7 +22,9 @@
     "discovery:run": "bun run src/discovery/worker/run-discovery.ts",
     "discovery:dry-run": "bun run src/discovery/worker/run-discovery.ts --dry-run",
     "discovery:process-queue": "bun run src/discovery/worker/run-process-queue.ts",
-    "discovery:process-queue:dry-run": "bun run src/discovery/worker/run-process-queue.ts --dry-run"
+    "discovery:process-queue:dry-run": "bun run src/discovery/worker/run-process-queue.ts --dry-run",
+    "hooks:install": "bash scripts/install-git-hooks.sh",
+    "check-secrets": "bun run scripts/check-secrets.ts"
   },
   "dependencies": {
     "fast-xml-parser": "^5.8.0",
