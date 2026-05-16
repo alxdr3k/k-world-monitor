@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: (pending AI-P1-13 code commit on branch `claude/scanner-orphan-axis`) — AI-P1-13 / `OPS-1B.h2-r2-invariant-scanner-orphan-axis` (P1 gate-blocker hotfix for PR #50 scanner blind spot). AI-P1-13 = scanner SQL extended from `decision = 'uploaded'` to `decision IN ('uploaded', 'set_r2_key_failed_neo4j')` + 2 new violation axes: `r2_object_without_graph_key` (the most critical orphan state — R2 object exists, Neo4j Snapshot.r2_key NULL via set_r2_key_failed_neo4j outcome row) + `malformed_r2_upload_audit_row` (rationale unparseable → surface as violation rather than silently drop, defensive coding rule). Existing 3 axes preserved with audit lifecycle invariant locked by PR #49 round 3 (no audit row semantic change). Followup deferred: v9 snap_id column (AI-P1-15 separate slice). +10 tests = 652 → 662 tests total. Tests breakdown: 3 fetchR2UploadOutcomeAuditRows (broadened SQL, malformed surfacing, backward-compat wrapper) + 3 Axis 4 (set_r2_key_failed_neo4j orphan emit, recovery defensive emit, uploaded-decision-no-emit) + 3 Axis 5 (malformed uploaded, malformed failed-neo4j, rationale prefix truncation) + 1 orchestrator (ScanCounts new fields + 3 axes integration). Previous code baseline = 2f6ce43 (AI-P0-2 / INFRA-1B.3.h4-dedup-r2-backed-link-policy-fix PR #53 — 647 → 652). Earlier baselines: 6500651 (AI-P1-6 PR #50 — 623 → 647), b660f46 (AI-P1-7 PR #49 — 609 → 623), 31abe60 (AI-P1-12 PR #48 — 569 → 609), AI-P1-1 PR #47 (561 → 569), 090ca5b (AI-P1-3 PR #45 — 544 → 561), 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). **Pre-merge SHA reachability**: `git fetch origin <branch>` resolves the branch SHA while the PR is open; post-squash-merge, the merge commit on main is the canonical reference and the next slice's baseline advances.
+> Last verified against code: (pending AI-P1-14 code commit on branch `claude/seed-sources-argv-allowlist`) — AI-P1-14 / `INFRA-1B.1.h3-seed-sources-argv-allowlist` (hygiene PR — operator CLI safety). AI-P1-14 = applies the `parseArgs` allowlist + `UnknownArgumentError` fail-fast pattern from PR #45 (run-process-queue) to `scripts/seed-sources.ts`. Pre-AI-P1-14 the CLI used `process.argv.includes(...)` which silently ignored typos like `--dryrun` (no hyphen); combined with `--neo4j` triggering real graph writes, a typoed `--dryrun --neo4j` would silently proceed with full SQLite + Neo4j mutations. AI-P1-14 also adds `import.meta.main` entry guard mirroring run-process-queue so tests/ can import parseArgs/UnknownArgumentError/KNOWN_FLAGS/USAGE_LINE without triggering the run() side effect. +12 tests = 662 → 674 tests total. Tests breakdown: 5 accept cases (empty, --dry-run, --neo4j, --preflight, all-3 combined) + 5 reject cases (--dryrun typo, --dry_run typo, --Neo4j capitalization, --dryrun mixed with --neo4j critical silent-write risk, positional arg) + 1 multi-unknown reporting + 1 KNOWN_FLAGS export shape. Previous code baseline = f081e50 (AI-P1-13 / OPS-1B.h2-r2-invariant-scanner-orphan-axis PR #54 — 652 → 662). Earlier baselines: 2f6ce43 (AI-P0-2 PR #53 — 647 → 652), 6500651 (AI-P1-6 PR #50 — 623 → 647), b660f46 (AI-P1-7 PR #49 — 609 → 623), 31abe60 (AI-P1-12 PR #48 — 569 → 609), AI-P1-1 PR #47 (561 → 569), 090ca5b (AI-P1-3 PR #45 — 544 → 561), 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). **Pre-merge SHA reachability**: `git fetch origin <branch>` resolves the branch SHA while the PR is open; post-squash-merge, the merge commit on main is the canonical reference and the next slice's baseline advances.
 
 ## Testing policy
 
@@ -55,7 +55,7 @@ bun run invariant:write
 |---|---|---|---|---|
 | install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
 | typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
-| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 23 file / **662 cases** — Bun native runner (post-AI-P1-13 OPS-1B.h2-r2-invariant-scanner-orphan-axis landed: +10 tests in r2_invariant_scanner_test.ts — 3 fetchR2UploadOutcomeAuditRows + 3 Axis 4 r2_object_without_graph_key + 3 Axis 5 malformed_r2_upload_audit_row + 1 orchestrator integration; previous baseline 652 = AI-P0-2 INFRA-1B.3.h4-dedup-r2-backed-link-policy-fix). |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 24 file / **674 cases** — Bun native runner (post-AI-P1-14 INFRA-1B.1.h3-seed-sources-argv-allowlist landed: +12 tests in new file seed_sources_argv_test.ts — 5 accept + 5 reject + 1 multi-unknown + 1 KNOWN_FLAGS shape; previous baseline 662 = AI-P1-13 OPS-1B.h2-r2-invariant-scanner-orphan-axis). |
 | migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v8 schema files parse (v7 = policy_decisions ADD COLUMN intended_action / INFRA-1B.3.x-audit; v8 = policy_decisions ADD COLUMN upload_attempt_id + 3 enum/required triggers / INFRA-1B.3.h3-audit-hardening AI-P1-7) |
 | invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
@@ -73,7 +73,7 @@ Workflow files (활성):
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
 | `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
-| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (662 cases) + migrate dry-run |
+| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (674 cases) + migrate dry-run |
 | `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
 | `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
@@ -109,7 +109,7 @@ advisory).
 - PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
   으로 (1) workflow exists stage 진입.
-- 코드 테스트 (`bun test`) 는 23 file / **662 케이스** — Bun native runner
+- 코드 테스트 (`bun test`) 는 24 file / **674 케이스** — Bun native runner
   1 분 이내 expected. History: 490 → 515 (INFRA-1B.3.x-audit PR #39) →
   521 (INFRA-1B.3.h1-policy-fix PR #41, AI-P0-1) → 544 (INFRA-1B.1.h1-
   source-bootstrap-neo4j PR #44, AI-P1-2) → 561 (INFRA-1B.3.h2-queue-cli
@@ -129,7 +129,7 @@ advisory).
   allowed_public_data_only) + 1 raw_cloud_policy=always_prohibited
   preserve regression + 1 positive case, AI-P0-2 P0 legal-safety
   hotfix closing the dedup-link call site missed by PR #41)
-  → **662** (OPS-1B.h2-r2-invariant-scanner-orphan-axis landed
+  → 662 (OPS-1B.h2-r2-invariant-scanner-orphan-axis landed
   2026-05-16: +10 tests in r2_invariant_scanner_test.ts — 3
   fetchR2UploadOutcomeAuditRows (broadened SQL + malformed surfacing +
   backward-compat wrapper) + 3 Axis 4 r2_object_without_graph_key
@@ -137,7 +137,16 @@ advisory).
   uploaded-no-emit) + 3 Axis 5 malformed_r2_upload_audit_row (uploaded
   malformed + set_r2_key_failed_neo4j malformed + rationale prefix
   truncation) + 1 orchestrator integration with ScanCounts new fields,
-  AI-P1-13 P1 gate-blocker hotfix for PR #50 scanner blind spot).
+  AI-P1-13 P1 gate-blocker hotfix for PR #50 scanner blind spot)
+  → **674** (INFRA-1B.1.h3-seed-sources-argv-allowlist landed
+  2026-05-16: +12 tests in new file seed_sources_argv_test.ts — 5
+  accept (empty + --dry-run + --neo4j + --preflight + all-3 combined)
+  + 5 reject (--dryrun typo, --dry_run typo, --Neo4j capitalization,
+  --dryrun mixed with --neo4j critical silent-write risk, positional
+  arg) + 1 multi-unknown reporting + 1 KNOWN_FLAGS export shape,
+  AI-P1-14 hygiene PR applying PR #45 parseArgs allowlist pattern to
+  seed-sources CLI to close the silent-write risk of typoed
+  `--dryrun --neo4j`).
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR

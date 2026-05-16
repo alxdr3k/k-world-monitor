@@ -31,6 +31,51 @@ import {
 } from "../src/storage/source-registry/neo4j-bootstrap";
 import { closeDriver } from "../src/storage/neo4j/connection";
 
+// ---------------------------------------------------------------------------
+// Argv handling — fail-fast on unknown flags (AI-P1-14 / INFRA-1B.1.h3,
+// same allowlist pattern as PR #45 src/discovery/worker/run-process-queue.ts).
+//
+// Pre-AI-P1-14 the CLI used `process.argv.includes(...)` which silently
+// ignores typos like `--dryrun` (no hyphen) or `--dry_run` (underscore).
+// Since `--neo4j` triggers real graph writes, a typoed `--dryrun --neo4j`
+// would silently proceed with full DB/Neo4j mutations instead of the
+// dry-run preview the operator expected. This is the same class of risk
+// PR #45 closed for discovery:process-queue.
+// ---------------------------------------------------------------------------
+
+export interface ParsedArgs {
+  dryRun: boolean;
+  neo4j: boolean;
+  preflight: boolean;
+}
+
+export const KNOWN_FLAGS = new Set(["--dry-run", "--neo4j", "--preflight"]);
+export const USAGE_LINE =
+  "Usage: bun run seed-sources [--dry-run] [--neo4j] [--preflight]";
+
+export class UnknownArgumentError extends Error {
+  constructor(public readonly unknown: ReadonlyArray<string>) {
+    super(
+      `Unknown argument(s): ${unknown.join(", ")}\n` +
+        `Known flags: ${[...KNOWN_FLAGS].join(", ")}\n` +
+        USAGE_LINE
+    );
+    this.name = "UnknownArgumentError";
+  }
+}
+
+export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
+  const unknown = argv.filter((a) => !KNOWN_FLAGS.has(a));
+  if (unknown.length > 0) {
+    throw new UnknownArgumentError(unknown);
+  }
+  return {
+    dryRun: argv.includes("--dry-run"),
+    neo4j: argv.includes("--neo4j"),
+    preflight: argv.includes("--preflight"),
+  };
+}
+
 function printPreflight(label: string, r: PreflightResult): void {
   console.log(
     `${label}: SQLite policy=${r.counts.sqlitePolicy}, slug_map=${r.counts.sqliteSlugMap}, Neo4j Source=${r.counts.neo4jSource} → ${r.aligned ? "aligned ✓" : "MISMATCH ✗"}`
@@ -38,9 +83,9 @@ function printPreflight(label: string, r: PreflightResult): void {
 }
 
 async function main(): Promise<number> {
-  const dryRun = process.argv.includes("--dry-run");
-  const neo4j = process.argv.includes("--neo4j");
-  const preflightOnly = process.argv.includes("--preflight");
+  // Argv slice(2) drops `bun` + script path. parseArgs raises
+  // UnknownArgumentError on typos / stray args (AI-P1-14).
+  const { dryRun, neo4j, preflight: preflightOnly } = parseArgs(process.argv.slice(2));
 
   if (preflightOnly) {
     // Preflight-only mode: no DB writes, just check alignment.
@@ -127,4 +172,11 @@ async function run(): Promise<void> {
   process.exit(exitCode);
 }
 
-run();
+// AI-P1-14 (INFRA-1B.1.h3): Bun-native entry-point guard. Only auto-invoke
+// when this file is the process entry (via `bun run seed-sources`). When
+// imported by tests/ for unit testing parseArgs, the side-effect of run()
+// (SQLite seed + optional Neo4j writes + process.exit) must not fire.
+// Mirrors src/discovery/worker/run-process-queue.ts.
+if (import.meta.main) {
+  run();
+}
