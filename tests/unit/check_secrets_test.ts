@@ -13,6 +13,7 @@ import {
   isStagedEnvFile,
   isEnvFileExempt,
   redactMatch,
+  parseNulSeparatedPaths,
   type StagedFile,
 } from "../../scripts/check-secrets";
 
@@ -250,6 +251,45 @@ describe("scanForSecrets — vendor secret patterns", () => {
     // No full secret payload in the redacted preview.
     expect(match).not.toContain("M3N4O5P6Q7R8");
     expect(match).toMatch(/^.{1,4}\.\.\..{1,4}$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseNulSeparatedPaths — git diff --name-only -z parser
+// (Codex PR #48 P1 fix #2 regression coverage)
+// ---------------------------------------------------------------------------
+
+describe("parseNulSeparatedPaths — git diff -z output", () => {
+  it("parses single path with trailing NUL", () => {
+    expect(parseNulSeparatedPaths("src/foo.ts\0")).toEqual(["src/foo.ts"]);
+  });
+
+  it("parses multiple paths separated by NUL with trailing NUL", () => {
+    expect(parseNulSeparatedPaths("a.ts\0b.ts\0c.ts\0")).toEqual(["a.ts", "b.ts", "c.ts"]);
+  });
+
+  it("returns empty array for empty input", () => {
+    expect(parseNulSeparatedPaths("")).toEqual([]);
+  });
+
+  it("returns empty array when input is only a NUL byte", () => {
+    expect(parseNulSeparatedPaths("\0")).toEqual([]);
+  });
+
+  it("preserves filenames containing newlines (the whole reason for -z)", () => {
+    // `git diff --name-only` (without -z) would C-style quote-escape this
+    // path; with -z, the newline is part of the literal filename and the
+    // NUL separator unambiguously demarcates entries.
+    const tricky = "weird\nname.ts";
+    expect(parseNulSeparatedPaths(`${tricky}\0other.ts\0`)).toEqual([tricky, "other.ts"]);
+  });
+
+  it("preserves filenames containing quote characters", () => {
+    // Without -z, paths with quote chars get C-quoted; with -z they pass
+    // through verbatim. Critical for command-injection safety — these
+    // chars would otherwise pollute downstream shell-interpolated calls.
+    const tricky = `foo"bar';rm.ts`;
+    expect(parseNulSeparatedPaths(`${tricky}\0`)).toEqual([tricky]);
   });
 });
 
