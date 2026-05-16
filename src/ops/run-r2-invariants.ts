@@ -19,17 +19,35 @@
  *       hook for the corresponding r2Put call site (snapshot-fingerprint).
  *
  *   audit_uploaded_without_r2_key
- *     - Look for a sibling `set_r2_key_failed_neo4j` row with the same
- *       upload_attempt_id — if present, the Neo4j SET fell over but r2
- *       succeeded (recoverable via dedup back-fill on next ingest).
- *     - If no sibling row: Snapshot was DETACH DELETE'd while r2 retained
- *       the object — manual r2 cleanup required.
+ *     - decision='uploaded' implies BOTH r2Put AND Neo4j SET succeeded
+ *       (per the snapshot-fingerprint.ts ternary; SET failures emit a
+ *       separate 'set_r2_key_failed_neo4j' row classified by
+ *       r2_object_without_graph_key below). Most likely cause: Snapshot
+ *       was DETACH DELETE'd while r2 retained the object — manual r2
+ *       cleanup required.
  *
  *   r2_key_with_restricted_source
  *     - Operator tightened source_material_policy AFTER the upload.
  *       Required: r2 object removal (separate slice — repair CLI) or
  *       source policy rollback to full_snapshot_allowed +
  *       allowed_public_data_only.
+ *
+ *   r2_object_without_graph_key (AI-P1-13)
+ *     - decision='set_r2_key_failed_neo4j' audit row — r2Put succeeded
+ *       but the subsequent Cypher SET s.r2_key failed (network partition
+ *       mid-tx, constraint violation, etc.). R2 object exists but graph
+ *       never recorded the key. Required: either rerun the SET with the
+ *       same r2_key value (recovery — preserves dedup) or remove the r2
+ *       object (cleanup). Both paths are repair-CLI scope (separate
+ *       slice — AI-P1-13 only surfaces the violation here).
+ *
+ *   malformed_r2_upload_audit_row (AI-P1-13)
+ *     - r2_upload outcome row whose rationale does NOT start with
+ *       `snap_id=snap_...;` canonical prefix. Pre-AI-P1-13 scanner
+ *       silently dropped these (defensive blind spot). Required:
+ *       investigate the audit ledger writer (recordR2UploadDecision)
+ *       for a format regression, then either repair the row or update
+ *       the parser regex.
  */
 
 import { scanR2Invariants, type R2InvariantViolation } from "./r2-invariant-scanner";
@@ -95,6 +113,20 @@ function formatViolation(v: R2InvariantViolation): string {
         `    → Required: r2 object removal (repair CLI, separate slice) or source policy rollback`
       );
     }
+    case "r2_object_without_graph_key":
+      return (
+        `  [r2_object_without_graph_key] snap_id=${v.snapId} ` +
+        `upload_attempt_id=${v.details.uploadAttemptId} audit_decision_id=${v.details.auditDecisionId}\n` +
+        `    → r2Put succeeded, Neo4j SET r2_key failed. Required: repair-CLI to either ` +
+        `rerun SET (recovery) or delete r2 object (cleanup)`
+      );
+    case "malformed_r2_upload_audit_row":
+      return (
+        `  [malformed_r2_upload_audit_row] audit_decision_id=${v.details.auditDecisionId} ` +
+        `decision=${v.details.decision} upload_attempt_id=${v.details.uploadAttemptId}\n` +
+        `    rationale_prefix="${v.details.rationalePrefix}"\n` +
+        `    → Investigate recordR2UploadDecision format regression; repair audit row or update parser`
+      );
     default: {
       // exhaustiveness check — TypeScript narrows v.type to never if all cases handled
       const _exhaustive: never = v.type;
@@ -119,6 +151,8 @@ async function main(): Promise<number> {
   console.log(
     `R2 invariant scan — counts: r2_backed_snapshots=${result.counts.r2BackedSnapshots}, ` +
       `uploaded_audit_rows=${result.counts.uploadedAuditRows}, ` +
+      `set_r2_key_failed_neo4j_audit_rows=${result.counts.setR2KeyFailedNeo4jAuditRows}, ` +
+      `malformed_r2_upload_audit_rows=${result.counts.malformedR2UploadAuditRows}, ` +
       `source_policy_rows=${result.counts.sourcePolicyRows}`
   );
   if (result.aligned) {
