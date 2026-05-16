@@ -49,6 +49,7 @@ mock.module("../../src/storage/neo4j/connection", () => neo4j.module);
 import { closeDb, getDb } from "../../src/storage/sqlite/connection";
 import {
   parseSnapIdFromRationale,
+  validSnapIdOrNull,
   reconcile,
   fetchUploadedAuditRows,
   fetchR2UploadOutcomeAuditRows,
@@ -821,5 +822,51 @@ describe("fetchR2UploadOutcomeAuditRows — v9 snap_id column resolution (AI-P1-
     expect(byId.get("pdec_mix_v9")).toBe("snap_NEW");
     expect(byId.get("pdec_mix_v8")).toBe("snap_OLD");
     expect(byId.get("pdec_mix_bad")).toBeNull();
+  });
+
+  // AI-P1-15 P2 (Codex PR #57): validSnapIdOrNull() guard. Pre-fix `r.snap_id
+  // ?? parseSnapIdFromRationale(rationale)` accepted any non-NULL column value
+  // (including empty string or manual SQL corruption) as canonical, so a
+  // garbage column would route the row into Axis 2/4 with a malformed handle
+  // instead of falling back to rationale or surfacing as Axis 5.
+
+  it("validSnapIdOrNull: rejects empty string, garbage, plain non-prefix; accepts canonical", () => {
+    expect(validSnapIdOrNull(null)).toBeNull();
+    expect(validSnapIdOrNull("")).toBeNull();
+    expect(validSnapIdOrNull("not_snap_prefix")).toBeNull();
+    expect(validSnapIdOrNull("snap_")).toBeNull(); // prefix only, no ULID body
+    expect(validSnapIdOrNull("snap_ABC123")).toBe("snap_ABC123");
+    expect(validSnapIdOrNull("snap_01KRRR_with-dashes")).toBe("snap_01KRRR_with-dashes");
+  });
+
+  it("v9 row with empty-string column → falls back to rationale parsing (P2 fix)", () => {
+    // Column has "" (a non-NULL but malformed value — e.g. manual SQL
+    // INSERT mistake). Pre-P2 fix: row.snapId would be "" → routed to
+    // Axis 2/4 with empty snap_id. Post-fix: validSnapIdOrNull("") = null,
+    // fall back to rationale.
+    insertV9AuditRow("pdec_empty_col", "", "snap_RECOVERED_VIA_RATIONALE", "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBe("snap_RECOVERED_VIA_RATIONALE");
+  });
+
+  it("v9 row with garbage column → falls back to rationale parsing (P2 fix)", () => {
+    insertV9AuditRow("pdec_garbage_col", "garbage_value_not_snap_prefix", "snap_RECOVERED", "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBe("snap_RECOVERED");
+  });
+
+  it("v9 row with garbage column AND malformed rationale → Axis 5 surface preserved (P2 fix)", () => {
+    // Both anchors unrecoverable — the row must surface as
+    // malformed_r2_upload_audit_row rather than silently use the garbage
+    // column value.
+    insertV9AuditRow("pdec_both_bad", "garbage", null, "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBeNull();
   });
 });

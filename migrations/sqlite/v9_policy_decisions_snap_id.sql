@@ -37,3 +37,10 @@ ALTER TABLE policy_decisions ADD COLUMN snap_id TEXT;
 CREATE INDEX IF NOT EXISTS policy_decisions_snap_id_idx
   ON policy_decisions(snap_id)
   WHERE snap_id IS NOT NULL;
+
+-- Schema version record. Without this, scripts/migrate.ts re-treats v9 as
+-- pending on every subsequent invocation (getMigrationVersion() stays at
+-- v8) and falls into the duplicate-column recovery branch at migrate.ts
+-- line 100. Mirrors v7 / v8 footers (Codex PR #57 P1 fix).
+INSERT OR IGNORE INTO schema_migrations (version, description)
+VALUES ('v9', 'INFRA-1B.3.h5-policy-decisions-snap-id-column-v9 — first-class snap_id column + partial index (AI-P1-15)');

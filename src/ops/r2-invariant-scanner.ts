@@ -166,6 +166,7 @@ export interface R2UploadOutcomeAuditRow {
 export type UploadedAuditRow = R2UploadOutcomeAuditRow;
 
 const SNAP_ID_RATIONALE_PREFIX = /^snap_id=(snap_[A-Za-z0-9_-]+)/;
+const SNAP_ID_SHAPE = /^snap_[A-Za-z0-9_-]+$/;
 
 /**
  * Parse the canonical `snap_id=<snap_id>; ...` prefix that
@@ -175,6 +176,23 @@ export function parseSnapIdFromRationale(rationale: string | null): string | nul
   if (!rationale) return null;
   const match = SNAP_ID_RATIONALE_PREFIX.exec(rationale);
   return match ? match[1]! : null;
+}
+
+/**
+ * AI-P1-15 P2 (Codex PR #57): validate the v9 snap_id column value matches
+ * the canonical `snap_<...>` shape before treating it as authoritative.
+ *
+ * Without this guard, a non-NULL but malformed value (empty string, manual
+ * SQL corruption, format regression) would be silently used as the snap_id
+ * and route the row into Axis 2/4 reconciliation with a garbage handle —
+ * the row would no longer surface as `malformed_r2_upload_audit_row` and
+ * could mis-classify under other axes. Empty/garbage values fall back to
+ * rationale parsing (recoverable case); if rationale is also malformed
+ * the row surfaces as Axis 5 (the defensive contract from AI-P1-13).
+ */
+export function validSnapIdOrNull(value: string | null): string | null {
+  if (!value) return null;
+  return SNAP_ID_SHAPE.test(value) ? value : null;
 }
 
 /**
@@ -210,8 +228,12 @@ export function fetchR2UploadOutcomeAuditRows(): R2UploadOutcomeAuditRow[] {
     .all();
   return rows.map((r) => ({
     // AI-P1-15: snap_id column preferred; rationale parsing is legacy
-    // fallback for v8- rows where the column is NULL.
-    snapId: r.snap_id ?? parseSnapIdFromRationale(r.rationale),
+    // fallback for v8- rows where the column is NULL. AI-P1-15 P2 (Codex
+    // PR #57): validSnapIdOrNull() guards against empty-string / garbage
+    // column values so a malformed column does not get silently used as
+    // canonical — falls back to rationale, then to Axis 5 if both fail.
+    snapId:
+      validSnapIdOrNull(r.snap_id) ?? parseSnapIdFromRationale(r.rationale),
     uploadAttemptId: r.upload_attempt_id,
     rationale: r.rationale ?? "",
     decisionId: r.decision_id,
