@@ -24,3 +24,26 @@
 - 리뷰/반영: PR #54 squash merge → main commit f081e50. Codex review pass. 4 CI checks green.
 - 리스크: 없음
 
+사이클 2 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일:
+  - AI-P1-14 / INFRA-1B.1.h3-seed-sources-argv-allowlist 구현: scripts/seed-sources.ts 의 process.argv.includes() 패턴을 parseArgs allowlist + UnknownArgumentError 로 교체. import.meta.main entry guard 추가 (tests/ 에서 import 시 run() 부수효과 차단). 핵심 위험 = 타이포 (`--dryrun`) + `--neo4j` 조합 silent write 차단.
+  - +12 tests in seed_sources_argv_test.ts: 5 accept + 5 reject (silent-write critical scenario 포함) + 1 multi-unknown + 1 KNOWN_FLAGS shape
+  - PR #56 Codex review pass → squash merge
+- 결론: AI-P1-14 hygiene PR landed (PR #56 → main commit 01f029f). seed-sources CLI 의 silent-write risk 해소 — operator typo 시 fail-fast.
+- 변경 범위: src_with_tests (3 files), contract surface
+- 검증 계획: full_ci, full CI 필요
+- 다음 검토 후보:
+  - AI-P1-15 / INFRA-1B.3.h5-policy-decisions-snap-id-column-v9: v9 migration: policy_decisions.snap_id TEXT 컬럼 추가 + recordR2UploadDecision 가 column 에도 저장 + r2-invariant-scanner 가 column 우선 사용 + rationale parsing fallback. operator-decided sequence 의 마지막 engineering slice. (ready) 시작 조건: AI-P1-14 land 후 즉시
+  - canonical register batch 3 (doc-only): AI-P0-2 + AI-P1-13 + AI-P1-14 (+AI-P1-15 land 시 함께) IMPL_PLAN slice 표 row 등록 + current-state.md 정합 보정 + retro reopen section + action-items table row 추가. AI-P1-15 land 후 batch 처리 권고 (ready) 시작 조건: AI-P1-15 land 후 (batch 효율) 또는 P0-M2 gate accept 전 필수
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증:
+  - bun test 662 → 674 pass (+12)
+  - tsc --noEmit clean
+  - invariant:check 0 errors, 5 warnings (pre-existing)
+  - GitHub Actions 4/4 check success
+- 리뷰/반영: PR #56 squash merge → main commit 01f029f. Codex pass.
+- 리스크: 없음
+

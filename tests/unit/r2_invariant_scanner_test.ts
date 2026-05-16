@@ -49,6 +49,7 @@ mock.module("../../src/storage/neo4j/connection", () => neo4j.module);
 import { closeDb, getDb } from "../../src/storage/sqlite/connection";
 import {
   parseSnapIdFromRationale,
+  validSnapIdOrNull,
   reconcile,
   fetchUploadedAuditRows,
   fetchR2UploadOutcomeAuditRows,
@@ -87,7 +88,8 @@ function setupDb() {
       rationale          TEXT,
       created_at         TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z',
       intended_action    TEXT,
-      upload_attempt_id  TEXT
+      upload_attempt_id  TEXT,
+      snap_id            TEXT
     );
   `);
   return db;
@@ -745,5 +747,126 @@ describe("scanR2Invariants — orchestrator with Axis 4 + 5 (AI-P1-13)", () => {
       "r2_object_without_graph_key",
     ]);
     expect(result.aligned).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI-P1-15 / INFRA-1B.3.h5-policy-decisions-snap-id-column-v9
+//
+// v9 adds a first-class snap_id column to policy_decisions. New audit writes
+// populate both the column and the rationale prefix. The scanner prefers the
+// column and falls back to rationale parsing for legacy v8- rows.
+// ---------------------------------------------------------------------------
+
+describe("fetchR2UploadOutcomeAuditRows — v9 snap_id column resolution (AI-P1-15)", () => {
+  function insertV9AuditRow(
+    decisionId: string,
+    snapId: string | null,
+    rationaleSnapId: string | null,
+    decision: string,
+  ): void {
+    const rationale = rationaleSnapId
+      ? `snap_id=${rationaleSnapId}; archive_policy=full_snapshot_allowed; raw_cloud_policy=allowed_public_data_only`
+      : "no_snap_id_prefix";
+    getDb()
+      .prepare(
+        `INSERT INTO policy_decisions
+         (decision_id, source_id, url, trigger_type, policy_gate_mode,
+          decision, rationale, intended_action, upload_attempt_id, snap_id)
+         VALUES (?, 'src_x', 'https://example.com', 'r2_upload', 'batch_report',
+                 ?, ?, 'r2_upload', 'uatt_test', ?)`,
+      )
+      .run(decisionId, decision, rationale, snapId);
+  }
+
+  it("v9 row: snap_id resolved from the dedicated column (not rationale)", () => {
+    // Column has snap_X, rationale prefix has snap_DIFFERENT — scanner must
+    // use the column. This locks the column-preferred contract so a future
+    // refactor that drops the column read cannot silently regress.
+    insertV9AuditRow("pdec_v9_col", "snap_V9_FROM_COLUMN", "snap_DIFFERENT", "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBe("snap_V9_FROM_COLUMN");
+  });
+
+  it("legacy v8- row: snap_id NULL → falls back to rationale parsing", () => {
+    // No snap_id column value (legacy row from before v9 migration). The
+    // scanner must keep the rationale-parsing fallback working so v8-
+    // historical rows are still classified correctly.
+    insertV9AuditRow("pdec_v8_legacy", null, "snap_V8_FROM_RATIONALE", "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBe("snap_V8_FROM_RATIONALE");
+  });
+
+  it("legacy v8- row with malformed rationale: snapId=null → Axis 5 violation surface preserved", () => {
+    // v8 silent-drop path that AI-P1-13 closed must remain working for
+    // legacy rows that have neither column nor parseable rationale prefix.
+    insertV9AuditRow("pdec_v8_bad", null, null, "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBeNull();
+  });
+
+  it("mixed v8 legacy + v9 new rows: each resolves via its own path", () => {
+    insertV9AuditRow("pdec_mix_v9", "snap_NEW", "snap_NEW", "uploaded");
+    insertV9AuditRow("pdec_mix_v8", null, "snap_OLD", "uploaded");
+    insertV9AuditRow("pdec_mix_bad", null, null, "set_r2_key_failed_neo4j");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(3);
+    const byId = new Map(rows.map((r) => [r.decisionId, r.snapId]));
+    expect(byId.get("pdec_mix_v9")).toBe("snap_NEW");
+    expect(byId.get("pdec_mix_v8")).toBe("snap_OLD");
+    expect(byId.get("pdec_mix_bad")).toBeNull();
+  });
+
+  // AI-P1-15 P2 (Codex PR #57): validSnapIdOrNull() guard. Pre-fix `r.snap_id
+  // ?? parseSnapIdFromRationale(rationale)` accepted any non-NULL column value
+  // (including empty string or manual SQL corruption) as canonical, so a
+  // garbage column would route the row into Axis 2/4 with a malformed handle
+  // instead of falling back to rationale or surfacing as Axis 5.
+
+  it("validSnapIdOrNull: rejects empty string, garbage, plain non-prefix; accepts canonical", () => {
+    expect(validSnapIdOrNull(null)).toBeNull();
+    expect(validSnapIdOrNull("")).toBeNull();
+    expect(validSnapIdOrNull("not_snap_prefix")).toBeNull();
+    expect(validSnapIdOrNull("snap_")).toBeNull(); // prefix only, no ULID body
+    expect(validSnapIdOrNull("snap_ABC123")).toBe("snap_ABC123");
+    expect(validSnapIdOrNull("snap_01KRRR_with-dashes")).toBe("snap_01KRRR_with-dashes");
+  });
+
+  it("v9 row with empty-string column → falls back to rationale parsing (P2 fix)", () => {
+    // Column has "" (a non-NULL but malformed value — e.g. manual SQL
+    // INSERT mistake). Pre-P2 fix: row.snapId would be "" → routed to
+    // Axis 2/4 with empty snap_id. Post-fix: validSnapIdOrNull("") = null,
+    // fall back to rationale.
+    insertV9AuditRow("pdec_empty_col", "", "snap_RECOVERED_VIA_RATIONALE", "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBe("snap_RECOVERED_VIA_RATIONALE");
+  });
+
+  it("v9 row with garbage column → falls back to rationale parsing (P2 fix)", () => {
+    insertV9AuditRow("pdec_garbage_col", "garbage_value_not_snap_prefix", "snap_RECOVERED", "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBe("snap_RECOVERED");
+  });
+
+  it("v9 row with garbage column AND malformed rationale → Axis 5 surface preserved (P2 fix)", () => {
+    // Both anchors unrecoverable — the row must surface as
+    // malformed_r2_upload_audit_row rather than silently use the garbage
+    // column value.
+    insertV9AuditRow("pdec_both_bad", "garbage", null, "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBeNull();
   });
 });
