@@ -14,6 +14,7 @@ import {
   isEnvFileExempt,
   redactMatch,
   parseNulSeparatedPaths,
+  STAGED_FILE_DIFF_ARGS,
   type StagedFile,
 } from "../../scripts/check-secrets";
 
@@ -290,6 +291,48 @@ describe("parseNulSeparatedPaths — git diff -z output", () => {
     // chars would otherwise pollute downstream shell-interpolated calls.
     const tricky = `foo"bar';rm.ts`;
     expect(parseNulSeparatedPaths(`${tricky}\0`)).toEqual([tricky]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// STAGED_FILE_DIFF_ARGS — security-critical configuration contract
+// (Codex PR #48 round 2 fixes — rename/type-change coverage)
+// ---------------------------------------------------------------------------
+
+describe("STAGED_FILE_DIFF_ARGS — security-critical filter contract", () => {
+  it("uses --no-renames so renamed files appear as add+delete (rename detection bypass closed)", () => {
+    // Codex P1 round 2: without --no-renames, `git mv .env.example .env`
+    // would emit a single R entry that the previous ACM filter dropped,
+    // bypassing both the filename and pattern guards. With --no-renames
+    // the rename decomposes into A (.env) + D (.env.example) and the A
+    // side is in the filter set.
+    expect(STAGED_FILE_DIFF_ARGS).toContain("--no-renames");
+  });
+
+  it("uses --diff-filter=ACMT — covers Added/Copied/Modified/TypeChanged", () => {
+    // T (type change) was added in Codex P2 round 2 fix: a path flipping
+    // from symlink/submodule to a regular file with secrets must be
+    // scanned. ACM alone excluded T entries entirely.
+    expect(STAGED_FILE_DIFF_ARGS).toContain("--diff-filter=ACMT");
+  });
+
+  it("uses -z (NUL separator) so unusual filenames are not C-quoted", () => {
+    expect(STAGED_FILE_DIFF_ARGS).toContain("-z");
+  });
+
+  it("uses --cached so the index version (what will be committed) is read", () => {
+    // Worktree changes that aren't staged should NOT be scanned — the
+    // operator may be staging only a redacted subset deliberately.
+    expect(STAGED_FILE_DIFF_ARGS).toContain("--cached");
+  });
+
+  it("uses --name-only — output is paths only (status info comes from the filter)", () => {
+    expect(STAGED_FILE_DIFF_ARGS).toContain("--name-only");
+  });
+
+  it("does NOT include legacy ACM-only filter (regression guard for round 2 fixes)", () => {
+    // Make sure a future refactor doesn't quietly downgrade the filter.
+    expect(STAGED_FILE_DIFF_ARGS).not.toContain("--diff-filter=ACM");
   });
 });
 

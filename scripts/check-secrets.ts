@@ -142,11 +142,49 @@ export function parseNulSeparatedPaths(raw: string): string[] {
   return raw.split("\0").filter(Boolean);
 }
 
+/**
+ * `git diff` argv used to enumerate staged files for the secret scanner.
+ * Exported for unit-test verification — the filter set + flags are the
+ * security-critical contract of the hook.
+ *
+ * Codex PR #48 round 2 fixes:
+ *   - P1 (line 163): renamed files were dropped by the previous `ACM`
+ *     filter (R entries excluded). `git mv .env.example .env` would
+ *     commit secrets via rename without triggering the filename or
+ *     pattern guard. Two-part fix:
+ *       (a) `--no-renames` — decompose renames into separate A+D entries
+ *           so the renamed file appears as a fresh `A` at the new path,
+ *           which the existing filter catches. Makes behavior
+ *           deterministic regardless of git's per-repo rename-detection
+ *           config (some operators set `diff.renames=true` globally).
+ *       (b) `T` added to the filter set explicitly (see below).
+ *   - P2 (line 163): type-changed entries (symlink → regular file, etc.)
+ *     were dropped by `ACM`. Add `T` so a path that flips type and now
+ *     contains a secret is scanned.
+ *
+ * Filter set rationale:
+ *   A — Added (new file)
+ *   C — Copied (rare, retained for safety; --no-copies is git's default
+ *       so this is mostly defensive)
+ *   M — Modified (existing file content changed)
+ *   T — Type changed (Codex P2: symlink → regular file with secrets)
+ * Intentionally excluded:
+ *   D — Deleted (no content to scan; secret-in-history is a separate
+ *       concern that a pre-commit hook cannot retroactively fix)
+ *   R — Renamed (decomposed by --no-renames into A+D)
+ *   U — Unmerged (conflict markers; git commit blocks anyway)
+ *   X — Unknown
+ */
+export const STAGED_FILE_DIFF_ARGS: ReadonlyArray<string> = [
+  "diff",
+  "--cached",
+  "--name-only",
+  "-z",
+  "--no-renames",
+  "--diff-filter=ACMT",
+];
+
 function getStagedFiles(): StagedFile[] {
-  // --diff-filter=ACM = Added / Copied / Modified. Excludes deletions
-  // (no content to scan) and pure renames (content already scanned at
-  // the source path in a prior commit).
-  //
   // Codex PR #48 P1 fix #1: execFileSync with argv array — NOT execSync
   // with a string template. The previous `execSync(`git show ":${path}"`)`
   // treated `path` as shell input — a staged filename containing quotes
@@ -158,11 +196,9 @@ function getStagedFiles(): StagedFile[] {
   //
   // Codex PR #48 P1 fix #2: -z (NUL separator) avoids `git diff`'s
   // default quoted-escaping of unusual paths.
-  const raw = execFileSync(
-    "git",
-    ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACM"],
-    { encoding: "utf-8" }
-  );
+  const raw = execFileSync("git", [...STAGED_FILE_DIFF_ARGS], {
+    encoding: "utf-8",
+  });
   const paths = parseNulSeparatedPaths(raw);
   const files: StagedFile[] = [];
   for (const path of paths) {
