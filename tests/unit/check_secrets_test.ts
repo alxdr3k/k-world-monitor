@@ -183,7 +183,7 @@ describe("scanForSecrets — vendor secret patterns", () => {
     expect(violations[0]!.pattern).toBe("google_api_key");
   });
 
-  it("matches AWS access key id (AKIA prefix)", () => {
+  it("matches AWS IAM user access key id (AKIA prefix)", () => {
     const violations = scanForSecrets([
       {
         path: "deploy.yml",
@@ -192,6 +192,22 @@ describe("scanForSecrets — vendor secret patterns", () => {
     ]);
     expect(violations).toHaveLength(1);
     expect(violations[0]!.pattern).toBe("aws_access_key_id");
+  });
+
+  it("matches AWS STS temporary access key id (ASIA prefix) — Codex PR #48 round 3 P2", () => {
+    // ASIA is the prefix for short-lived AWS STS credentials. Equally
+    // sensitive as AKIA; commonly leaked from CI / local debugging
+    // sessions where temporary credentials are exported to env vars.
+    // The previous pattern (AKIA-only) silently let ASIA keys through.
+    const violations = scanForSecrets([
+      {
+        path: "ci-debug.log",
+        content: "AWS_ACCESS_KEY_ID: ASIAIOSFODNN7EXAMPLE",
+      },
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.pattern).toBe("aws_access_key_id");
+    expect(violations[0]!.match).toContain("ASIA");
   });
 
   it("matches GitHub PAT (ghp_ classic 36-char)", () => {

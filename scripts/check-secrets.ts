@@ -60,8 +60,12 @@ const SECRET_PATTERNS: ReadonlyArray<readonly [name: string, regex: RegExp]> = [
   ["anthropic_api_key", /sk-ant-[A-Za-z0-9_-]{20,}/g],
   // Google AI Studio (Gemini): AIza + 35 url-safe chars.
   ["google_api_key", /AIza[A-Za-z0-9_-]{35}/g],
-  // AWS access key id.
-  ["aws_access_key_id", /AKIA[0-9A-Z]{16}/g],
+  // AWS access key id — IAM user keys (`AKIA`) + STS temporary credentials
+  // (`ASIA`). Both prefixes share the same 16-char suffix format and are
+  // equally sensitive. Codex PR #48 round 3 P2: ASIA was previously missed,
+  // creating a leak path for short-lived credentials commonly used in CI
+  // and local debugging.
+  ["aws_access_key_id", /(?:AKIA|ASIA)[0-9A-Z]{16}/g],
   // GitHub PAT (classic 36 / fine-grained 82 / oauth/server/refresh variants).
   ["github_pat_classic", /ghp_[A-Za-z0-9]{36}/g],
   ["github_pat_fine_grained", /github_pat_[A-Za-z0-9_]{82}/g],
