@@ -184,8 +184,11 @@ export function parseSnapIdFromRationale(rationale: string | null): string | nul
  * which made the most critical orphan state invariant break (R2 object
  * exists, graph never set r2_key) invisible to the scanner.
  *
- * Malformed rationale rows are RETURNED with snapId=null (not dropped) so
- * reconcile() can surface them as `malformed_r2_upload_audit_row`.
+ * AI-P1-15 (v9): also selects `snap_id` column. snapId resolution prefers
+ * the column (structured handle) and falls back to rationale parsing for
+ * legacy v8- rows where snap_id is NULL. Malformed rationale rows in v8-
+ * legacy state are still RETURNED with snapId=null so reconcile() can
+ * surface them as `malformed_r2_upload_audit_row`.
  */
 export function fetchR2UploadOutcomeAuditRows(): R2UploadOutcomeAuditRow[] {
   const rows = getDb()
@@ -195,17 +198,20 @@ export function fetchR2UploadOutcomeAuditRows(): R2UploadOutcomeAuditRow[] {
         upload_attempt_id: string | null;
         decision_id: string;
         decision: string;
+        snap_id: string | null;
       },
       []
     >(
-      `SELECT rationale, upload_attempt_id, decision_id, decision
+      `SELECT rationale, upload_attempt_id, decision_id, decision, snap_id
        FROM policy_decisions
        WHERE intended_action = 'r2_upload'
          AND decision IN ('uploaded', 'set_r2_key_failed_neo4j')`
     )
     .all();
   return rows.map((r) => ({
-    snapId: parseSnapIdFromRationale(r.rationale),
+    // AI-P1-15: snap_id column preferred; rationale parsing is legacy
+    // fallback for v8- rows where the column is NULL.
+    snapId: r.snap_id ?? parseSnapIdFromRationale(r.rationale),
     uploadAttemptId: r.upload_attempt_id,
     rationale: r.rationale ?? "",
     decisionId: r.decision_id,

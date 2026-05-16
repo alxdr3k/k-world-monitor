@@ -87,7 +87,8 @@ function setupDb() {
       rationale          TEXT,
       created_at         TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z',
       intended_action    TEXT,
-      upload_attempt_id  TEXT
+      upload_attempt_id  TEXT,
+      snap_id            TEXT
     );
   `);
   return db;
@@ -745,5 +746,80 @@ describe("scanR2Invariants — orchestrator with Axis 4 + 5 (AI-P1-13)", () => {
       "r2_object_without_graph_key",
     ]);
     expect(result.aligned).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI-P1-15 / INFRA-1B.3.h5-policy-decisions-snap-id-column-v9
+//
+// v9 adds a first-class snap_id column to policy_decisions. New audit writes
+// populate both the column and the rationale prefix. The scanner prefers the
+// column and falls back to rationale parsing for legacy v8- rows.
+// ---------------------------------------------------------------------------
+
+describe("fetchR2UploadOutcomeAuditRows — v9 snap_id column resolution (AI-P1-15)", () => {
+  function insertV9AuditRow(
+    decisionId: string,
+    snapId: string | null,
+    rationaleSnapId: string | null,
+    decision: string,
+  ): void {
+    const rationale = rationaleSnapId
+      ? `snap_id=${rationaleSnapId}; archive_policy=full_snapshot_allowed; raw_cloud_policy=allowed_public_data_only`
+      : "no_snap_id_prefix";
+    getDb()
+      .prepare(
+        `INSERT INTO policy_decisions
+         (decision_id, source_id, url, trigger_type, policy_gate_mode,
+          decision, rationale, intended_action, upload_attempt_id, snap_id)
+         VALUES (?, 'src_x', 'https://example.com', 'r2_upload', 'batch_report',
+                 ?, ?, 'r2_upload', 'uatt_test', ?)`,
+      )
+      .run(decisionId, decision, rationale, snapId);
+  }
+
+  it("v9 row: snap_id resolved from the dedicated column (not rationale)", () => {
+    // Column has snap_X, rationale prefix has snap_DIFFERENT — scanner must
+    // use the column. This locks the column-preferred contract so a future
+    // refactor that drops the column read cannot silently regress.
+    insertV9AuditRow("pdec_v9_col", "snap_V9_FROM_COLUMN", "snap_DIFFERENT", "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBe("snap_V9_FROM_COLUMN");
+  });
+
+  it("legacy v8- row: snap_id NULL → falls back to rationale parsing", () => {
+    // No snap_id column value (legacy row from before v9 migration). The
+    // scanner must keep the rationale-parsing fallback working so v8-
+    // historical rows are still classified correctly.
+    insertV9AuditRow("pdec_v8_legacy", null, "snap_V8_FROM_RATIONALE", "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBe("snap_V8_FROM_RATIONALE");
+  });
+
+  it("legacy v8- row with malformed rationale: snapId=null → Axis 5 violation surface preserved", () => {
+    // v8 silent-drop path that AI-P1-13 closed must remain working for
+    // legacy rows that have neither column nor parseable rationale prefix.
+    insertV9AuditRow("pdec_v8_bad", null, null, "uploaded");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.snapId).toBeNull();
+  });
+
+  it("mixed v8 legacy + v9 new rows: each resolves via its own path", () => {
+    insertV9AuditRow("pdec_mix_v9", "snap_NEW", "snap_NEW", "uploaded");
+    insertV9AuditRow("pdec_mix_v8", null, "snap_OLD", "uploaded");
+    insertV9AuditRow("pdec_mix_bad", null, null, "set_r2_key_failed_neo4j");
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(3);
+    const byId = new Map(rows.map((r) => [r.decisionId, r.snapId]));
+    expect(byId.get("pdec_mix_v9")).toBe("snap_NEW");
+    expect(byId.get("pdec_mix_v8")).toBe("snap_OLD");
+    expect(byId.get("pdec_mix_bad")).toBeNull();
   });
 });

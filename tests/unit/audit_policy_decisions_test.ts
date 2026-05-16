@@ -43,7 +43,8 @@ function setupDb() {
       rationale         TEXT,
       created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
       intended_action   TEXT,
-      upload_attempt_id TEXT
+      upload_attempt_id TEXT,
+      snap_id           TEXT
     );
 
     -- v8 audit hardening triggers (AI-P1-7) — DB-level enum + correlation
@@ -581,5 +582,75 @@ describe("v8 trigger: upload_attempt_id required for r2_upload rows (INSERT)", (
     expect(triggerSql).toContain("char(9)");  // tab
     expect(triggerSql).toContain("char(10)"); // newline
     expect(triggerSql).toContain("char(13)"); // CR
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI-P1-15 / INFRA-1B.3.h5-policy-decisions-snap-id-column-v9
+//
+// Pre-v9 the scanner had to parse snap_id out of the free-form `rationale`
+// column. v9 adds a first-class `snap_id` TEXT column; recordR2UploadDecision
+// writes both the column AND the rationale prefix (legacy v8- consumers
+// continue to work via rationale parsing). Tests verify the dual write
+// contract so future refactors do not silently regress one side.
+// ---------------------------------------------------------------------------
+
+describe("recordR2UploadDecision — v9 snap_id column dual-write (AI-P1-15)", () => {
+  it("writes snap_id to the dedicated v9 column (not just rationale prefix)", () => {
+    setupDb();
+    const decisionId = recordR2UploadDecision({
+      sourceId: "src_v9_dual",
+      snapId: "snap_v9_column_check",
+      url: "https://example.com/v9-dual",
+      archivePolicy: "full_snapshot_allowed",
+      rawCloudPolicy: "allowed_public_data_only",
+      decision: "uploaded",
+      uploadAttemptId: "uatt_v9_dual",
+    });
+
+    const row = getDb()
+      .query<{ snap_id: string | null; rationale: string }, [string]>(
+        "SELECT snap_id, rationale FROM policy_decisions WHERE decision_id = ?"
+      )
+      .get(decisionId);
+
+    expect(row).not.toBeNull();
+    // v9 column has the structured handle.
+    expect(row!.snap_id).toBe("snap_v9_column_check");
+    // Rationale prefix retained for backward-compat (v8- consumers parsing).
+    expect(row!.rationale).toContain("snap_id=snap_v9_column_check");
+  });
+
+  it("attempted + outcome pair both write snap_id column with the same value", () => {
+    setupDb();
+    const uattId = "uatt_v9_pair";
+    const beforeId = recordR2UploadDecision({
+      sourceId: "src_v9_pair",
+      snapId: "snap_v9_pair",
+      url: "https://example.com/v9-pair",
+      archivePolicy: "full_snapshot_allowed",
+      rawCloudPolicy: "allowed_public_data_only",
+      decision: "attempted",
+      uploadAttemptId: uattId,
+    });
+    const afterId = recordR2UploadDecision({
+      sourceId: "src_v9_pair",
+      snapId: "snap_v9_pair",
+      url: "https://example.com/v9-pair",
+      archivePolicy: "full_snapshot_allowed",
+      rawCloudPolicy: "allowed_public_data_only",
+      decision: "uploaded",
+      uploadAttemptId: uattId,
+    });
+
+    const rows = getDb()
+      .query<{ decision_id: string; snap_id: string | null }, [string]>(
+        "SELECT decision_id, snap_id FROM policy_decisions WHERE upload_attempt_id = ? ORDER BY decision_id"
+      )
+      .all(uattId);
+
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.snap_id))).toEqual(new Set(["snap_v9_pair"]));
+    expect(rows.map((r) => r.decision_id).sort()).toEqual([beforeId, afterId].sort());
   });
 });

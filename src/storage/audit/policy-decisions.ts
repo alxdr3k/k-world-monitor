@@ -25,7 +25,10 @@
 // Schema anchor: policy_decisions.intended_action (v7) +
 // policy_decisions.upload_attempt_id (v8) + v8 enum triggers
 // (intended_action / decision / required upload_attempt_id when
-// intended_action='r2_upload').
+// intended_action='r2_upload') + policy_decisions.snap_id (v9, AI-P1-15) —
+// first-class structured handle; new audit writes populate both the column
+// AND the rationale prefix so legacy v8- consumers parsing rationale stay
+// working while the scanner can migrate off rationale regex for new rows.
 
 import { monotonicFactory } from "ulid";
 import { getDb } from "../sqlite/connection";
@@ -89,12 +92,16 @@ function formatRationale(input: R2UploadAuditInput): string {
  */
 export function recordR2UploadDecision(input: R2UploadAuditInput): string {
   const decisionId = `pdec_${ulid()}`;
+  // AI-P1-15 (v9): also write snap_id as a first-class column. The rationale
+  // prefix is kept for backward-compat with v8- consumers; the column is the
+  // canonical source for new readers (scanner v9+ prefers the column and
+  // falls back to rationale parsing only when the column is NULL).
   getDb()
     .prepare(
       `INSERT INTO policy_decisions
          (decision_id, source_id, url, trigger_type, policy_gate_mode,
-          decision, rationale, intended_action, upload_attempt_id)
-       VALUES (?, ?, ?, 'r2_upload', 'batch_report', ?, ?, 'r2_upload', ?)`
+          decision, rationale, intended_action, upload_attempt_id, snap_id)
+       VALUES (?, ?, ?, 'r2_upload', 'batch_report', ?, ?, 'r2_upload', ?, ?)`
     )
     .run(
       decisionId,
@@ -102,7 +109,8 @@ export function recordR2UploadDecision(input: R2UploadAuditInput): string {
       input.url,
       input.decision,
       formatRationale(input),
-      input.uploadAttemptId
+      input.uploadAttemptId,
+      input.snapId
     );
   return decisionId;
 }

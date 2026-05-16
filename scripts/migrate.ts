@@ -32,6 +32,7 @@ const SQLITE_MIGRATIONS: Array<{ version: string; file: string }> = [
   { version: "v6", file: "migrations/sqlite/v6_discovery_queue.sql" },
   { version: "v7", file: "migrations/sqlite/v7_policy_decisions_intended_action.sql" },
   { version: "v8", file: "migrations/sqlite/v8_audit_hardening.sql" },
+  { version: "v9", file: "migrations/sqlite/v9_policy_decisions_snap_id.sql" },
 ];
 
 // Parse "v<N>" → integer for numeric comparison. Lexicographic string compare

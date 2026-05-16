@@ -180,7 +180,8 @@ function setupDb() {
       (source_id, archive_policy, raw_cloud_policy, external_llm_policy)
       VALUES ('src-1', 'full_snapshot_allowed', 'allowed_public_data_only', 'allowed');
     -- policy_decisions: v1 + v7 (intended_action) + v8 (upload_attempt_id +
-    -- enum triggers, AI-P1-7 INFRA-1B.3.h3-audit-hardening).
+    -- enum triggers, AI-P1-7 INFRA-1B.3.h3-audit-hardening) + v9 (snap_id
+    -- column, AI-P1-15 INFRA-1B.3.h5-policy-decisions-snap-id-column-v9).
     -- INFRA-1B.3.x-audit hooks INSERT into this table around every r2Put call,
     -- so the snapshot-fingerprint tests must materialize the schema here.
     CREATE TABLE IF NOT EXISTS policy_decisions (
@@ -194,7 +195,8 @@ function setupDb() {
       rationale         TEXT,
       created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
       intended_action   TEXT,
-      upload_attempt_id TEXT
+      upload_attempt_id TEXT,
+      snap_id           TEXT
     );
 
     -- v8 audit hardening triggers (mirror migrations/sqlite/v8_audit_hardening.sql).
