@@ -573,24 +573,30 @@ GH PAT / fine-grained / OAuth token 의 revoke 시점 + 절차.
 5. **Personal-machine sign-out** — 운영자 personal device 분실 / 매각 /
    양도 직전.
 
-**Revoke procedure (GitHub web UI primary)**:
+**Revoke procedure (web UI primary — canonical for both PAT types)**:
 
 ```text
-https://github.com/settings/tokens               # classic PAT
-https://github.com/settings/personal-access-tokens   # fine-grained
+https://github.com/settings/tokens                   # classic PAT → Delete
+https://github.com/settings/personal-access-tokens   # fine-grained PAT → Delete
 ```
 
 각 token row → "Delete" 또는 "Revoke" 클릭. immediate 효과.
 
-**Revoke procedure (gh CLI fallback)**:
+**API note (Codex PR #48 round 5 P2 fix — deprecated endpoint 정정)**:
 
-```bash
-# fine-grained 는 gh CLI 미지원 (2026-05 시점) — UI 만.
-# classic PAT 는 API 로 revoke 가능:
-gh api -X DELETE /authorizations/<id>
-# 단 본 token 자체가 admin scope 보유해야 호출 가능 (chicken-and-egg).
-# 보통 UI revoke 가 안전한 default.
-```
+- **legacy `/authorizations/{id}` endpoint 는 2020-11 sunset** (GitHub
+  blog "Deprecation Notice: GitHub OAuth Authorizations API"). 이전
+  RUNBOOK 의 `gh api -X DELETE /authorizations/<id>` 명령은 동작 안 함 —
+  rotation 시점에 실패하여 운영자를 혼란시킬 수 있어 본 round 에서 정정.
+- **Classic PAT**: gh CLI 에 자기 자신의 PAT 를 revoke 하는 직접 명령
+  없음. **web UI (위 URL) 가 canonical flow**.
+- **Fine-grained PAT**: `gh api --method DELETE /user/personal-access-tokens/{pat_id}`
+  로 revoke 가능 (caller token 이 적절 scope 보유 시). 단 audit trace +
+  운영자 명확성 측면에서 **web UI 사용 권장**.
+- **OAuth app grant** (PAT 아닌 OAuth integration token): `gh api --method DELETE /applications/{client_id}/grant`
+  + basic auth `client_id:client_secret` — 본 repo 는 PAT 만 사용하므로
+  적용 X. 향후 GitHub App 도입 시점 (RESEARCH-1A.* OAuth flow) 에 추가
+  검토.
 
 **Post-revoke 의무 (rotate 가 아닌 경우)**:
 - Revoke 직후: `git push` / `gh pr create` / cron host workflow 등 모든
