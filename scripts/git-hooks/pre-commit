@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Pre-commit hook — env scrub (AI-P1-12 / RUNBOOK setup hygiene).
+#
+# Invokes scripts/check-secrets.ts. Wired via `git config core.hooksPath
+# = scripts/git-hooks` (run `bun run hooks:install` once per fresh clone).
+# Operator override: `git commit --no-verify` bypasses this hook.
+set -euo pipefail
+
+exec bun run scripts/check-secrets.ts

@@ -19,7 +19,10 @@
 |---|---|
 | `scripts/migrate.ts` | Migration runner CLI (`bun run migrate`, `:neo4j`, `:sqlite`) |
 | `scripts/validate_invariants.ts` | Invariant validator (`bun run invariant:check`) |
-| `scripts/seed-sources.ts` | Source registry seed CLI (`bun run seed-sources`, `:dry-run`, INFRA-1B.1) |
+| `scripts/seed-sources.ts` | Source registry seed CLI (`bun run seed-sources`, `:dry-run`, `:neo4j`, `:preflight`, INFRA-1B.1 + AI-P1-2) |
+| `scripts/check-secrets.ts` | Pre-commit secret scanner — pure `scanForSecrets()` + CLI entry (`bun run check-secrets`). 2-layer defense: filename guard (`.env` family reject, exempt `.env.example` / `.sample` / `.template`) + content pattern guard (OpenAI / Anthropic / Google / AWS / GitHub PAT / Doppler). Redacted preview (`first4...last4`) — no token re-leak in stderr. AI-P1-12 / INFRA-1B.5.h1-runbook-setup-hygiene |
+| `scripts/git-hooks/pre-commit` | Bash shim invoking `scripts/check-secrets.ts`. Activated via `git config core.hooksPath = scripts/git-hooks` (`bun run hooks:install`). Operator override: `git commit --no-verify`. AI-P1-12 |
+| `scripts/install-git-hooks.sh` | One-shot fresh-worktree installer — sets `core.hooksPath` + `chmod +x` all hooks. `bun run hooks:install`. AI-P1-12 |
 | `src/discovery/worker/run-discovery.ts` | Discovery worker entry (`bun run discovery:run`, `:dry-run`, INFRA-1B.2) |
 | `tests/bench/neo4j_fts_search_bench.ts` | SPIKE-001 FTS bench (`bun run bench:neo4j`) |
 
@@ -105,6 +108,7 @@
 | `tests/unit/source_registry_test.ts` | Source registry seed dry-run + enum validation + YAML structure | — (INFRA-1B.1) |
 | `tests/unit/neo4j_bootstrap_test.ts` | Neo4j Source bootstrap idempotency + preflight (3-way SQLite policy / slug_map / Neo4j Source alignment) + fail-fast BootstrapPreflightError | — (INFRA-1B.1.h1-source-bootstrap-neo4j, AI-P1-2) |
 | `tests/unit/run_process_queue_test.ts` | `discovery:process-queue` CLI internals — SQLite-backed `makeArchivePolicyLookup` enum validation + missing-row diagnostics + `pendingSnapshot` dry-run summary (total / per-source breakdown sorted by count DESC / stale-processing > 1h) | — (INFRA-1B.3.h2-queue-cli, AI-P1-3) |
+| `tests/unit/check_secrets_test.ts` | Pre-commit secret scanner pure-function tests — `isStagedEnvFile` / `isEnvFileExempt` filename guard + `redactMatch` preview + `scanForSecrets` vendor patterns (OpenAI / Anthropic / Google / AWS / GitHub PAT classic+fine-grained+oauth / Doppler) + regex `g`-flag state isolation across files | — (INFRA-1B.5.h1-runbook-setup-hygiene, AI-P1-12) |
 | `tests/unit/access_intervention_test.ts` | severity scoring + recorder integration + batch-report generation (26 tests) | TEST-024 (AC-024) |
 | `tests/unit/safe_fetch_test.ts` | safe-fetch defense unit tests (117 tests) | — (ADR-0028, DEC-017) |
 | `tests/unit/xml_safe_test.ts` | xml-safe singleton + XXE block tests | — (DEC-018) |
