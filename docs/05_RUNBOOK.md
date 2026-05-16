@@ -582,21 +582,50 @@ https://github.com/settings/personal-access-tokens   # fine-grained PAT → Dele
 
 각 token row → "Delete" 또는 "Revoke" 클릭. immediate 효과.
 
-**API note (Codex PR #48 round 5 P2 fix — deprecated endpoint 정정)**:
+**Important: revoke (server-side) vs local credential cleanup (client-side)
+구분** — 둘은 다른 작업이다. revoke 가 server 에서 token 을 무효화 (모든
+machine 영향), local cleanup 은 단일 machine 의 credential cache 정리만.
+운영자가 leak 의심 시 의무: **revoke 먼저** (universal kill), 그 다음
+필요 시 local cleanup (다른 machine 의 stale cache 도 같이 청소 의무).
 
-- **legacy `/authorizations/{id}` endpoint 는 2020-11 sunset** (GitHub
-  blog "Deprecation Notice: GitHub OAuth Authorizations API"). 이전
-  RUNBOOK 의 `gh api -X DELETE /authorizations/<id>` 명령은 동작 안 함 —
-  rotation 시점에 실패하여 운영자를 혼란시킬 수 있어 본 round 에서 정정.
-- **Classic PAT**: gh CLI 에 자기 자신의 PAT 를 revoke 하는 직접 명령
-  없음. **web UI (위 URL) 가 canonical flow**.
-- **Fine-grained PAT**: `gh api --method DELETE /user/personal-access-tokens/{pat_id}`
-  로 revoke 가능 (caller token 이 적절 scope 보유 시). 단 audit trace +
-  운영자 명확성 측면에서 **web UI 사용 권장**.
-- **OAuth app grant** (PAT 아닌 OAuth integration token): `gh api --method DELETE /applications/{client_id}/grant`
-  + basic auth `client_id:client_secret` — 본 repo 는 PAT 만 사용하므로
-  적용 X. 향후 GitHub App 도입 시점 (RESEARCH-1A.* OAuth flow) 에 추가
-  검토.
+**1. Server-side revoke** (universal kill — 모든 client 에 영향):
+
+| Token type | Procedure |
+|---|---|
+| Classic PAT | **Web UI only** — Settings → Developer settings → Personal access tokens → Tokens (classic) → Delete. gh CLI 에 자기 자신의 classic PAT 를 revoke 하는 명령 없음. |
+| Fine-grained PAT | **Web UI primary** — Settings → Developer settings → Personal access tokens → Fine-grained tokens → Delete. CLI 가능 옵션: `gh api --method DELETE /user/personal-access-tokens/{pat_id}` (caller token 이 admin scope 보유 시). audit trace + 운영자 명확성 측면에서 web UI 권장. |
+| OAuth/App token (별도) | **App owner 만 가능** — `gh api --method DELETE /applications/{client_id}/token` (revoke specific token) 또는 `/applications/{client_id}/grant` (revoke all grants). basic auth `client_id:client_secret` 의무 — 일반 operator PAT revoke 절차와 다름. 본 repo 는 PAT 만 사용하므로 OOB. RESEARCH-1A.* OAuth flow 진입 시 추가 검토. |
+
+**Deprecated endpoint warning (Codex PR #48 round 5 P2 fix)**: GitHub 의
+legacy `/authorizations/{id}` API 는 **2020-11-13 sunset** (blog post
+"Deprecation Notice: GitHub OAuth Authorizations API"). 이전 RUNBOOK 의
+`gh api -X DELETE /authorizations/<id>` fallback 은 동작하지 않으니
+**절대 사용 금지** — rotation 시점에 silent fail 하여 운영자가 token 이
+revoke 됐다고 오인할 수 있다.
+
+**2. Local credential cleanup** (NOT revoke — 단일 machine 만 영향):
+
+revoke 와 별개로, 운영자가 leak 의심 machine 또는 personal device sign-off
+시 local credential cache 도 청소 의무 (stale token 이 다른 process 에서
+재사용 안 되게):
+
+```bash
+# gh CLI logout — local OAuth/PAT credential 제거
+gh auth logout                          # 모든 host 에 대해 logout
+gh auth logout --hostname github.com    # 특정 host 만
+
+# git credential cache reject — git 내장 credential helper 가 cache 한 token
+git credential reject < /dev/null       # 또는 'protocol=https\nhost=github.com' input
+
+# OS keychain credential — macOS Keychain Access 또는 Windows Credential Manager
+# 또는 Linux gnome-keyring 에서 'github.com' 또는 'git:https://github.com'
+# entry 수동 삭제. 운영자 OS 별 GUI 절차 참조.
+```
+
+**중요**: local cleanup 만 하면 server 의 token 은 살아있으므로 다른
+machine 에서 그대로 사용 가능 — leak 의심 시 반드시 server-side revoke
+선행 후 local cleanup. 반대로 device 양도 / 매각 시 local cleanup 만
+필요 (token 자체는 다른 machine 에서 계속 사용).
 
 **Post-revoke 의무 (rotate 가 아닌 경우)**:
 - Revoke 직후: `git push` / `gh pr create` / cron host workflow 등 모든
@@ -628,13 +657,33 @@ bun run hooks:install
 # 내부: git config core.hooksPath scripts/git-hooks + chmod +x scripts/git-hooks/*
 ```
 
-**Test** (hook 동작 확인):
+**Test** (hook 동작 확인 — 두 방식, 운영자 선호 따라 선택):
+
+방식 A (commit 까지 실행, hook 자체를 검증):
 
 ```bash
-echo 'sk-proj-FAKE-TEST-KEY-PLACEHOLDER-1234567890123456' > /tmp/fake-test.txt
-git add /tmp/fake-test.txt && git commit -m test
+# repo-relative 경로 의무 — /tmp/* 는 git add 가 "outside repository" 거절.
+echo 'sk-proj-FAKE-TEST-KEY-PLACEHOLDER-1234567890123456' > .secret-scan-smoke.txt
+git add .secret-scan-smoke.txt
+git commit -m secret-scan-smoke-test
 # → "secret pattern 'openai_api_key' matched: sk-p...3456" + exit 1
+
+# cleanup (commit 실패했으므로 stage 만 풀고 파일 삭제)
+git restore --staged .secret-scan-smoke.txt 2>/dev/null || true
+rm -f .secret-scan-smoke.txt
 ```
+
+방식 B (commit 없이 scanner 만 직접 호출 — 더 안전, hook wiring 의존 X):
+
+```bash
+echo 'sk-proj-FAKE-TEST-KEY-PLACEHOLDER-1234567890123456' > .secret-scan-smoke.txt
+git add .secret-scan-smoke.txt
+bun run check-secrets   # → exit 1, stderr 에 violation 보고
+git restore --staged .secret-scan-smoke.txt
+rm -f .secret-scan-smoke.txt
+```
+
+방식 A 가 hook installer + git core.hooksPath 까지 end-to-end 검증, 방식 B 는 scanner 의 pure logic 만 검증 (hook wiring 별도 verify). 운영자가 fresh worktree setup 직후 sanity check 시 방식 A 권장.
 
 **Operator override** (false positive — 예 test fixture, glossary 인용 등):
 

@@ -34,9 +34,13 @@ for hook in "${HOOKS_DIR}"/*; do
   echo "  - ${name}"
 done
 echo
-echo "Test the hook:"
-echo "  echo 'sk-proj-FAKE-TEST-KEY-PLACEHOLDER-1234567890123456' > /tmp/fake.txt"
-echo "  git add /tmp/fake.txt && git commit -m test  # should fail"
+echo "Test the hook (repo-relative path — /tmp/* is rejected by git add as outside repo):"
+echo "  echo 'sk-proj-FAKE-TEST-KEY-PLACEHOLDER-1234567890123456' > .secret-scan-smoke.txt"
+echo "  git add .secret-scan-smoke.txt && git commit -m secret-scan-smoke-test  # should fail"
+echo "  git restore --staged .secret-scan-smoke.txt && rm -f .secret-scan-smoke.txt"
+echo
+echo "Or invoke scanner directly without git commit (safer for repeated checks):"
+echo "  bun run check-secrets   # reads currently-staged content"
 echo
 echo "Bypass (operator override, document in commit body):"
 echo "  git commit --no-verify"
