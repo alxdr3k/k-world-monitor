@@ -227,10 +227,11 @@ function setupDb() {
     BEFORE INSERT ON policy_decisions
     FOR EACH ROW
     WHEN NEW.intended_action = 'r2_upload'
-         AND NEW.upload_attempt_id IS NULL
+         AND (NEW.upload_attempt_id IS NULL
+              OR TRIM(NEW.upload_attempt_id, ' ' || char(9) || char(10) || char(13)) = '')
     BEGIN
       SELECT RAISE(ABORT,
-        'policy_decisions.upload_attempt_id: required when intended_action=r2_upload (correlates attempted/outcome pair)');
+        'policy_decisions.upload_attempt_id: required when intended_action=r2_upload (must be non-empty correlation key for attempted/outcome pair)');
     END;
   `);
   return db;

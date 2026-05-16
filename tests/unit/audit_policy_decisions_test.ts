@@ -77,10 +77,11 @@ function setupDb() {
     BEFORE INSERT ON policy_decisions
     FOR EACH ROW
     WHEN NEW.intended_action = 'r2_upload'
-         AND NEW.upload_attempt_id IS NULL
+         AND (NEW.upload_attempt_id IS NULL
+              OR TRIM(NEW.upload_attempt_id, ' ' || char(9) || char(10) || char(13)) = '')
     BEGIN
       SELECT RAISE(ABORT,
-        'policy_decisions.upload_attempt_id: required when intended_action=r2_upload (correlates attempted/outcome pair)');
+        'policy_decisions.upload_attempt_id: required when intended_action=r2_upload (must be non-empty correlation key for attempted/outcome pair)');
     END;
   `);
   return db;
@@ -538,5 +539,47 @@ describe("v8 trigger: upload_attempt_id required for r2_upload rows (INSERT)", (
         )
         .run();
     }).not.toThrow();
+  });
+
+  it("rejects empty + whitespace-only upload_attempt_id (space / tab / newline / CR / mixed) — Codex PR #49 P2", () => {
+    // SQLite's default TRIM(x) only strips ASCII space (0x20). The trigger
+    // uses `TRIM(x, ' ' || char(9) || char(10) || char(13))` to also catch
+    // tabs, newlines, and CR — common "missing value" representations in
+    // raw SQL / scripts that the migration explicitly defends against.
+    const badIds = ["", " ", "\t", "\n", "\r", "  \t\n\r  "];
+    badIds.forEach((badId, i) => {
+      let caught: unknown;
+      try {
+        getDb()
+          .prepare(
+            `INSERT INTO policy_decisions
+               (decision_id, source_id, url, trigger_type, policy_gate_mode,
+                decision, intended_action, upload_attempt_id)
+             VALUES (?, 'src_x', 'https://x.com/', 'r2_upload',
+                     'batch_report', 'attempted', 'r2_upload', ?)`
+          )
+          .run(`pdec_empty_${i}`, badId);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).toMatch(/non-empty correlation key/);
+    });
+  });
+
+  it("trigger SQL contains TRIM with whitespace char set (regression guard for SQLite TRIM default-space-only behavior)", () => {
+    // SQLite's default TRIM strips ASCII space only — a future refactor
+    // that simplifies to `TRIM(NEW.upload_attempt_id) = ''` silently
+    // re-opens the tab/newline/CR bypass path. Lock the char set in SQL.
+    const triggerSql = (
+      getDb()
+        .query("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='policy_decisions_r2_upload_attempt_id_required_ins'")
+        .get() as { sql: string } | null
+    )?.sql;
+    expect(triggerSql).toBeDefined();
+    expect(triggerSql).toContain("TRIM");
+    expect(triggerSql).toContain("char(9)");  // tab
+    expect(triggerSql).toContain("char(10)"); // newline
+    expect(triggerSql).toContain("char(13)"); // CR
   });
 });

@@ -65,18 +65,26 @@ BEGIN
     'policy_decisions.decision: invalid value for intended_action=r2_upload (must be in R2_UPLOAD_DECISION enum)');
 END;
 
--- Step 1b: r2_upload rows must have an upload_attempt_id (correlation key).
+-- Step 1b: r2_upload rows must have a non-empty upload_attempt_id (correlation key).
 -- Defense against future caller that forgets the correlation argument —
 -- without it, operator audit queries cannot pair BEFORE / AFTER rows
 -- across concurrent r2Put calls for the same snap_id.
+--
+-- Codex PR #49 P2 fix: rejects NULL OR empty/whitespace-only string. The
+-- migration explicitly defends against runtime drift / raw SQL / future
+-- scripts, and "" is a common "missing value" representation that would
+-- silently collapse multiple attempts onto a single non-meaningful key
+-- (operator audit query `WHERE upload_attempt_id = ''` would then return
+-- ALL drift-affected attempts together — false correlation).
 CREATE TRIGGER IF NOT EXISTS policy_decisions_r2_upload_attempt_id_required_ins
 BEFORE INSERT ON policy_decisions
 FOR EACH ROW
 WHEN NEW.intended_action = 'r2_upload'
-     AND NEW.upload_attempt_id IS NULL
+     AND (NEW.upload_attempt_id IS NULL
+          OR TRIM(NEW.upload_attempt_id, ' ' || char(9) || char(10) || char(13)) = '')
 BEGIN
   SELECT RAISE(ABORT,
-    'policy_decisions.upload_attempt_id: required when intended_action=r2_upload (correlates attempted/outcome pair)');
+    'policy_decisions.upload_attempt_id: required when intended_action=r2_upload (must be non-empty correlation key for attempted/outcome pair)');
 END;
 
 -- Schema version record
