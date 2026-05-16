@@ -38,6 +38,7 @@
 | `migrations/sqlite/v5_crawl_state.sql` | crawl_state table — discovery scheduler etag/Last-Modified + backoff (INFRA-1B.2b, ADR-0030 INV-0030-5) |
 | `migrations/sqlite/v6_discovery_queue.sql` | discovery_queue table — discovered URLs pending fingerprint (INFRA-1B.2, INFRA-1B.3) |
 | `migrations/sqlite/v7_policy_decisions_intended_action.sql` | policy_decisions ADD COLUMN intended_action — R2 upload audit ledger (INFRA-1B.3.x-audit, AC-032 / NFR-008, Q-044 → DEC-020 / TRACE-040) |
+| `migrations/sqlite/v8_audit_hardening.sql` | policy_decisions audit hardening: ADD COLUMN upload_attempt_id (BEFORE/AFTER correlation key) + 3 BEFORE INSERT triggers (intended_action enum + r2_upload decision enum + r2_upload upload_attempt_id required). DB-level defense-in-depth for AC-032 / NFR-008 audit invariants (INFRA-1B.3.h3-audit-hardening, AI-P1-7) |
 
 ## Source
 
@@ -61,7 +62,7 @@
 | `src/storage/r2/client.ts` | Bun.S3Client wrapper — `r2Put/r2Get/r2Delete` with policy enforcement (INFRA-1A.3) |
 | `src/storage/source-registry/seed.ts` | Parse `data/sources_seed.yaml`, validate enums + URLs, upsert source_material_policy + slug map (INFRA-1B.1) |
 | `src/storage/source-registry/neo4j-bootstrap.ts` | `bootstrapNeo4jSourceNodes()` UNWIND MERGE Neo4j Source nodes from resolved SQLite slug_map rows (`loadBootstrapRowsFromSqlite()` — YAML name preferred, historical slug-only rows fallback `name=slug`) + `preflightSourceRegistry()` SQLite policy / SQLite slug_map / Neo4j Source 3-way alignment check + null source_id detection (`neo4jNodesMissingSourceId`) + duplicate source_id detection (`neo4jDuplicateSourceIds[]`) + `assertSourceRegistryAligned()` fail-fast `BootstrapPreflightError` with remediation hints. Source node properties minimal (`source_id` / `slug` / `name` / `bootstrap_at` / `updated_at`); `was_created` via OPTIONAL MATCH query-local variable (NOT stored as Source property). (INFRA-1B.1.h1-source-bootstrap-neo4j, AI-P1-2) |
-| `src/storage/audit/policy-decisions.ts` | `recordR2UploadDecision()` — immutable audit row INSERT into policy_decisions around every r2Put call site in snapshot-fingerprint (INFRA-1B.3.x-audit, AC-032 / NFR-008, ADR-0012 INV-0012-3) |
+| `src/storage/audit/policy-decisions.ts` | `recordR2UploadDecision()` — immutable audit row INSERT into policy_decisions around every r2Put call site in snapshot-fingerprint (INFRA-1B.3.x-audit, AC-032 / NFR-008, ADR-0012 INV-0012-3). AI-P1-7 (INFRA-1B.3.h3-audit-hardening): `newUploadAttemptId()` 신규 export + `R2UploadAuditInput.uploadAttemptId` 의무 — BEFORE 'attempted' / AFTER outcome row 가 동일 `upload_attempt_id` (`uatt_<ULID>`) 공유, operator 가 `WHERE upload_attempt_id = '...'` 로 concurrent r2Put 사이에서 단일 attempt 의 BEFORE/AFTER pair 정확 추출. v8 SQLite trigger 가 r2_upload row 의 NULL upload_attempt_id reject. |
 
 ### Discovery
 
