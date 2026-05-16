@@ -47,3 +47,26 @@
 - 리뷰/반영: PR #56 squash merge → main commit 01f029f. Codex pass.
 - 리스크: 없음
 
+사이클 3 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일:
+  - AI-P1-15 / INFRA-1B.3.h5-policy-decisions-snap-id-column-v9 구현: v9 migration 으로 policy_decisions.snap_id TEXT 컬럼 + partial INDEX 추가. recordR2UploadDecision 가 column + rationale prefix 양쪽에 dual-write. scanner 가 column 우선 + rationale fallback (legacy v8- 호환). AI-P1-13 의 free-form rationale regex 의존 해소.
+  - Codex PR #57 round 1 finding 2건 처리: P1 (v9 schema_migrations record 누락) + P2 (snap_id column shape 미검증 — empty/garbage 통과). 둘 다 비판적 평가로 confirmed real bug, 즉시 fix. P1 = INSERT OR IGNORE schema_migrations 추가. P2 = validSnapIdOrNull() helper + scanner 에 shape 검증.
+  - Round 2 Codex pass 'Didn\'t find any major issues' → squash merge
+- 결론: AI-P1-15 v9 audit schema improvement landed (PR #57 → main commit cdd1faf). 운영자 결정 sequence 의 마지막 engineering slice 완료. Codex 2 round review (P1+P2 fix 후 pass).
+- 변경 범위: src_with_tests_and_migration (8 files), contract surface
+- 검증 계획: full_ci, full CI 필요
+- 다음 검토 후보:
+  - canonical register batch 3 (doc-only PR): AI-P0-2 + AI-P1-13 + AI-P1-14 + AI-P1-15 의 IMPL_PLAN slice 표 row 등록 + current-state.md 정합 보정 + retro reopen section + action-items table row 추가. operator-decided sequence step 3 (지연됨) 처리 + P0-M2 gate accept 전 필수. (ready) 시작 조건: AI-P1-15 land (방금 완료) → 즉시 진입 가능
+  - P0-M2 gate accept (operator-driven): 운영자 manual: SPIKE-001 + AC-023 결정 + AC-022/023/024 evidence 확정 (blocked) 시작 조건: canonical register batch 3 land + operator manual task 수행
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증:
+  - bun test 674 → 684 pass (+10, round 1 +6 → round 2 +4 = total +10)
+  - tsc --noEmit clean
+  - invariant:check 0 errors, 5 warnings (pre-existing)
+  - GitHub Actions 4/4 success
+- 리뷰/반영: PR #57 squash merge → main commit cdd1faf. Codex 2 round review (round 1 P1+P2 fixed, round 2 pass).
+- 리스크: 없음
+
