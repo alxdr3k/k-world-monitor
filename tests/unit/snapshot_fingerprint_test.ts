@@ -1096,3 +1096,155 @@ describe("createSnapshotFingerprint — cross-source archive_policy guard (AI-P0
     expect(audit.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
   });
 });
+
+describe("createSnapshotFingerprint — cross-source archive_policy guard, dedup-link path (AI-P0-2)", () => {
+  // AI-P0-2 / INFRA-1B.3.h4-dedup-r2-backed-link-policy-fix
+  //
+  // AI-P0-1 (PR #41) closed the back-fill + new-path call sites of
+  // allLinkedSourcesAllowR2SnapshotUpload() (covered by the AI-P0-1 describe
+  // block above). The dedup-link call site at snapshot-fingerprint.ts
+  // line 490 — fired when `existing.r2Key !== null` (the existing Snapshot is
+  // already R2-backed) — was left checking only `raw_cloud_policy ===
+  // "always_prohibited"`, missing the archive_policy axis. A Source with
+  // archive_policy in {metadata_only, excerpt_only, do_not_collect} but
+  // raw_cloud_policy=allowed_public_data_only could still be linked to an
+  // R2-backed Snapshot via ensureSourceLinkage(), violating INV-0012-3 at a
+  // sibling call site.
+  //
+  // AI-P0-2 closes that hole with an allowlist guard (PR #47 lesson: enum
+  // gates use allowlist, never deny-list — unknown archive_policy values
+  // fail closed).
+
+  function insertPolicy(
+    sourceId: string,
+    archivePolicy: string,
+    rawCloudPolicy: string,
+  ): void {
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    getDb()
+      .prepare(
+        `INSERT OR REPLACE INTO source_material_policy
+         (source_id, archive_policy, raw_cloud_policy, external_llm_policy)
+         VALUES (?, ?, ?, 'allowed')`,
+      )
+      .run(sourceId, archivePolicy, rawCloudPolicy);
+  }
+
+  async function expectDedupRejected(
+    queueId: string,
+    archivePolicy: SnapshotInput["archivePolicy"],
+    rawCloudPolicy: SnapshotInput["rawCloudPolicy"],
+  ): Promise<void> {
+    let caught: unknown;
+    try {
+      await createSnapshotFingerprint({
+        ...baseInput(queueId),
+        archivePolicy,
+        rawCloudPolicy,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(TypedQueueError);
+    expect((caught as TypedQueueError).errorCode).toBe("dedup_prohibited_source");
+    expect((caught as Error).message).toMatch(/dedup: prohibited source cannot link to r2-backed snapshot/);
+    // Guard fires BEFORE ensureSourceLinkage — no MERGE for HAS_DOCUMENT /
+    // HAS_SNAPSHOT edges should appear (the linkage path was never reached).
+    const linkageMerge = neo4j.runs.find(
+      (r) =>
+        r.via === "tx" &&
+        /MERGE\s*\([^)]*\)-\[:HAS_(DOCUMENT|SNAPSHOT)\]/.test(r.query),
+    );
+    expect(linkageMerge).toBeUndefined();
+    // No R2 upload (the dedup branch never reaches the back-fill code path
+    // when the guard throws).
+    expect(r2Puts).toHaveLength(0);
+    // No audit rows (audit hooks live at the r2Put sites, not at this guard).
+    expect(readAuditRows()).toHaveLength(0);
+  }
+
+  it("dedup-link: archive_policy=metadata_only is rejected even with allowed_public_data_only", async () => {
+    findExistingResult = {
+      snapId: "snap_EXISTING_R2_META",
+      r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING_R2_META",
+    };
+
+    const db = setupDb();
+    insertPolicy("src-1", "metadata_only", "allowed_public_data_only");
+    seedQueue(db, "dq_dedup_link_meta");
+
+    await expectDedupRejected("dq_dedup_link_meta", "metadata_only", "allowed_public_data_only");
+  });
+
+  it("dedup-link: archive_policy=excerpt_only is rejected even with allowed_public_data_only", async () => {
+    findExistingResult = {
+      snapId: "snap_EXISTING_R2_EXCERPT",
+      r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING_R2_EXCERPT",
+    };
+
+    const db = setupDb();
+    insertPolicy("src-1", "excerpt_only", "allowed_public_data_only");
+    seedQueue(db, "dq_dedup_link_excerpt");
+
+    await expectDedupRejected("dq_dedup_link_excerpt", "excerpt_only", "allowed_public_data_only");
+  });
+
+  it("dedup-link: archive_policy=do_not_collect is rejected even with allowed_public_data_only", async () => {
+    findExistingResult = {
+      snapId: "snap_EXISTING_R2_DNC",
+      r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING_R2_DNC",
+    };
+
+    const db = setupDb();
+    insertPolicy("src-1", "do_not_collect", "allowed_public_data_only");
+    seedQueue(db, "dq_dedup_link_dnc");
+
+    await expectDedupRejected("dq_dedup_link_dnc", "do_not_collect", "allowed_public_data_only");
+  });
+
+  it("dedup-link: raw_cloud_policy=always_prohibited is rejected (pre-existing axis preserved)", async () => {
+    // Regression: the line 490 guard's original check (rawCloudPolicy ===
+    // "always_prohibited") must still fire under the broadened allowlist. The
+    // archive_policy check now joined it with OR, not replaced it.
+    findExistingResult = {
+      snapId: "snap_EXISTING_R2_PROHIBITED",
+      r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING_R2_PROHIBITED",
+    };
+
+    const db = setupDb();
+    insertPolicy("src-1", "full_snapshot_allowed", "always_prohibited");
+    seedQueue(db, "dq_dedup_link_prohibited");
+
+    await expectDedupRejected("dq_dedup_link_prohibited", "full_snapshot_allowed", "always_prohibited");
+  });
+
+  it("dedup-link: archive_policy=full_snapshot_allowed + raw_cloud_policy=allowed_public_data_only is allowed (positive case)", async () => {
+    // The allowlist branch: both axes permitted → dedup-link proceeds,
+    // ensureSourceLinkage() runs, result.deduplicated=true with the existing
+    // r2Key preserved.
+    findExistingResult = {
+      snapId: "snap_EXISTING_R2_OK",
+      r2Key: "permitted_artifact/derived/snapshot/snap_EXISTING_R2_OK",
+    };
+
+    const db = setupDb();
+    insertPolicy("src-1", "full_snapshot_allowed", "allowed_public_data_only");
+    seedQueue(db, "dq_dedup_link_ok");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_dedup_link_ok"));
+
+    expect(result.deduplicated).toBe(true);
+    expect(result.snapId).toBe("snap_EXISTING_R2_OK");
+    expect(result.r2Key).toBe("permitted_artifact/derived/snapshot/snap_EXISTING_R2_OK");
+    // Linkage was performed (ensureSourceLinkage's MERGE ran via tx.run).
+    const linkageMerge = neo4j.runs.find(
+      (r) =>
+        r.via === "tx" &&
+        /MERGE\s*\(src\)-\[:HAS_DOCUMENT\]/.test(r.query),
+    );
+    expect(linkageMerge).toBeDefined();
+    // No new R2 upload — dedup preserves the existing r2_key, no back-fill
+    // because r2Key is already set.
+    expect(r2Puts).toHaveLength(0);
+  });
+});
