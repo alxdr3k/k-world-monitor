@@ -481,6 +481,49 @@ ORDER BY updated_at DESC LIMIT 50;
 reclaim threshold = 1h (1h 넘게 'processing' 인 row 는 재기동 시점에
 'pending' 으로 reclaim — crashed worker 복구).
 
+### R2 Invariant Scan — `audit:r2-invariants` (AI-P1-6, OPS-1B.h1-runtime-invariant-scanner)
+
+**Read-only** 3-way reconciliation: `Snapshot.r2_key` (Neo4j) ↔
+`policy_decisions.decision='uploaded'` audit row (SQLite) ↔
+`source_material_policy` 정책 (SQLite). Schema-side hardening
+(INFRA-1B.3.x-audit + INFRA-1B.3.h3-audit-hardening) 의 runtime consumer
+— operator alert 의 canonical evidence query.
+
+```bash
+bun run audit:r2-invariants            # human-readable, exit 1 on violations
+bun run audit:r2-invariants:json       # machine-readable JSON 출력 (cron / log pipe)
+```
+
+**3 violation axis** 별 operator response:
+
+| Axis | 의미 | 대응 |
+|---|---|---|
+| `r2_key_without_audit` | Snapshot 에 r2_key 있으나 audit ledger 에 'uploaded' row 없음 | (a) pre-v7 historical Snapshot 이면 informational — 백필 slice 검토. (b) post-v7 Snapshot 이면 NFR-008 audit-hook regression — snapshot-fingerprint 코드 review 의무 |
+| `audit_uploaded_without_r2_key` | audit 가 upload 성공 주장하나 Snapshot.r2_key NULL 또는 Snapshot 자체 부재 | (a) 같은 `upload_attempt_id` 의 sibling `set_r2_key_failed_neo4j` row 검색 — 있으면 r2 는 성공 / Neo4j SET 실패, 다음 dedup back-fill 시 복구. (b) sibling 없으면 Snapshot DETACH DELETE 흔적 — manual r2 cleanup 의무 (별도 repair CLI slice) |
+| `r2_key_with_restricted_source` | Snapshot 에 r2_key 있으나 linked source 의 archive_policy / raw_cloud_policy 가 **현재** restrictive (retroactive tightening) | r2 object removal (repair CLI 별도 slice) **또는** source policy rollback (`full_snapshot_allowed` + `allowed_public_data_only` 로 복귀) — operator 결정 의무 |
+
+**상태 정상 출력 예시**:
+
+```text
+R2 invariant scan — counts: r2_backed_snapshots=12, uploaded_audit_rows=12, source_policy_rows=72
+aligned ✓ (no violations)
+```
+
+**Violation 출력 예시**:
+
+```text
+R2 invariant scan — counts: r2_backed_snapshots=12, uploaded_audit_rows=11, source_policy_rows=72
+
+1 violation(s) detected:
+
+  [r2_key_without_audit] snap_id=snap_01ABCDEF r2_key=permitted_artifact/derived/snapshot/snap_01ABCDEF linked_sources=[src_A]
+    → Investigate: pre-v7 historical snapshot or audit-hook regression
+
+Full violation details (JSON): re-run with --json. Read-only scan — no changes were made to Neo4j / SQLite / R2.
+```
+
+**Recommended cadence**: 운영자가 weekly 또는 P0-M6 publish 직전 manual 호출. v1+ cron 통합은 별도 slice (`OPS-1A.5-unified-cli` 또는 후속).
+
 ### 복구 절차
 
 **Neo4j 복구:**

@@ -24,7 +24,9 @@
     "discovery:process-queue": "bun run src/discovery/worker/run-process-queue.ts",
     "discovery:process-queue:dry-run": "bun run src/discovery/worker/run-process-queue.ts --dry-run",
     "hooks:install": "bash scripts/install-git-hooks.sh",
-    "check-secrets": "bun run scripts/check-secrets.ts"
+    "check-secrets": "bun run scripts/check-secrets.ts",
+    "audit:r2-invariants": "bun run src/ops/run-r2-invariants.ts",
+    "audit:r2-invariants:json": "bun run src/ops/run-r2-invariants.ts --json"
   },
   "dependencies": {
     "fast-xml-parser": "^5.8.0",
