@@ -593,7 +593,7 @@ machine 영향), local cleanup 은 단일 machine 의 credential cache 정리만
 | Token type | Procedure |
 |---|---|
 | Classic PAT | **Web UI only** — Settings → Developer settings → Personal access tokens → Tokens (classic) → Delete. gh CLI 에 자기 자신의 classic PAT 를 revoke 하는 명령 없음. |
-| Fine-grained PAT | **Web UI primary** — Settings → Developer settings → Personal access tokens → Fine-grained tokens → Delete. CLI 가능 옵션: `gh api --method DELETE /user/personal-access-tokens/{pat_id}` (caller token 이 admin scope 보유 시). audit trace + 운영자 명확성 측면에서 web UI 권장. |
+| Fine-grained PAT | **Web UI only** — Settings → Developer settings → Personal access tokens → Fine-grained tokens → Delete. (Codex PR #48 round 6 P2 fix: 이전 RUNBOOK 의 `gh api --method DELETE /user/personal-access-tokens/{pat_id}` 는 **존재하지 않는 endpoint**. GitHub 의 documented fine-grained PAT REST API 는 모두 org-scoped (`/orgs/{org}/personal-access-tokens/...`) 이고 **GitHub App 인증만 허용** — 일반 operator PAT 호출 시 404/403. self-revoke 가능한 user-scoped REST endpoint 는 GitHub 가 2026-05 시점에 제공하지 않음.) |
 | OAuth/App token (별도) | **App owner 만 가능** — `gh api --method DELETE /applications/{client_id}/token` (revoke specific token) 또는 `/applications/{client_id}/grant` (revoke all grants). basic auth `client_id:client_secret` 의무 — 일반 operator PAT revoke 절차와 다름. 본 repo 는 PAT 만 사용하므로 OOB. RESEARCH-1A.* OAuth flow 진입 시 추가 검토. |
 
 **Deprecated endpoint warning (Codex PR #48 round 5 P2 fix)**: GitHub 의
@@ -614,8 +614,12 @@ revoke 와 별개로, 운영자가 leak 의심 machine 또는 personal device si
 gh auth logout                          # 모든 host 에 대해 logout
 gh auth logout --hostname github.com    # 특정 host 만
 
-# git credential cache reject — git 내장 credential helper 가 cache 한 token
-git credential reject < /dev/null       # 또는 'protocol=https\nhost=github.com' input
+# git credential reject — git 내장 credential helper 가 cache 한 token 제거.
+# (Codex PR #48 round 6 P2 fix: 이전 RUNBOOK 의 `git credential reject < /dev/null` 는
+#  `fatal: refusing to work with credential missing host field` 로 실패. credential
+#  description (최소 protocol + host) 을 stdin 으로 전달 의무. 빈 줄이 input
+#  terminator.)
+printf 'protocol=https\nhost=github.com\n\n' | git credential reject
 
 # OS keychain credential — macOS Keychain Access 또는 Windows Credential Manager
 # 또는 Linux gnome-keyring 에서 'github.com' 또는 'git:https://github.com'
