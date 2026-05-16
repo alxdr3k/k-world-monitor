@@ -51,10 +51,12 @@ import {
   parseSnapIdFromRationale,
   reconcile,
   fetchUploadedAuditRows,
+  fetchR2UploadOutcomeAuditRows,
   fetchSourcePolicies,
   fetchR2BackedSnapshots,
   scanR2Invariants,
   type R2BackedSnapshot,
+  type R2UploadOutcomeAuditRow,
   type UploadedAuditRow,
   type SourcePolicy,
 } from "../../src/ops/r2-invariant-scanner";
@@ -175,19 +177,19 @@ describe("reconcile — aligned state", () => {
       { snapId: "snap_A", r2Key: "permitted_artifact/derived/snapshot/snap_A", linkedSourceIds: ["src_A"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_A", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1" },
+      { snapId: "snap_A", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       { sourceId: "src_A", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "allowed_public_data_only" },
     ];
     expect(
-      reconcile({ r2BackedSnapshots: snapshots, uploadedAuditRows: audits, sourcePolicies: policies })
+      reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies })
     ).toEqual([]);
   });
 
   it("returns no violations for empty inputs (degenerate baseline)", () => {
     expect(
-      reconcile({ r2BackedSnapshots: [], uploadedAuditRows: [], sourcePolicies: [] })
+      reconcile({ r2BackedSnapshots: [], r2UploadOutcomeAuditRows: [], sourcePolicies: [] })
     ).toEqual([]);
   });
 });
@@ -201,7 +203,7 @@ describe("reconcile — Axis 1: r2_key_without_audit", () => {
     const policies: SourcePolicy[] = [
       { sourceId: "src_A", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "allowed_public_data_only" },
     ];
-    const violations = reconcile({ r2BackedSnapshots: snapshots, uploadedAuditRows: audits, sourcePolicies: policies });
+    const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
     expect(violations).toHaveLength(1);
     expect(violations[0]).toMatchObject({
       type: "r2_key_without_audit",
@@ -216,12 +218,12 @@ describe("reconcile — Axis 1: r2_key_without_audit", () => {
       { snapId: "snap_A", r2Key: "k1", linkedSourceIds: ["src_A"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_A", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1" },
+      { snapId: "snap_A", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       { sourceId: "src_A", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "allowed_public_data_only" },
     ];
-    const violations = reconcile({ r2BackedSnapshots: snapshots, uploadedAuditRows: audits, sourcePolicies: policies });
+    const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
     expect(violations).toHaveLength(0);
   });
 });
@@ -230,10 +232,10 @@ describe("reconcile — Axis 2: audit_uploaded_without_r2_key", () => {
   it("flags uploaded audit row without matching r2-backed Snapshot", () => {
     const snapshots: R2BackedSnapshot[] = []; // no r2-backed snapshot
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_GHOST", uploadAttemptId: "uatt_ghost", rationale: "", decisionId: "pdec_ghost" },
+      { snapId: "snap_GHOST", uploadAttemptId: "uatt_ghost", rationale: "", decisionId: "pdec_ghost", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [];
-    const violations = reconcile({ r2BackedSnapshots: snapshots, uploadedAuditRows: audits, sourcePolicies: policies });
+    const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
     expect(violations).toHaveLength(1);
     expect(violations[0]).toMatchObject({
       type: "audit_uploaded_without_r2_key",
@@ -250,13 +252,13 @@ describe("reconcile — Axis 3: r2_key_with_restricted_source", () => {
       { snapId: "snap_RESTRICTED", r2Key: "k1", linkedSourceIds: ["src_TIGHTENED"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_RESTRICTED", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1" },
+      { snapId: "snap_RESTRICTED", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       // src_TIGHTENED was operator-changed to metadata_only AFTER the upload.
       { sourceId: "src_TIGHTENED", archivePolicy: "metadata_only", rawCloudPolicy: "allowed_public_data_only" },
     ];
-    const violations = reconcile({ r2BackedSnapshots: snapshots, uploadedAuditRows: audits, sourcePolicies: policies });
+    const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
     expect(violations).toHaveLength(1);
     expect(violations[0]).toMatchObject({ type: "r2_key_with_restricted_source", snapId: "snap_RESTRICTED" });
     const restricted = violations[0]!.details.restrictedSources as Array<{ sourceId: string; archivePolicy: string; rawCloudPolicy: string }>;
@@ -273,12 +275,12 @@ describe("reconcile — Axis 3: r2_key_with_restricted_source", () => {
       { snapId: "snap_X", r2Key: "k1", linkedSourceIds: ["src_X"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_X", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1" },
+      { snapId: "snap_X", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       { sourceId: "src_X", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "always_prohibited" },
     ];
-    const violations = reconcile({ r2BackedSnapshots: snapshots, uploadedAuditRows: audits, sourcePolicies: policies });
+    const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
     expect(violations).toHaveLength(1);
     expect(violations[0]!.type).toBe("r2_key_with_restricted_source");
   });
@@ -288,10 +290,10 @@ describe("reconcile — Axis 3: r2_key_with_restricted_source", () => {
       { snapId: "snap_UNREG", r2Key: "k1", linkedSourceIds: ["src_DELETED"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_UNREG", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1" },
+      { snapId: "snap_UNREG", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = []; // src_DELETED row was operator-removed
-    const violations = reconcile({ r2BackedSnapshots: snapshots, uploadedAuditRows: audits, sourcePolicies: policies });
+    const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
     expect(violations).toHaveLength(1);
     expect(violations[0]!.details.hasUnregistered).toBe(true);
     const restricted = violations[0]!.details.restrictedSources as Array<{ sourceId: string; archivePolicy: string }>;
@@ -306,10 +308,10 @@ describe("reconcile — Axis 3: r2_key_with_restricted_source", () => {
       { snapId: "snap_NOLINK", r2Key: "k1", linkedSourceIds: [] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_NOLINK", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1" },
+      { snapId: "snap_NOLINK", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [];
-    const violations = reconcile({ r2BackedSnapshots: snapshots, uploadedAuditRows: audits, sourcePolicies: policies });
+    const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
     // Axis 3 violations specifically — no source to check, so axis 3 is silent.
     const axis3 = violations.filter((v) => v.type === "r2_key_with_restricted_source");
     expect(axis3).toHaveLength(0);
@@ -323,14 +325,14 @@ describe("reconcile — combined violations", () => {
       { snapId: "snap_RESTRICTED", r2Key: "k2", linkedSourceIds: ["src_B"] }, // → axis 3
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_GHOST", uploadAttemptId: "uatt_g", rationale: "", decisionId: "pdec_g" }, // → axis 2
-      { snapId: "snap_RESTRICTED", uploadAttemptId: "uatt_r", rationale: "", decisionId: "pdec_r" },
+      { snapId: "snap_GHOST", uploadAttemptId: "uatt_g", rationale: "", decisionId: "pdec_g", decision: "uploaded" as const }, // → axis 2
+      { snapId: "snap_RESTRICTED", uploadAttemptId: "uatt_r", rationale: "", decisionId: "pdec_r", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       { sourceId: "src_A", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "allowed_public_data_only" },
       { sourceId: "src_B", archivePolicy: "metadata_only", rawCloudPolicy: "allowed_public_data_only" },
     ];
-    const violations = reconcile({ r2BackedSnapshots: snapshots, uploadedAuditRows: audits, sourcePolicies: policies });
+    const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
     expect(violations.map((v) => v.type).sort()).toEqual([
       "audit_uploaded_without_r2_key",
       "r2_key_with_restricted_source",
@@ -443,6 +445,8 @@ describe("scanR2Invariants — orchestrator", () => {
     expect(result.counts).toEqual({
       r2BackedSnapshots: 1,
       uploadedAuditRows: 1,
+      setR2KeyFailedNeo4jAuditRows: 0,
+      malformedR2UploadAuditRows: 0,
       sourcePolicyRows: 1,
     });
   });
@@ -457,5 +461,289 @@ describe("scanR2Invariants — orchestrator", () => {
     const result = await scanR2Invariants();
     expect(result.aligned).toBe(false);
     expect(result.violations.map((v) => v.type)).toEqual(["r2_key_with_restricted_source"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI-P1-13 / OPS-1B.h2-r2-invariant-scanner-orphan-axis
+//
+// Pre-AI-P1-13 the scanner had a P1 gate-blocker blind spot:
+//   - `fetchUploadedAuditRows()` hardcoded decision='uploaded', so audit rows
+//     with decision='set_r2_key_failed_neo4j' were invisible. Combined with
+//     `fetchR2BackedSnapshots()` filtering to r2_key IS NOT NULL, this made
+//     the most critical orphan state (R2 object exists, graph Snapshot.r2_key
+//     is NULL) invisible to all 3 original axes.
+//   - `parseSnapIdFromRationale()` returning null caused silent drop in the
+//     fetcher, so malformed audit rows were invisible to reconciliation.
+//
+// AI-P1-13 adds:
+//   - `fetchR2UploadOutcomeAuditRows()` covering both decision types and
+//     returning malformed rows with snapId=null (NOT dropped).
+//   - Axis 4: r2_object_without_graph_key (from set_r2_key_failed_neo4j).
+//   - Axis 5: malformed_r2_upload_audit_row (from snapId=null rows).
+//   - Backward-compat: `fetchUploadedAuditRows()` retained as a wrapper that
+//     filters to well-formed decision='uploaded' rows (pre-AI-P1-13 semantic).
+// ---------------------------------------------------------------------------
+
+describe("fetchR2UploadOutcomeAuditRows — SQLite query layer (AI-P1-13)", () => {
+  it("returns rows with decision='uploaded' AND decision='set_r2_key_failed_neo4j' (broadened from pre-AI-P1-13)", () => {
+    insertAuditRow("pdec_up", "snap_U", "uploaded");
+    insertAuditRow("pdec_fail", "snap_F", "set_r2_key_failed_neo4j");
+    insertAuditRow("pdec_att", "snap_A", "attempted"); // wrong decision — excluded
+    insertAuditRow("pdec_toc", "snap_T", "skipped_toctou"); // wrong decision — excluded (see scanner comment)
+    insertAuditRow("pdec_other", "snap_O", "uploaded", "uatt_x", null); // wrong intended_action — excluded
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(2);
+    const decisionsByDecisionId = new Map(rows.map((r) => [r.decisionId, r.decision]));
+    expect(decisionsByDecisionId.get("pdec_up")).toBe("uploaded");
+    expect(decisionsByDecisionId.get("pdec_fail")).toBe("set_r2_key_failed_neo4j");
+  });
+
+  it("returns malformed rows with snapId=null (AI-P1-13 — NOT silently dropped)", () => {
+    insertAuditRow("pdec_ok", "snap_OK", "uploaded");
+    // raw INSERT bypassing the helper, since the helper assumes parseable snap_id
+    getDb()
+      .prepare(
+        `INSERT INTO policy_decisions
+         (decision_id, source_id, url, trigger_type, policy_gate_mode,
+          decision, rationale, intended_action, upload_attempt_id)
+         VALUES ('pdec_bad', 'src_x', 'https://x.com', 'r2_upload',
+                 'batch_report', 'uploaded', 'no_snap_id_here_just_raw_text',
+                 'r2_upload', 'uatt_x')`
+      )
+      .run();
+    getDb()
+      .prepare(
+        `INSERT INTO policy_decisions
+         (decision_id, source_id, url, trigger_type, policy_gate_mode,
+          decision, rationale, intended_action, upload_attempt_id)
+         VALUES ('pdec_bad_fail', 'src_x', 'https://x.com', 'r2_upload',
+                 'batch_report', 'set_r2_key_failed_neo4j', 'no_snap_id_either',
+                 'r2_upload', 'uatt_y')`
+      )
+      .run();
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(3);
+    const malformed = rows.filter((r) => r.snapId === null);
+    expect(malformed).toHaveLength(2);
+    // both decisions surface malformed
+    expect(new Set(malformed.map((r) => r.decision))).toEqual(
+      new Set<"uploaded" | "set_r2_key_failed_neo4j">(["uploaded", "set_r2_key_failed_neo4j"])
+    );
+  });
+
+  it("backward-compat: fetchUploadedAuditRows still filters to decision='uploaded' + well-formed", () => {
+    // Pre-AI-P1-13 behavior contract preserved for callers that imported the
+    // narrower fetcher.
+    insertAuditRow("pdec_up_ok", "snap_OK", "uploaded");
+    insertAuditRow("pdec_fail_ok", "snap_F", "set_r2_key_failed_neo4j"); // excluded by wrapper
+    getDb()
+      .prepare(
+        `INSERT INTO policy_decisions
+         (decision_id, source_id, url, trigger_type, policy_gate_mode,
+          decision, rationale, intended_action, upload_attempt_id)
+         VALUES ('pdec_up_bad', 'src_x', 'https://x.com', 'r2_upload',
+                 'batch_report', 'uploaded', 'malformed_rationale', 'r2_upload', 'uatt_z')`
+      )
+      .run();
+
+    const rows = fetchUploadedAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.decisionId).toBe("pdec_up_ok");
+    expect(rows[0]!.snapId).toBe("snap_OK");
+  });
+});
+
+describe("reconcile — Axis 4: r2_object_without_graph_key (AI-P1-13)", () => {
+  it("flags set_r2_key_failed_neo4j audit row as R2 object orphan", () => {
+    const snapshots: R2BackedSnapshot[] = []; // R2 had bytes but graph never set r2_key
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_ORPHAN_R2_OBJECT",
+        uploadAttemptId: "uatt_orphan",
+        rationale: "snap_id=snap_ORPHAN_R2_OBJECT; archive_policy=full_snapshot_allowed",
+        decisionId: "pdec_failed_set",
+        decision: "set_r2_key_failed_neo4j",
+      },
+    ];
+    const policies: SourcePolicy[] = [];
+
+    const violations = reconcile({
+      r2BackedSnapshots: snapshots,
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: policies,
+    });
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({
+      type: "r2_object_without_graph_key",
+      snapId: "snap_ORPHAN_R2_OBJECT",
+    });
+    expect(violations[0]!.details.uploadAttemptId).toBe("uatt_orphan");
+    expect(violations[0]!.details.auditDecisionId).toBe("pdec_failed_set");
+  });
+
+  it("set_r2_key_failed_neo4j fires Axis 4 even when Snapshot.r2_key was later somehow set (defensive)", () => {
+    // The audit row's existence is the violation evidence; the orphan period
+    // happened. Even if a future repair set r2_key, the historical orphan
+    // window violated NFR-008 and should be reported until the audit row is
+    // acknowledged/resolved by a future repair-CLI slice.
+    const snapshots: R2BackedSnapshot[] = [
+      { snapId: "snap_RECOVERED", r2Key: "k1", linkedSourceIds: ["src_A"] },
+    ];
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_RECOVERED",
+        uploadAttemptId: "uatt_x",
+        rationale: "snap_id=snap_RECOVERED; ...",
+        decisionId: "pdec_failed_recovered",
+        decision: "set_r2_key_failed_neo4j",
+      },
+    ];
+    const policies: SourcePolicy[] = [
+      { sourceId: "src_A", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "allowed_public_data_only" },
+    ];
+
+    const violations = reconcile({
+      r2BackedSnapshots: snapshots,
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: policies,
+    });
+
+    // Axis 4 fires. Axis 1 also fires (no uploaded row for snap_RECOVERED).
+    // Axis 2/3 do not.
+    const types = violations.map((v) => v.type).sort();
+    expect(types).toEqual(["r2_key_without_audit", "r2_object_without_graph_key"]);
+  });
+
+  it("does NOT flag uploaded rows (Axis 2 handles those)", () => {
+    const snapshots: R2BackedSnapshot[] = []; // missing graph
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_GHOST",
+        uploadAttemptId: "uatt_g",
+        rationale: "snap_id=snap_GHOST; ...",
+        decisionId: "pdec_g",
+        decision: "uploaded",
+      },
+    ];
+
+    const violations = reconcile({
+      r2BackedSnapshots: snapshots,
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+
+    // Axis 2 fires; Axis 4 silent (different decision type).
+    expect(violations.map((v) => v.type)).toEqual(["audit_uploaded_without_r2_key"]);
+  });
+});
+
+describe("reconcile — Axis 5: malformed_r2_upload_audit_row (AI-P1-13)", () => {
+  it("flags malformed uploaded row (snapId=null) — defensive surfacing, not silent drop", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: null,
+        uploadAttemptId: "uatt_bad",
+        rationale: "no_snap_id_here_at_all",
+        decisionId: "pdec_malformed_up",
+        decision: "uploaded",
+      },
+    ];
+
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({
+      type: "malformed_r2_upload_audit_row",
+      snapId: "<unparseable>",
+    });
+    expect(violations[0]!.details.decision).toBe("uploaded");
+    expect(violations[0]!.details.auditDecisionId).toBe("pdec_malformed_up");
+    expect(violations[0]!.details.rationalePrefix).toBe("no_snap_id_here_at_all");
+  });
+
+  it("flags malformed set_r2_key_failed_neo4j row too (both decision types)", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: null,
+        uploadAttemptId: "uatt_bad_fail",
+        rationale: "garbage_rationale_format",
+        decisionId: "pdec_malformed_fail",
+        decision: "set_r2_key_failed_neo4j",
+      },
+    ];
+
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+
+    // Axis 5 fires regardless of decision type. Axis 4 silent because
+    // snapId is null (orphan classification requires a parseable snap_id).
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.type).toBe("malformed_r2_upload_audit_row");
+    expect(violations[0]!.details.decision).toBe("set_r2_key_failed_neo4j");
+  });
+
+  it("truncates long rationale to 120 chars in details.rationalePrefix", () => {
+    const longRationale = "X".repeat(500);
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: null,
+        uploadAttemptId: null,
+        rationale: longRationale,
+        decisionId: "pdec_long",
+        decision: "uploaded",
+      },
+    ];
+
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+
+    expect((violations[0]!.details.rationalePrefix as string).length).toBe(120);
+  });
+});
+
+describe("scanR2Invariants — orchestrator with Axis 4 + 5 (AI-P1-13)", () => {
+  it("counts.setR2KeyFailedNeo4jAuditRows + counts.malformedR2UploadAuditRows populate correctly", async () => {
+    neo4jR2BackedRows = [];
+    insertAuditRow("pdec_up", "snap_U", "uploaded", "uatt_up");
+    insertAuditRow("pdec_fail", "snap_F", "set_r2_key_failed_neo4j", "uatt_fail");
+    // malformed: bypass helper
+    getDb()
+      .prepare(
+        `INSERT INTO policy_decisions
+         (decision_id, source_id, url, trigger_type, policy_gate_mode,
+          decision, rationale, intended_action, upload_attempt_id)
+         VALUES ('pdec_bad', 'src_x', 'https://x.com', 'r2_upload',
+                 'batch_report', 'uploaded', 'malformed', 'r2_upload', 'uatt_bad')`
+      )
+      .run();
+
+    const result = await scanR2Invariants();
+
+    expect(result.counts.uploadedAuditRows).toBe(1); // well-formed uploaded only
+    expect(result.counts.setR2KeyFailedNeo4jAuditRows).toBe(1);
+    expect(result.counts.malformedR2UploadAuditRows).toBe(1);
+
+    // 3 violations: Axis 2 (uploaded ghost), Axis 4 (failed orphan), Axis 5 (malformed)
+    const types = result.violations.map((v) => v.type).sort();
+    expect(types).toEqual([
+      "audit_uploaded_without_r2_key",
+      "malformed_r2_upload_audit_row",
+      "r2_object_without_graph_key",
+    ]);
+    expect(result.aligned).toBe(false);
   });
 });
