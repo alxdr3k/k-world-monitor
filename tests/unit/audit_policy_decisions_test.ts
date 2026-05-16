@@ -10,7 +10,10 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { closeDb, getDb } from "../../src/storage/sqlite/connection";
-import { recordR2UploadDecision } from "../../src/storage/audit/policy-decisions";
+import {
+  recordR2UploadDecision,
+  newUploadAttemptId,
+} from "../../src/storage/audit/policy-decisions";
 import {
   INTENDED_ACTION,
   isIntendedAction,
@@ -21,7 +24,8 @@ import {
 process.env["SQLITE_PATH"] = ":memory:";
 
 // ---------------------------------------------------------------------------
-// SQLite setup — materializes policy_decisions schema (v1 + v7 ALTER COLUMN).
+// SQLite setup — materializes policy_decisions schema (v1 + v7 ALTER + v8
+// audit hardening triggers + upload_attempt_id column).
 // ---------------------------------------------------------------------------
 
 function setupDb() {
@@ -38,10 +42,56 @@ function setupDb() {
       decision          TEXT NOT NULL,
       rationale         TEXT,
       created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-      intended_action   TEXT
+      intended_action   TEXT,
+      upload_attempt_id TEXT
     );
+
+    -- v8 audit hardening triggers (AI-P1-7) — DB-level enum + correlation
+    -- enforcement. Mirrors migrations/sqlite/v8_audit_hardening.sql.
+    CREATE TRIGGER IF NOT EXISTS policy_decisions_intended_action_enum_ins
+    BEFORE INSERT ON policy_decisions
+    FOR EACH ROW
+    WHEN NEW.intended_action IS NOT NULL
+         AND NEW.intended_action NOT IN ('r2_upload')
+    BEGIN
+      SELECT RAISE(ABORT,
+        'policy_decisions.intended_action: invalid value (must be NULL or in INTENDED_ACTION enum: r2_upload)');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS policy_decisions_r2_upload_decision_enum_ins
+    BEFORE INSERT ON policy_decisions
+    FOR EACH ROW
+    WHEN NEW.intended_action = 'r2_upload'
+         AND NEW.decision NOT IN (
+           'attempted',
+           'uploaded',
+           'skipped_toctou',
+           'set_r2_key_failed_neo4j'
+         )
+    BEGIN
+      SELECT RAISE(ABORT,
+        'policy_decisions.decision: invalid value for intended_action=r2_upload (must be in R2_UPLOAD_DECISION enum)');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS policy_decisions_r2_upload_attempt_id_required_ins
+    BEFORE INSERT ON policy_decisions
+    FOR EACH ROW
+    WHEN NEW.intended_action = 'r2_upload'
+         AND (NEW.upload_attempt_id IS NULL
+              OR TRIM(NEW.upload_attempt_id, ' ' || char(9) || char(10) || char(13)) = '')
+    BEGIN
+      SELECT RAISE(ABORT,
+        'policy_decisions.upload_attempt_id: required when intended_action=r2_upload (must be non-empty correlation key for attempted/outcome pair)');
+    END;
   `);
   return db;
+}
+
+// Test helper: every recordR2UploadDecision call now requires an
+// uploadAttemptId (v8 trigger). Default a fresh id per call unless the
+// test explicitly cares about correlation.
+function freshAttemptId(): string {
+  return newUploadAttemptId();
 }
 
 beforeEach(() => {
@@ -119,6 +169,7 @@ describe("recordR2UploadDecision returns pdec_<ULID> decision_id", () => {
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "attempted",
+      uploadAttemptId: freshAttemptId(),
     });
     expect(id).toMatch(/^pdec_[0-9A-HJKMNP-TV-Z]{26}$/i);
   });
@@ -131,6 +182,7 @@ describe("recordR2UploadDecision returns pdec_<ULID> decision_id", () => {
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "attempted",
+      uploadAttemptId: freshAttemptId(),
     });
     const b = recordR2UploadDecision({
       sourceId: "src_test1",
@@ -139,6 +191,7 @@ describe("recordR2UploadDecision returns pdec_<ULID> decision_id", () => {
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "uploaded",
+      uploadAttemptId: freshAttemptId(),
       rationale: `r2_key=permitted_artifact/derived/snapshot/snap_test1`,
     });
     expect(a).not.toBe(b);
@@ -154,6 +207,7 @@ describe("recordR2UploadDecision INSERTs row with canonical column values", () =
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "attempted",
+      uploadAttemptId: freshAttemptId(),
     });
     const row = readRow(id);
     expect(row.trigger_type).toBe("r2_upload");
@@ -169,6 +223,7 @@ describe("recordR2UploadDecision INSERTs row with canonical column values", () =
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "uploaded",
+      uploadAttemptId: freshAttemptId(),
     });
     const row = readRow(id);
     expect(row.source_id).toBe("src_abc123");
@@ -184,6 +239,7 @@ describe("recordR2UploadDecision INSERTs row with canonical column values", () =
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "attempted",
+      uploadAttemptId: freshAttemptId(),
     });
     const row = readRow(id);
     expect(row.rationale).toContain("snap_id=snap_grep_anchor");
@@ -199,6 +255,7 @@ describe("recordR2UploadDecision INSERTs row with canonical column values", () =
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "set_r2_key_failed_neo4j",
+      uploadAttemptId: freshAttemptId(),
       rationale: "neo4j driver ETIMEDOUT after 5000ms",
     });
     const row = readRow(id);
@@ -218,6 +275,7 @@ describe("recordR2UploadDecision INSERTs row with canonical column values", () =
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "attempted",
+      uploadAttemptId: freshAttemptId(),
     });
     const row = readRow(id);
     expect(row.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
@@ -238,6 +296,7 @@ describe("recordR2UploadDecision accepts every R2UploadDecision value", () => {
         archivePolicy: "full_snapshot_allowed",
         rawCloudPolicy: "allowed_public_data_only",
         decision,
+        uploadAttemptId: freshAttemptId(),
       });
       const row = readRow(id);
       expect(row.decision).toBe(decision);
@@ -260,6 +319,7 @@ describe("audit-trail correlation via snap_id rationale anchor", () => {
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "attempted",
+      uploadAttemptId: freshAttemptId(),
       rationale: "dedup back-fill path",
     });
     recordR2UploadDecision({
@@ -269,6 +329,7 @@ describe("audit-trail correlation via snap_id rationale anchor", () => {
       archivePolicy: "full_snapshot_allowed",
       rawCloudPolicy: "allowed_public_data_only",
       decision: "uploaded",
+      uploadAttemptId: freshAttemptId(),
       rationale: "dedup back-fill path; r2_key=permitted_artifact/derived/snapshot/" + snap,
     });
 
@@ -280,5 +341,245 @@ describe("audit-trail correlation via snap_id rationale anchor", () => {
     expect(rows.length).toBe(2);
     const decisions = rows.map((r) => r.decision).sort();
     expect(decisions).toEqual(["attempted", "uploaded"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI-P1-7 (INFRA-1B.3.h3-audit-hardening, v8 migration) regression coverage:
+// upload_attempt_id correlation + DB-level enum + required-field triggers.
+// ---------------------------------------------------------------------------
+
+describe("newUploadAttemptId — correlation key generation", () => {
+  it("returns uatt_<ULID> shape", () => {
+    const id = newUploadAttemptId();
+    expect(id).toMatch(/^uatt_[0-9A-HJKMNP-TV-Z]{26}$/i);
+  });
+
+  it("each call returns a unique id (monotonic ulid)", () => {
+    const a = newUploadAttemptId();
+    const b = newUploadAttemptId();
+    expect(a).not.toBe(b);
+  });
+});
+
+describe("recordR2UploadDecision persists upload_attempt_id verbatim", () => {
+  it("stores the supplied uploadAttemptId in the row", () => {
+    const attemptId = "uatt_KNOWN_TEST_VALUE_123456789";
+    const id = recordR2UploadDecision({
+      sourceId: "src_test1",
+      snapId: "snap_test1",
+      url: "https://example.com/a",
+      archivePolicy: "full_snapshot_allowed",
+      rawCloudPolicy: "allowed_public_data_only",
+      decision: "attempted",
+      uploadAttemptId: attemptId,
+    });
+    const row = getDb()
+      .query<{ upload_attempt_id: string }, [string]>(
+        "SELECT upload_attempt_id FROM policy_decisions WHERE decision_id = ?"
+      )
+      .get(id);
+    expect(row?.upload_attempt_id).toBe(attemptId);
+  });
+
+  it("BEFORE/AFTER row pair sharing one uploadAttemptId is queryable as a single attempt", () => {
+    // Operator audit query: WHERE upload_attempt_id = '...' returns the
+    // matched pair regardless of intervening rows from concurrent r2Put
+    // calls. This is the canonical correlation; rationale-snap_id parsing
+    // breaks under dedup back-fill race.
+    const attemptId = newUploadAttemptId();
+    const otherAttemptId = newUploadAttemptId(); // a concurrent r2Put for the same snap
+
+    // Concurrent r2Put for the same snap_id (e.g. dedup back-fill race) —
+    // should NOT be returned by the upload_attempt_id query for `attemptId`.
+    recordR2UploadDecision({
+      sourceId: "src_concurrent",
+      snapId: "snap_shared",
+      url: "https://example.com/a",
+      archivePolicy: "full_snapshot_allowed",
+      rawCloudPolicy: "allowed_public_data_only",
+      decision: "attempted",
+      uploadAttemptId: otherAttemptId,
+    });
+
+    // The attempt we care about — BEFORE row.
+    recordR2UploadDecision({
+      sourceId: "src_test1",
+      snapId: "snap_shared",
+      url: "https://example.com/a",
+      archivePolicy: "full_snapshot_allowed",
+      rawCloudPolicy: "allowed_public_data_only",
+      decision: "attempted",
+      uploadAttemptId: attemptId,
+    });
+
+    // Concurrent outcome (different attempt).
+    recordR2UploadDecision({
+      sourceId: "src_concurrent",
+      snapId: "snap_shared",
+      url: "https://example.com/a",
+      archivePolicy: "full_snapshot_allowed",
+      rawCloudPolicy: "allowed_public_data_only",
+      decision: "uploaded",
+      uploadAttemptId: otherAttemptId,
+    });
+
+    // Our attempt's outcome.
+    recordR2UploadDecision({
+      sourceId: "src_test1",
+      snapId: "snap_shared",
+      url: "https://example.com/a",
+      archivePolicy: "full_snapshot_allowed",
+      rawCloudPolicy: "allowed_public_data_only",
+      decision: "skipped_toctou",
+      uploadAttemptId: attemptId,
+    });
+
+    const rows = getDb()
+      .query<{ decision: string; source_id: string }, [string]>(
+        "SELECT decision, source_id FROM policy_decisions WHERE upload_attempt_id = ? ORDER BY created_at"
+      )
+      .all(attemptId);
+    expect(rows.length).toBe(2);
+    expect(rows.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
+    // Confirm correlation isolated our attempt from the concurrent one.
+    expect(rows.every((r) => r.source_id === "src_test1")).toBe(true);
+  });
+});
+
+describe("v8 trigger: intended_action enum enforcement (INSERT)", () => {
+  it("rejects INSERT with intended_action='UNKNOWN' (not in INTENDED_ACTION enum)", () => {
+    expect(() => {
+      getDb()
+        .prepare(
+          `INSERT INTO policy_decisions
+             (decision_id, source_id, url, trigger_type, policy_gate_mode,
+              decision, intended_action, upload_attempt_id)
+           VALUES ('pdec_bad1', 'src_x', 'https://x.com/', 'r2_upload',
+                   'batch_report', 'attempted', 'UNKNOWN_ACTION', 'uatt_x')`
+        )
+        .run();
+    }).toThrow(/intended_action.*invalid value/);
+  });
+
+  it("allows INSERT with intended_action=NULL (operator-policy-gate row, ADR-0017)", () => {
+    // The operator-policy-gate flow keeps intended_action NULL — the v8
+    // trigger MUST NOT block these rows or the existing 8-danger-action
+    // policy gate (REQ-018, AC-023) breaks.
+    expect(() => {
+      getDb()
+        .prepare(
+          `INSERT INTO policy_decisions
+             (decision_id, source_id, url, trigger_type, policy_gate_mode,
+              decision, intended_action)
+           VALUES ('pdec_op_gate', 'src_x', 'https://x.com/', 'extract',
+                   'inline_block', 'block', NULL)`
+        )
+        .run();
+    }).not.toThrow();
+  });
+});
+
+describe("v8 trigger: r2_upload decision enum enforcement (INSERT)", () => {
+  it("rejects INSERT with intended_action='r2_upload' + decision='unknown_outcome'", () => {
+    expect(() => {
+      getDb()
+        .prepare(
+          `INSERT INTO policy_decisions
+             (decision_id, source_id, url, trigger_type, policy_gate_mode,
+              decision, intended_action, upload_attempt_id)
+           VALUES ('pdec_bad_dec', 'src_x', 'https://x.com/', 'r2_upload',
+                   'batch_report', 'unknown_outcome', 'r2_upload', 'uatt_x')`
+        )
+        .run();
+    }).toThrow(/decision.*invalid value for intended_action=r2_upload/);
+  });
+
+  it("decision-enum trigger does NOT fire for intended_action=NULL (operator gate rows untouched)", () => {
+    // Operator-gate rows can have any decision string — the trigger only
+    // constrains r2_upload rows.
+    expect(() => {
+      getDb()
+        .prepare(
+          `INSERT INTO policy_decisions
+             (decision_id, source_id, url, trigger_type, policy_gate_mode,
+              decision, intended_action)
+           VALUES ('pdec_op_dec', 'src_x', 'https://x.com/', 'extract',
+                   'inline_block', 'arbitrary_operator_decision', NULL)`
+        )
+        .run();
+    }).not.toThrow();
+  });
+});
+
+describe("v8 trigger: upload_attempt_id required for r2_upload rows (INSERT)", () => {
+  it("rejects INSERT with intended_action='r2_upload' + upload_attempt_id=NULL", () => {
+    expect(() => {
+      getDb()
+        .prepare(
+          `INSERT INTO policy_decisions
+             (decision_id, source_id, url, trigger_type, policy_gate_mode,
+              decision, intended_action, upload_attempt_id)
+           VALUES ('pdec_no_uatt', 'src_x', 'https://x.com/', 'r2_upload',
+                   'batch_report', 'attempted', 'r2_upload', NULL)`
+        )
+        .run();
+    }).toThrow(/upload_attempt_id.*required when intended_action=r2_upload/);
+  });
+
+  it("allows INSERT with intended_action=NULL + upload_attempt_id=NULL (operator gate rows)", () => {
+    expect(() => {
+      getDb()
+        .prepare(
+          `INSERT INTO policy_decisions
+             (decision_id, source_id, url, trigger_type, policy_gate_mode,
+              decision, intended_action, upload_attempt_id)
+           VALUES ('pdec_op_no_uatt', 'src_x', 'https://x.com/', 'extract',
+                   'inline_block', 'block', NULL, NULL)`
+        )
+        .run();
+    }).not.toThrow();
+  });
+
+  it("rejects empty + whitespace-only upload_attempt_id (space / tab / newline / CR / mixed) — Codex PR #49 P2", () => {
+    // SQLite's default TRIM(x) only strips ASCII space (0x20). The trigger
+    // uses `TRIM(x, ' ' || char(9) || char(10) || char(13))` to also catch
+    // tabs, newlines, and CR — common "missing value" representations in
+    // raw SQL / scripts that the migration explicitly defends against.
+    const badIds = ["", " ", "\t", "\n", "\r", "  \t\n\r  "];
+    badIds.forEach((badId, i) => {
+      let caught: unknown;
+      try {
+        getDb()
+          .prepare(
+            `INSERT INTO policy_decisions
+               (decision_id, source_id, url, trigger_type, policy_gate_mode,
+                decision, intended_action, upload_attempt_id)
+             VALUES (?, 'src_x', 'https://x.com/', 'r2_upload',
+                     'batch_report', 'attempted', 'r2_upload', ?)`
+          )
+          .run(`pdec_empty_${i}`, badId);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).toMatch(/non-empty correlation key/);
+    });
+  });
+
+  it("trigger SQL contains TRIM with whitespace char set (regression guard for SQLite TRIM default-space-only behavior)", () => {
+    // SQLite's default TRIM strips ASCII space only — a future refactor
+    // that simplifies to `TRIM(NEW.upload_attempt_id) = ''` silently
+    // re-opens the tab/newline/CR bypass path. Lock the char set in SQL.
+    const triggerSql = (
+      getDb()
+        .query("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='policy_decisions_r2_upload_attempt_id_required_ins'")
+        .get() as { sql: string } | null
+    )?.sql;
+    expect(triggerSql).toBeDefined();
+    expect(triggerSql).toContain("TRIM");
+    expect(triggerSql).toContain("char(9)");  // tab
+    expect(triggerSql).toContain("char(10)"); // newline
+    expect(triggerSql).toContain("char(13)"); // CR
   });
 });

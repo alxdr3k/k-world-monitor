@@ -18,6 +18,7 @@
 | v5 | `migrations/sqlite/v5_crawl_state.sql` | crawl_state — etag/Last-Modified + backoff (INFRA-1B.2b, ADR-0030 INV-0030-5) |
 | v6 | `migrations/sqlite/v6_discovery_queue.sql` | discovery_queue — 발견 URL pending fingerprint (INFRA-1B.2) |
 | v7 | `migrations/sqlite/v7_policy_decisions_intended_action.sql` | policy_decisions ADD COLUMN intended_action — R2 upload audit (INFRA-1B.3.x-audit, AC-032 / NFR-008, Q-044 → DEC-020 / TRACE-040) |
+| v8 | `migrations/sqlite/v8_audit_hardening.sql` | policy_decisions ADD COLUMN upload_attempt_id (BEFORE/AFTER correlation key) + 3 BEFORE INSERT triggers (intended_action enum / r2_upload decision enum / r2_upload upload_attempt_id required) — DB-level defense-in-depth for AC-032 / NFR-008 audit invariants (INFRA-1B.3.h3-audit-hardening, AI-P1-7) |
 
 Neo4j 단일 마이그레이션 v1 은 INFRA-1A.2 + INFRA-1A.7 갱신 포함 (13 node UNIQUE
 + 5 edge UNIQUE + 5 FTS + Scenario property schema + Thesis stance + Source
@@ -69,7 +70,7 @@ FTS indexes (Lucene): claim_fts, source_fts, document_fts, scenario_fts, thesis_
 | `run_ledger` | ADR-0023 INV-0023-7 | 모든 LLM call + cost + vendor + tier + batch_id |
 | `cross_vendor_review_ledger` | ADR-0023 INV-0023-4 | 3종 mandatory cross-vendor review |
 | `source_material_policy` | ADR-0017 | source별 archive/raw_cloud/external_llm policy |
-| `policy_decisions` | ADR-0017 + ADR-0012 INV-0012-3 | 운영자 policy gate 결정 기록 + **v7 ALTER (INFRA-1B.3.x-audit): `intended_action` 컬럼 추가**. `intended_action='r2_upload'` row 는 `src/storage/audit/policy-decisions.ts.recordR2UploadDecision()` 가 snapshot-fingerprint r2Put 전후 INSERT (AC-032 / NFR-008 audit log) |
+| `policy_decisions` | ADR-0017 + ADR-0012 INV-0012-3 | 운영자 policy gate 결정 기록 + **v7 ALTER (INFRA-1B.3.x-audit): `intended_action` 컬럼 추가** + **v8 ALTER + 3 BEFORE INSERT triggers (INFRA-1B.3.h3-audit-hardening, AI-P1-7): `upload_attempt_id` 컬럼 + intended_action enum / r2_upload decision enum / r2_upload upload_attempt_id required triggers**. `intended_action='r2_upload'` row 는 `src/storage/audit/policy-decisions.ts.recordR2UploadDecision()` 가 snapshot-fingerprint r2Put 전후 INSERT (AC-032 / NFR-008 audit log). `upload_attempt_id` (`uatt_<ULID>`) 가 BEFORE/AFTER row pair 의 canonical correlation key — operator audit query `WHERE upload_attempt_id = '...'` 가 concurrent r2Put 사이에서 단일 attempt 의 BEFORE/AFTER 정확 추출 (snap_id 만으로는 dedup back-fill race 시 부정확) |
 | `policy_learning_events` | ADR-0021 | pattern 1–5 학습 이벤트 |
 | `source_policy_rules` | ADR-0021 | propose/confirm 규칙 (auto-tighten only) |
 | `dataset_vintage` | ADR-0024 PRE-0024-2 | dataset fetch 시점 vintage + checksum |
@@ -97,7 +98,7 @@ The **logical Source Registry** spans two stores. GPT round 1 review on PR #37 (
 | Per-source material policy | SQLite | `source_material_policy` (`source_id` FK, `archive_policy`, `raw_cloud_policy`, `external_llm_policy`, `checked_at`, `updated_at`) — ADR-0017 |
 | Slug → src_id stable mapping | SQLite | `source_registry_slug_map` (`slug` PK, `source_id`) — idempotent seed re-run anchor (DEC-015, v3 migration) |
 | Auto-tighten rule propose / confirm | SQLite | `source_policy_rules` (`rule_id`, `pattern`, `applies_to_field`, `match_pattern`, `rule_value`, `active`) — ADR-0021 (auto-tighten only, no auto-relax) |
-| Policy gate decision audit (immutable) | SQLite | `policy_decisions` (`decision_id` PK = `pdec_<ULID>`, `source_id` nullable, `session_id` nullable, `url`, `trigger_type` NOT NULL, `policy_gate_mode` NOT NULL CHECK (inline_block / inline_warn / batch_report), `decision`, `rationale`, `created_at`, **`intended_action`** nullable — v7 ALTER, INFRA-1B.3.x-audit) — ADR-0017 INV-0017-3 + ADR-0012 INV-0012-3. operator-facing 결정 row 는 `intended_action` NULL; R2 upload audit row 는 `intended_action='r2_upload'` + `trigger_type='r2_upload'` + `policy_gate_mode='batch_report'` 로 `src/storage/audit/policy-decisions.ts.recordR2UploadDecision()` 가 INSERT. **HLD §Data Model** 가 추가로 계획 중인 `risk_level` / `intervention_id` 컬럼은 아직 v1+v7 schema 미반영 — landed 시점에 본 row 갱신 의무 |
+| Policy gate decision audit (immutable) | SQLite | `policy_decisions` (`decision_id` PK = `pdec_<ULID>`, `source_id` nullable, `session_id` nullable, `url`, `trigger_type` NOT NULL, `policy_gate_mode` NOT NULL CHECK (inline_block / inline_warn / batch_report), `decision`, `rationale`, `created_at`, **`intended_action`** nullable — v7 ALTER (INFRA-1B.3.x-audit), **`upload_attempt_id`** nullable — v8 ALTER (INFRA-1B.3.h3-audit-hardening, AI-P1-7)) + **v8 BEFORE INSERT triggers** enforcing intended_action enum / r2_upload decision enum / r2_upload upload_attempt_id required. ADR-0017 INV-0017-3 + ADR-0012 INV-0012-3. operator-facing 결정 row 는 `intended_action` NULL (모든 v8 trigger constraint 우회); R2 upload audit row 는 `intended_action='r2_upload'` + `trigger_type='r2_upload'` + `policy_gate_mode='batch_report'` + `upload_attempt_id='uatt_<ULID>'` 로 `src/storage/audit/policy-decisions.ts.recordR2UploadDecision()` 가 INSERT. **HLD §Data Model** 가 추가로 계획 중인 `risk_level` / `intervention_id` 컬럼은 아직 v1+v7+v8 schema 미반영 — landed 시점에 본 row 갱신 의무 |
 
 ### Bootstrap order
 

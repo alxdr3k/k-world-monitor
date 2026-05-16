@@ -10,7 +10,7 @@ import { createHash } from "crypto";
 import { withSession } from "../../storage/neo4j/connection";
 import { r2Put } from "../../storage/r2/client";
 import { getDb } from "../../storage/sqlite/connection";
-import { recordR2UploadDecision } from "../../storage/audit/policy-decisions";
+import { recordR2UploadDecision, newUploadAttemptId } from "../../storage/audit/policy-decisions";
 import type { ContentKind } from "../fetch/safe-fetch";
 
 export type ArchivePolicy =
@@ -529,6 +529,12 @@ export async function createSnapshotFingerprint(
         input.body.byteOffset,
         input.body.byteOffset + input.body.byteLength
       ) as ArrayBuffer;
+      // AI-P1-7 (v8 audit hardening): generate a single upload_attempt_id
+      // for THIS r2Put call. Threaded through BOTH the BEFORE 'attempted'
+      // row AND the AFTER outcome row so operator audit queries can pair
+      // them via `WHERE upload_attempt_id = '...'` regardless of concurrent
+      // r2Put calls for the same snap_id (dedup back-fill race).
+      const dedupUploadAttemptId = newUploadAttemptId();
       // INV-0012-3 audit row 1/2 — record attempt BEFORE r2Put so a network
       // failure still leaves a recoverable audit trail (NFR-008 audit-by-absence
       // proof requires every upload attempt accounted for). Best-effort: an
@@ -540,6 +546,7 @@ export async function createSnapshotFingerprint(
         archivePolicy: input.archivePolicy,
         rawCloudPolicy: input.rawCloudPolicy,
         decision: "attempted",
+        uploadAttemptId: dedupUploadAttemptId,
         rationale: "dedup back-fill path",
       });
       await r2Put(key, bodyBuf);
@@ -606,6 +613,8 @@ export async function createSnapshotFingerprint(
         }
         // INV-0012-3 audit row 2/2 — uploaded vs set_r2_key_failed_neo4j
         // attribution decided strictly by the Neo4j SET outcome above.
+        // AI-P1-7: reuses dedupUploadAttemptId so the BEFORE/AFTER pair
+        // shares the correlation key.
         auditR2UploadOrThrow({
           sourceId: input.sourceId,
           snapId: existing.snapId,
@@ -613,6 +622,7 @@ export async function createSnapshotFingerprint(
           archivePolicy: input.archivePolicy,
           rawCloudPolicy: input.rawCloudPolicy,
           decision: setSucceeded ? "uploaded" : "set_r2_key_failed_neo4j",
+          uploadAttemptId: dedupUploadAttemptId,
           rationale: setSucceeded
             ? `dedup back-fill path; r2_key=${key}`
             : `dedup back-fill path; ${setError instanceof Error ? setError.message : String(setError)}`,
@@ -621,7 +631,7 @@ export async function createSnapshotFingerprint(
         // INV-0012-3 audit row 2/2 — TOCTOU recheck rejected (concurrent
         // prohibited source linker, or recheck itself threw). r2 object
         // remains orphaned by design (see rationale above for why we do
-        // NOT r2Delete here).
+        // NOT r2Delete here). AI-P1-7: reuses dedupUploadAttemptId.
         auditR2UploadOrThrow({
           sourceId: input.sourceId,
           snapId: existing.snapId,
@@ -629,6 +639,7 @@ export async function createSnapshotFingerprint(
           archivePolicy: input.archivePolicy,
           rawCloudPolicy: input.rawCloudPolicy,
           decision: "skipped_toctou",
+          uploadAttemptId: dedupUploadAttemptId,
           rationale: "dedup back-fill path; post-r2Put cross-source policy recheck rejected — r2_key not set",
         });
       }
@@ -699,6 +710,13 @@ export async function createSnapshotFingerprint(
         input.body.byteOffset,
         input.body.byteOffset + input.body.byteLength
       ) as ArrayBuffer;
+      // AI-P1-7 (v8 audit hardening): generate a single upload_attempt_id
+      // for THIS r2Put call. Threaded through BOTH the BEFORE 'attempted'
+      // row AND the AFTER outcome row so operator audit queries can pair
+      // them via `WHERE upload_attempt_id = '...'` regardless of concurrent
+      // r2Put calls. Distinct from the dedup-back-fill path's id — each
+      // r2Put attempt gets its own correlation key.
+      const newPathUploadAttemptId = newUploadAttemptId();
       // INV-0012-3 audit row 1/2 — new-path attempt BEFORE r2Put. Best-effort
       // (Codex PR #39 round 2 P2): audit failure must not block r2Put.
       auditR2UploadOrThrow({
@@ -708,6 +726,7 @@ export async function createSnapshotFingerprint(
         archivePolicy: input.archivePolicy,
         rawCloudPolicy: input.rawCloudPolicy,
         decision: "attempted",
+        uploadAttemptId: newPathUploadAttemptId,
         rationale: mergeMatchedExisting
           ? "new-path; MERGE matched existing Snapshot"
           : "new-path; first create",
@@ -769,6 +788,7 @@ export async function createSnapshotFingerprint(
         }
         // INV-0012-3 audit row 2/2 — uploaded vs set_r2_key_failed_neo4j
         // attribution decided strictly by the Neo4j SET outcome above.
+        // AI-P1-7: reuses newPathUploadAttemptId for BEFORE/AFTER correlation.
         auditR2UploadOrThrow({
           sourceId: input.sourceId,
           snapId: actualSnapId,
@@ -776,12 +796,14 @@ export async function createSnapshotFingerprint(
           archivePolicy: input.archivePolicy,
           rawCloudPolicy: input.rawCloudPolicy,
           decision: setSucceeded ? "uploaded" : "set_r2_key_failed_neo4j",
+          uploadAttemptId: newPathUploadAttemptId,
           rationale: setSucceeded
             ? `new-path; r2_key=${key}`
             : `new-path; ${setError instanceof Error ? setError.message : String(setError)}`,
         });
       } else {
         // INV-0012-3 audit row 2/2 — TOCTOU recheck rejected on MERGE-matched branch.
+        // AI-P1-7: reuses newPathUploadAttemptId.
         auditR2UploadOrThrow({
           sourceId: input.sourceId,
           snapId: actualSnapId,
@@ -789,6 +811,7 @@ export async function createSnapshotFingerprint(
           archivePolicy: input.archivePolicy,
           rawCloudPolicy: input.rawCloudPolicy,
           decision: "skipped_toctou",
+          uploadAttemptId: newPathUploadAttemptId,
           rationale: "new-path; MERGE-matched existing snapshot; post-r2Put cross-source policy recheck rejected",
         });
       }

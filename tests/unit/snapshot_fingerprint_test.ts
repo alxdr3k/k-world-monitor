@@ -179,7 +179,8 @@ function setupDb() {
     INSERT OR REPLACE INTO source_material_policy
       (source_id, archive_policy, raw_cloud_policy, external_llm_policy)
       VALUES ('src-1', 'full_snapshot_allowed', 'allowed_public_data_only', 'allowed');
-    -- policy_decisions: v1 + v7 (intended_action column for R2 upload audit).
+    -- policy_decisions: v1 + v7 (intended_action) + v8 (upload_attempt_id +
+    -- enum triggers, AI-P1-7 INFRA-1B.3.h3-audit-hardening).
     -- INFRA-1B.3.x-audit hooks INSERT into this table around every r2Put call,
     -- so the snapshot-fingerprint tests must materialize the schema here.
     CREATE TABLE IF NOT EXISTS policy_decisions (
@@ -192,8 +193,46 @@ function setupDb() {
       decision          TEXT NOT NULL,
       rationale         TEXT,
       created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-      intended_action   TEXT
+      intended_action   TEXT,
+      upload_attempt_id TEXT
     );
+
+    -- v8 audit hardening triggers (mirror migrations/sqlite/v8_audit_hardening.sql).
+    CREATE TRIGGER IF NOT EXISTS policy_decisions_intended_action_enum_ins
+    BEFORE INSERT ON policy_decisions
+    FOR EACH ROW
+    WHEN NEW.intended_action IS NOT NULL
+         AND NEW.intended_action NOT IN ('r2_upload')
+    BEGIN
+      SELECT RAISE(ABORT,
+        'policy_decisions.intended_action: invalid value (must be NULL or in INTENDED_ACTION enum: r2_upload)');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS policy_decisions_r2_upload_decision_enum_ins
+    BEFORE INSERT ON policy_decisions
+    FOR EACH ROW
+    WHEN NEW.intended_action = 'r2_upload'
+         AND NEW.decision NOT IN (
+           'attempted',
+           'uploaded',
+           'skipped_toctou',
+           'set_r2_key_failed_neo4j'
+         )
+    BEGIN
+      SELECT RAISE(ABORT,
+        'policy_decisions.decision: invalid value for intended_action=r2_upload (must be in R2_UPLOAD_DECISION enum)');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS policy_decisions_r2_upload_attempt_id_required_ins
+    BEFORE INSERT ON policy_decisions
+    FOR EACH ROW
+    WHEN NEW.intended_action = 'r2_upload'
+         AND (NEW.upload_attempt_id IS NULL
+              OR TRIM(NEW.upload_attempt_id, ' ' || char(9) || char(10) || char(13)) = '')
+    BEGIN
+      SELECT RAISE(ABORT,
+        'policy_decisions.upload_attempt_id: required when intended_action=r2_upload (must be non-empty correlation key for attempted/outcome pair)');
+    END;
   `);
   return db;
 }
@@ -248,6 +287,7 @@ interface AuditRow {
   trigger_type: string;
   policy_gate_mode: string;
   intended_action: string | null;
+  upload_attempt_id: string | null;
   rationale: string | null;
 }
 
@@ -261,7 +301,7 @@ function readAuditRows(): AuditRow[] {
     .getDb()
     .query<AuditRow, []>(
       `SELECT decision, source_id, url, trigger_type, policy_gate_mode,
-              intended_action, rationale
+              intended_action, upload_attempt_id, rationale
        FROM policy_decisions
        WHERE intended_action = 'r2_upload'
        ORDER BY decision_id`
@@ -842,6 +882,47 @@ describe("createSnapshotFingerprint — audit hook integration (INFRA-1B.3.x-aud
     const audit = readAuditRows();
     expect(audit.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
     expect(audit[0]!.rationale).toContain("new-path; first create");
+  });
+
+  // AI-P1-7 (INFRA-1B.3.h3-audit-hardening, v8 migration): both audit rows
+  // for a single r2Put call MUST share one upload_attempt_id. The v8 trigger
+  // already enforces non-NULL at INSERT time; this test verifies the
+  // snapshot-fingerprint integration actually threads the SAME id through
+  // BEFORE/AFTER (operator audit query `WHERE upload_attempt_id = '...'`
+  // must return the matched pair).
+  it("attempted + outcome rows share the same upload_attempt_id (correlation contract, AI-P1-7)", async () => {
+    const db = setupDb();
+    seedQueue(db, "dq_correlate_uatt");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_correlate_uatt"));
+    expect(result.deduplicated).toBe(false);
+    expect(r2Puts).toHaveLength(1);
+
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "uploaded"]);
+    // Both rows have a non-NULL upload_attempt_id (v8 trigger requires it).
+    expect(audit[0]!.upload_attempt_id).toMatch(/^uatt_[0-9A-HJKMNP-TV-Z]{26}$/i);
+    expect(audit[1]!.upload_attempt_id).toMatch(/^uatt_[0-9A-HJKMNP-TV-Z]{26}$/i);
+    // BEFORE/AFTER pair share ONE id — this is the correlation contract.
+    expect(audit[0]!.upload_attempt_id).toBe(audit[1]!.upload_attempt_id);
+  });
+
+  it("dedup back-fill attempted + outcome share one upload_attempt_id (correlation, AI-P1-7)", async () => {
+    findExistingResult = { snapId: "snap_uatt_dedup", r2Key: null };
+    const db = setupDb();
+    seedQueue(db, "dq_uatt_dedup");
+
+    const result = await createSnapshotFingerprint(baseInput("dq_uatt_dedup"));
+    expect(result.deduplicated).toBe(true);
+    expect(r2Puts).toHaveLength(1);
+
+    const audit = readAuditRows();
+    expect(audit.map((r) => r.decision)).toEqual(["attempted", "uploaded"]);
+    expect(audit[0]!.upload_attempt_id).toBe(audit[1]!.upload_attempt_id);
+    // Distinct from the new-path test: the dedup back-fill path generates
+    // its OWN upload_attempt_id (no collision risk with concurrent new-path
+    // attempts for the same snap_id under dedup back-fill race).
+    expect(audit[0]!.rationale).toContain("dedup back-fill path");
   });
 });
 
