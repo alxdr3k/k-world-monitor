@@ -482,12 +482,26 @@ export async function createSnapshotFingerprint(
   // Deduplication: if identical content already snapped, skip Neo4j write.
   const existing = await findExistingSnapshot(contentHash);
   if (existing) {
-    // ADR-0012 INV-0012-3 cross-source guard (dedup link path): a Source whose
-    // raw_cloud_policy is `always_prohibited` must never be linked to a
-    // Snapshot that already has an r2_key, because the link would associate
-    // the prohibited source with a cloud-backed raw artifact through dedup
-    // reuse. Mark the row error and throw so this is counted as a real failure.
-    if (existing.r2Key !== null && input.rawCloudPolicy === "always_prohibited") {
+    // ADR-0012 INV-0012-3 cross-source guard (dedup link path):
+    //
+    // When the existing Snapshot already has an r2_key (R2-backed), a new
+    // Source must satisfy BOTH policy axes before being linked. Otherwise the
+    // graph would claim that a restricted Source has a full-snapshot,
+    // R2-backed artifact for its content — violating either the source's
+    // archive_policy (metadata_only / excerpt_only / do_not_collect) or its
+    // raw_cloud_policy (always_prohibited).
+    //
+    // AI-P0-1 (PR #41) closed back-fill + new-path call sites of
+    // allLinkedSourcesAllowR2SnapshotUpload() but missed this sibling call
+    // site — the dedup-link path where ensureSourceLinkage() runs against an
+    // already R2-backed Snapshot. AI-P0-2 closes that hole with an allowlist
+    // guard (PR #47 lesson: enum gates use allowlist, never deny-list, so
+    // future enum values fail closed).
+    if (
+      existing.r2Key !== null &&
+      (input.archivePolicy !== "full_snapshot_allowed" ||
+        input.rawCloudPolicy !== "allowed_public_data_only")
+    ) {
       throw new TypedQueueError(
         "dedup_prohibited_source",
         `dedup: prohibited source cannot link to r2-backed snapshot: ${input.sourceId}`

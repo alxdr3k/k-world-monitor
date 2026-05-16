@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: f96bbaa (2026-05-16) — AI-P1-6 / `OPS-1B.h1-runtime-invariant-scanner` code commit on branch `claude/r2-invariant-scanner`. Following commits are doc-only (TESTING SHA refresh) and do NOT advance the code baseline. AI-P1-6 = R2 invariant scanner — read-only 3-way reconciliation (Snapshot.r2_key Neo4j ↔ policy_decisions uploaded audit SQLite ↔ source_material_policy SQLite) with 3 violation axes: `r2_key_without_audit` / `audit_uploaded_without_r2_key` / `r2_key_with_restricted_source`. +24 tests = 623 → 647 tests total. Tests breakdown: 5 parseSnapIdFromRationale + 2 reconcile aligned + 2 Axis 1 + 1 Axis 2 + 4 Axis 3 + 1 combined + 3 fetchUploadedAuditRows + 2 fetchSourcePolicies + 2 fetchR2BackedSnapshots + 2 scanR2Invariants orchestrator. Previous code baseline = b660f46 (AI-P1-7 INFRA-1B.3.h3-audit-hardening PR #49 — 609 → 623). Earlier baselines: 31abe60 (AI-P1-12 PR #48 — 569 → 609), AI-P1-1 PR #47 (561 → 569), 090ca5b (AI-P1-3 PR #45 — 544 → 561), 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). **Pre-merge SHA reachability**: `git fetch origin <branch>` + `git checkout f96bbaa` resolves correctly while the PR is open; post-squash-merge, the merge commit on main is the canonical reference and the next slice's baseline advances.
+> Last verified against code: (pending AI-P0-2 code commit on branch `claude/dedup-r2-backed-link-policy-fix`) — AI-P0-2 / `INFRA-1B.3.h4-dedup-r2-backed-link-policy-fix` (P0 legal-safety hotfix). AI-P0-2 = closes the dedup-link path call site of `allLinkedSourcesAllowR2SnapshotUpload()` enforcement; snapshot-fingerprint.ts line 490 guard broadened from `rawCloudPolicy === "always_prohibited"` only to an allowlist requiring BOTH `archivePolicy === "full_snapshot_allowed"` AND `rawCloudPolicy === "allowed_public_data_only"` before linking a Source to an already R2-backed Snapshot. Sibling fix to AI-P0-1 (PR #41) which closed back-fill + new-path call sites; AI-P0-2 closes the dedup-link site missed there. +5 tests = 647 → 652 tests total. Tests breakdown: 4 reject cases (archive_policy ∈ {metadata_only, excerpt_only, do_not_collect} + raw_cloud_policy = always_prohibited preserve regression) + 1 positive case (both axes permitted → linkage proceeds, no new r2Put). Previous code baseline = 6500651 / f96bbaa (AI-P1-6 / OPS-1B.h1-runtime-invariant-scanner PR #50 — 623 → 647). Earlier baselines: b660f46 (AI-P1-7 INFRA-1B.3.h3-audit-hardening PR #49 — 609 → 623), 31abe60 (AI-P1-12 PR #48 — 569 → 609), AI-P1-1 PR #47 (561 → 569), 090ca5b (AI-P1-3 PR #45 — 544 → 561), 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). **Pre-merge SHA reachability**: `git fetch origin <branch>` resolves the branch SHA while the PR is open; post-squash-merge, the merge commit on main is the canonical reference and the next slice's baseline advances.
 
 ## Testing policy
 
@@ -55,7 +55,7 @@ bun run invariant:write
 |---|---|---|---|---|
 | install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
 | typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
-| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 23 file / **647 cases** — Bun native runner (post-AI-P1-6 OPS-1B.h1-runtime-invariant-scanner landed: +24 tests in r2_invariant_scanner_test.ts for 3-axis reconciliation Snapshot↔policy↔audit; previous baseline 623 = AI-P1-7 INFRA-1B.3.h3-audit-hardening). After PR #49 round 1 fix, audit-policy-decisions also gained 2 whitespace TRIM trigger tests → 623 baseline reflects that. |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 23 file / **652 cases** — Bun native runner (post-AI-P0-2 INFRA-1B.3.h4-dedup-r2-backed-link-policy-fix landed: +5 tests in snapshot_fingerprint_test.ts "cross-source archive_policy guard, dedup-link path (AI-P0-2)" describe block — 4 reject + 1 positive case; previous baseline 647 = AI-P1-6 OPS-1B.h1-runtime-invariant-scanner). After PR #49 round 1 fix, audit-policy-decisions also gained 2 whitespace TRIM trigger tests → 623 baseline reflects that. |
 | migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v8 schema files parse (v7 = policy_decisions ADD COLUMN intended_action / INFRA-1B.3.x-audit; v8 = policy_decisions ADD COLUMN upload_attempt_id + 3 enum/required triggers / INFRA-1B.3.h3-audit-hardening AI-P1-7) |
 | invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
@@ -73,7 +73,7 @@ Workflow files (활성):
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
 | `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
-| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (647 cases) + migrate dry-run |
+| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (652 cases) + migrate dry-run |
 | `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
 | `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
@@ -109,7 +109,7 @@ advisory).
 - PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
   으로 (1) workflow exists stage 진입.
-- 코드 테스트 (`bun test`) 는 23 file / **647 케이스** — Bun native runner
+- 코드 테스트 (`bun test`) 는 23 file / **652 케이스** — Bun native runner
   1 분 이내 expected. History: 490 → 515 (INFRA-1B.3.x-audit PR #39) →
   521 (INFRA-1B.3.h1-policy-fix PR #41, AI-P0-1) → 544 (INFRA-1B.1.h1-
   source-bootstrap-neo4j PR #44, AI-P1-2) → 561 (INFRA-1B.3.h2-queue-cli
@@ -117,11 +117,18 @@ advisory).
   AI-P1-1) → 609 (INFRA-1B.5.h1-runbook-setup-hygiene PR #48, AI-P1-12)
   → 623 (INFRA-1B.3.h3-audit-hardening PR #49: +12 tests v8 audit
   hardening + +2 Codex P2 round 1 whitespace TRIM trigger, AI-P1-7)
-  → **647** (OPS-1B.h1-runtime-invariant-scanner landed 2026-05-16:
+  → 647 (OPS-1B.h1-runtime-invariant-scanner landed 2026-05-16:
   +24 tests in r2_invariant_scanner_test.ts for 3-axis reconciliation
   Snapshot↔policy↔audit — parseSnapIdFromRationale 5 + reconcile axes
   9 + SQLite fetchers 5 + Neo4j fetcher 2 + scanR2Invariants
-  orchestrator 2 + combined 1, AI-P1-6).
+  orchestrator 2 + combined 1, AI-P1-6)
+  → **652** (INFRA-1B.3.h4-dedup-r2-backed-link-policy-fix landed
+  2026-05-16: +5 tests in snapshot_fingerprint_test.ts cross-source
+  archive_policy guard dedup-link path describe block — 3 archive_policy
+  reject (metadata_only / excerpt_only / do_not_collect with
+  allowed_public_data_only) + 1 raw_cloud_policy=always_prohibited
+  preserve regression + 1 positive case, AI-P0-2 P0 legal-safety
+  hotfix closing the dedup-link call site missed by PR #41).
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR
