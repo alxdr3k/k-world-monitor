@@ -188,6 +188,23 @@ export const STAGED_FILE_DIFF_ARGS: ReadonlyArray<string> = [
   "--diff-filter=ACMT",
 ];
 
+/**
+ * `execFileSync` default `maxBuffer` is 1MB (Node compat). Files larger
+ * than that trigger `ENOBUFS` and the hook fails-closed with a confusing
+ * "read error" — forcing the operator to `git commit --no-verify`, which
+ * bypasses the entire scanner. The scanner must handle reasonably large
+ * staged files without treating the buffer ceiling as a security failure.
+ *
+ * 256MB ceiling: enough for any source / doc / config / typical binary
+ * fixture. Files exceeding this likely belong in git-lfs or external
+ * storage — if such a file is staged, the hook still fails-closed (which
+ * is correct: the operator should investigate before committing a
+ * 256MB+ blob), but day-to-day commits with multi-MB fixtures pass.
+ *
+ * Codex PR #48 round 4 P2 fix.
+ */
+export const MAX_BUFFER_BYTES = 256 * 1024 * 1024;
+
 function getStagedFiles(): StagedFile[] {
   // Codex PR #48 P1 fix #1: execFileSync with argv array — NOT execSync
   // with a string template. The previous `execSync(`git show ":${path}"`)`
@@ -200,8 +217,13 @@ function getStagedFiles(): StagedFile[] {
   //
   // Codex PR #48 P1 fix #2: -z (NUL separator) avoids `git diff`'s
   // default quoted-escaping of unusual paths.
+  //
+  // Codex PR #48 round 4 P2 fix: explicit maxBuffer above the 1MB Node
+  // default — large repos / large staged blobs would otherwise hit
+  // ENOBUFS and the fail-closed catch would block legitimate commits.
   const raw = execFileSync("git", [...STAGED_FILE_DIFF_ARGS], {
     encoding: "utf-8",
+    maxBuffer: MAX_BUFFER_BYTES,
   });
   const paths = parseNulSeparatedPaths(raw);
   const files: StagedFile[] = [];
@@ -209,9 +231,11 @@ function getStagedFiles(): StagedFile[] {
     try {
       // `git show :<path>` reads the STAGED content (index version) — this
       // is what will be committed if the hook returns 0, not what's on disk.
-      // execFileSync with argv array — no shell interpolation.
+      // execFileSync with argv array — no shell interpolation. maxBuffer
+      // bumped from the 1MB Node default (Codex round 4 P2).
       const content = execFileSync("git", ["show", `:${path}`], {
         encoding: "utf-8",
+        maxBuffer: MAX_BUFFER_BYTES,
       });
       files.push({ path, content });
     } catch (err) {

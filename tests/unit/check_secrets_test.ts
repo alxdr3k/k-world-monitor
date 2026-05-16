@@ -15,6 +15,7 @@ import {
   redactMatch,
   parseNulSeparatedPaths,
   STAGED_FILE_DIFF_ARGS,
+  MAX_BUFFER_BYTES,
   type StagedFile,
 } from "../../scripts/check-secrets";
 
@@ -349,6 +350,35 @@ describe("STAGED_FILE_DIFF_ARGS — security-critical filter contract", () => {
   it("does NOT include legacy ACM-only filter (regression guard for round 2 fixes)", () => {
     // Make sure a future refactor doesn't quietly downgrade the filter.
     expect(STAGED_FILE_DIFF_ARGS).not.toContain("--diff-filter=ACM");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MAX_BUFFER_BYTES — execFileSync ceiling for staged-content reads
+// (Codex PR #48 round 4 P2 fix regression coverage)
+// ---------------------------------------------------------------------------
+
+describe("MAX_BUFFER_BYTES — execFileSync read ceiling", () => {
+  it("is set above the 1MB Node default (avoids ENOBUFS on moderately large staged files)", () => {
+    // Default execFileSync maxBuffer is 1MB. Without an explicit override,
+    // staging a ~1.5MB file triggers ENOBUFS → fail-closed throws → operator
+    // forced to `--no-verify`, bypassing the entire scanner. The constant
+    // MUST exceed the Node default.
+    expect(MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
+  });
+
+  it("is set high enough to cover typical multi-MB fixtures (≥ 64MB)", () => {
+    // Lower bound for what counts as "covers practical use". Source files,
+    // docs, config, JSON fixtures, small binary artifacts all fit in 64MB.
+    // Anything larger should likely live in git-lfs or external storage —
+    // the hook still fails-closed at MAX_BUFFER_BYTES, which is correct
+    // behavior for an operator who is staging unusually large content.
+    expect(MAX_BUFFER_BYTES).toBeGreaterThanOrEqual(64 * 1024 * 1024);
+  });
+
+  it("is finite (not Infinity / 0 / negative — which would disable the ceiling)", () => {
+    expect(Number.isFinite(MAX_BUFFER_BYTES)).toBe(true);
+    expect(MAX_BUFFER_BYTES).toBeGreaterThan(0);
   });
 });
 
