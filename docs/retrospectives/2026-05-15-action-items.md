@@ -63,6 +63,23 @@ defer 자체가 명시 결정 (re-entry gate + 조건 lock) — doc drift 방지
 | **P3** | AI-P3-batch-2 | Claude L1-C / L1-H / L1-K / L1-N / L1-O / L8-A 등 | doc inventory cleanup (AC row 순서 / TRACE-016/039 duplicate / IMPL_PLAN P0-M3 row codex review 회고 / TEST count stale 등) | **doc cleanup** |
 | **P3** | AI-P3-batch-3 | GPT 2부 P3 multiple | 잔여 P3 cleanup (lint alias / dry-run idempotency preview / RSS author/summary / DNS rebinding RUNBOOK / Markdown escaping / chunk hash 등) | **mixed** |
 
+### A.2 Post-PR #51 static review reopen + follow-up (2026-05-16)
+
+Week 1~3 sequence 완료 직후 (PR #51 merged 2026-05-16) 진행된 정적 GPT
+review 가 2 reopen-class blocker + 2 follow-up slice 식별. 원 priority
+표를 다음 4 AI ID 로 확장한다. **AI-P0-2 ID 재사용 주의**: 원 AI-P0-2
+(line 38, Q-052 main branch protection 3중 mismatch via Claude L9-A) 는
+DEC-024 D1 으로 resolved → ID 가 vacate 된 상태로 본 사용자 결정 (2026-
+05-16) 에 의해 dedup-link hotfix 로 재할당. 원 entry 는 history reference
+로 남기고 본 표에서 신규 의미 사용 (관련 회고: `2026-05-16-p0-m2-hardening-axis-complete.md`).
+
+| 우선 | ID | source | 항목 | type | land 결과 |
+|---|---|---|---|---|---|
+| **P0** | AI-P0-2 (reused) | GPT post-PR #51 static review | R2 cross-source `archive_policy` guard 의 sibling call site (dedup-link path inline guard, snapshot-fingerprint.ts line 490) — PR #41 (AI-P0-1) 가 미수정 → restricted Source 가 `existing.r2Key !== null` Snapshot 에 link 가능. INV-0012-3 sibling-site 위반 | **legal-safety bug fix hotfix slice** | landed (PR #53, INFRA-1B.3.h4-dedup-r2-backed-link-policy-fix, 2f6ce43) |
+| **P1** | AI-P1-13 | GPT post-PR #51 static review | R2 invariant scanner 가 `set_r2_key_failed_neo4j` orphan 상태 invisible — `fetchUploadedAuditRows()` 가 `decision = 'uploaded'` 만 fetch + parseSnapIdFromRationale null silent drop. PR #50 가 missed 한 가장 critical R2 orphan 상태 + defensive coding regression | **scanner extension hotfix slice** | landed (PR #54, OPS-1B.h2-r2-invariant-scanner-orphan-axis, f081e50) |
+| **P1** | AI-P1-14 | GPT post-PR #51 static review | scripts/seed-sources.ts 가 `process.argv.includes()` 패턴 — typo `--dryrun --neo4j` 가 silent SQLite + Neo4j real write 가능. PR #45 (AI-P1-3) 의 parseArgs allowlist 패턴 propagation 누락 | **operator CLI safety hygiene slice** | landed (PR #56, INFRA-1B.1.h3-seed-sources-argv-allowlist, 01f029f) |
+| **P1** | AI-P1-15 | AI-P1-13 follow-up | `policy_decisions.snap_id` first-class column 부재로 scanner 가 free-form rationale regex 에 의존 — 구조적 audit schema improvement 필요. v9 migration 으로 column add + recordR2UploadDecision dual-write + scanner column-preferred + shape guard | **migration v9 + scanner column-preferred slice** | landed (PR #57, INFRA-1B.3.h5-policy-decisions-snap-id-column-v9, cdd1faf, Codex 2 round review — P1 schema_migrations 누락 + P2 shape 미검증 fix) |
+
 ## B. Q-052~Q-059 decision package (DEC-024 lock)
 
 본 review 가 발견한 운영자 결정 항목. Q-052~Q-059 는 `docs/questions/` 에 per-file 등록되었고, [DEC-024](../decisions/DEC-024.md) 로 **resolved (6) + deferred (2)** 상태 lock. 아래 표는 historical anchor — 결정 본문은 DEC-024 D1~D8 참조.
