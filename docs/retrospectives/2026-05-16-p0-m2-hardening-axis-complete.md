@@ -86,7 +86,7 @@ AI-P1-7 + AI-P1-6 + canonical register batch 2) 이 main 진입한 후,
 | #43 | AI-P1-9 | 03a7ac9 | DOC-SYNC-2026-05-15 (current-state + IMPL_PLAN + HLD + PRD + SPIKES + TESTING 일괄 동기화) |
 | #46 | PR-canonical-register-2026-05-15 | b702d3b | AI-P0-1 + AI-P1-2 + AI-P1-3 의 IMPL_PLAN slice 표 row 등록 (code 변경 0건) |
 | #51 | PR-canonical-register-batch-2-2026-05-16 | 4c4bdb1 | AI-P1-1 + AI-P1-12 + AI-P1-7 + AI-P1-6 의 IMPL_PLAN slice 표 row 등록 (code 변경 0건) |
-| 본 PR | PR-canonical-register-batch-3-2026-05-16 | TBD | AI-P0-2 + AI-P1-13 + AI-P1-14 + AI-P1-15 의 IMPL_PLAN slice 표 row 등록 + sub-phase Milestones row landed list 8 → 12 + doc baseline list 4 → 5 + retro reopen section 본문 + action-items table row 4 추가 (code 변경 0건) |
+| 본 PR (#58) | PR-canonical-register-batch-3-2026-05-16 | self-reference (post-merge SHA in `git log`) | AI-P0-2 + AI-P1-13 + AI-P1-14 + AI-P1-15 의 IMPL_PLAN slice 표 row 등록 + sub-phase Milestones row landed list 8 → 12 + doc baseline list 4 → 5 + retro reopen section 본문 + action-items table row 4 추가 (code 변경 0건). 본 row 의 merged SHA 는 self-referential — squash merge 시점에 main commit SHA 가 결정되므로 placeholder 유지가 구조적 제약 (audit trail = git log 의 본 PR squash commit 으로 결정) |
 
 ### A.3 Test count + invariant 정합 baseline 추이
 
@@ -569,10 +569,10 @@ sequence 에 따라 다음 sub-phase 진입.
 
 **Doc anchors**:
 - canonical milestones row: [`docs/04_IMPLEMENTATION_PLAN.md`](../04_IMPLEMENTATION_PLAN.md)
-  `P0-M2-hardening` row + 8 slice 표 row (`INFRA-1B.3.x-audit` ~
-  `OPS-1B.h1-runtime-invariant-scanner`)
+  `P0-M2-hardening` row + 12 slice 표 row (`INFRA-1B.3.x-audit` ~
+  `INFRA-1B.3.h5-policy-decisions-snap-id-column-v9`)
 - current-state: [`docs/context/current-state.md`](../context/current-state.md)
-  line 38 + line 53-58 + line 186-196
+  line 38 + line 53-63 + line 197-228 (line offsets reflect post-batch-3 expansion)
 - prior retro: [2026-05-15 action-items](2026-05-15-action-items.md) Week 1~3 sequence
 - prior retro (review source): [2026-05-15 GPT cross-review](2026-05-15-gpt-cross-review.md)
 - DEC anchor: [DEC-024 D8](../decisions/DEC-024.md#d8--q-059-attention-budget--p2p3-backlog-처리-정책)

@@ -194,8 +194,7 @@ injection containment / discovery worker concurrency / research app stack)
    포함하지 않음** (각 slice 의 milestone row 에서 별도 평가).
 2. **SPIKE-001 실행** — Neo4j Community + native FTS, 1만 graph object 시점
    p95 < 1초 (NFR-001 / AC-002). M1 gate accept 차단 risk.
-3. ~~**Q-044 R2 upload audit code enforcement**~~ — **landed (8 audit-axis
-   slices)**: PR #39 `INFRA-1B.3.x-audit` + PR #41 `INFRA-1B.3.h1-policy-fix`
+3. ~~**Q-044 R2 upload audit code enforcement**~~ — **landed (8 slices = 7 audit-axis + 1 sibling hygiene)**: PR #39 `INFRA-1B.3.x-audit` + PR #41 `INFRA-1B.3.h1-policy-fix`
    + PR #53 `INFRA-1B.3.h4-dedup-r2-backed-link-policy-fix` (AI-P0-2 —
    PR #41 dedup-link sibling site hole 종결) + PR #49 `INFRA-1B.3.h3-audit-hardening`
    + PR #50 `OPS-1B.h1-runtime-invariant-scanner` + PR #54 `OPS-1B.h2-r2-invariant-scanner-orphan-axis`
