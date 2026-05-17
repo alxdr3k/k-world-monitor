@@ -82,30 +82,52 @@ export interface DetectedRisk {
 // ---------------------------------------------------------------------------
 // Wire-service allowlist (INV-0017-4 trigger 4).
 //
-// v0 hardcoded — case-insensitive substring match on RiskTriggerContext.sourceName.
-// Each entry covers the canonical name + the common abbreviations operators
-// might enter in source registry. Future hardening: derive from
-// data/source-profiles.yaml source_role='wire_service' (anchor
-// INFRA-1B.1.h2-source-profile / AI-P1-4).
+// v0 hardcoded — case-insensitive match on RiskTriggerContext.sourceName.
+// Two-tier match strategy to balance recall (must catch operator naming
+// variants) vs precision (must NOT false-positive on common English words
+// containing the same letter sequences):
+//
+//   1. Long-canonical substrings (≥6 chars, unlikely to false-positive):
+//      simple `lower.includes(p)` match. Covers "associated press",
+//      "agence france-presse", "yonhap news agency", etc.
+//
+//   2. Short acronyms (≤4 chars, high false-positive risk):
+//      word-boundary regex match. Codex PR #68 P1 finding: bare "AP" was
+//      missing from tier 1 because adding "ap" as a substring would match
+//      "Aperture" / "MAPS" / "happenstance". `\bap\b` matches "AP" /
+//      "AP News" / " AP " but not "Aperture" / "happen". Same hardening
+//      applied to AFP (vs "Stafford") and TASS.
+//
+// Future hardening: derive from data/source-profiles.yaml
+// source_role='wire_service' first-class flag (anchor
+// INFRA-1B.1.h2-source-profile / AI-P1-4) — both tiers become unnecessary
+// once source profile carries explicit wire_service classification.
 // ---------------------------------------------------------------------------
-const WIRE_SERVICE_PATTERNS = [
+const WIRE_SERVICE_SUBSTRINGS = [
   "reuters",
   "associated press",
-  "ap news",
   "agence france-presse",
-  "afp",
   "bloomberg",
   "yonhap", // 연합뉴스 (KR)
   "kyodo",  // 共同通信 (JP)
   "xinhua", // 新华社 (CN)
-  "tass",
   "interfax",
+] as const;
+
+// Word-boundary regexes for short acronyms (PR #68 Codex P1 finding —
+// "AP" / "AFP" / "TASS" common false-positive risks: Aperture / MAPS /
+// happen / Stafford / atlas-like words). Case-insensitive.
+const WIRE_SERVICE_WORD_BOUNDARY_REGEXES = [
+  /\bap\b/i,    // Associated Press bare alias
+  /\bafp\b/i,   // Agence France-Presse bare alias
+  /\btass\b/i,  // TASS bare alias
 ] as const;
 
 function isWireService(sourceName: string | undefined): boolean {
   if (!sourceName) return false;
   const lower = sourceName.toLowerCase();
-  return WIRE_SERVICE_PATTERNS.some((p) => lower.includes(p));
+  if (WIRE_SERVICE_SUBSTRINGS.some((p) => lower.includes(p))) return true;
+  return WIRE_SERVICE_WORD_BOUNDARY_REGEXES.some((re) => re.test(sourceName));
 }
 
 // ---------------------------------------------------------------------------

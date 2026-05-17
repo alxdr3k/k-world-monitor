@@ -274,6 +274,52 @@ describe("detectRisks (ADR-0017 INV-0017-4 List A — 8 risk triggers)", () => {
     expect(detectRisks(ctxNpr)).toEqual([]);
   });
 
+  it("trigger 4: fires on bare 'AP' alias (Codex PR #68 P1 finding — word-boundary regex)", () => {
+    const ctx: RiskTriggerContext = {
+      ...permissiveCtx(),
+      intendedAction: "extract_full_text",
+      sourceName: "AP",
+    };
+    expect(detectRisks(ctx).map((r) => r.trigger)).toContain(
+      "wire_service_full_text"
+    );
+  });
+
+  it("trigger 4: fires on bare 'AFP' / 'TASS' aliases via word-boundary regex", () => {
+    for (const name of ["AFP", "TASS"]) {
+      const ctx: RiskTriggerContext = {
+        ...permissiveCtx(),
+        intendedAction: "extract_full_text",
+        sourceName: name,
+      };
+      expect(detectRisks(ctx).map((r) => r.trigger)).toContain(
+        "wire_service_full_text"
+      );
+    }
+  });
+
+  it("trigger 4: does NOT false-positive on common English words containing 'ap' / 'afp' / 'tass' substrings", () => {
+    // Without word-boundary regex, naive substring match would false-positive
+    // on these (Aperture / MAPS / happenstance / Stafford / Tasmania).
+    // The PR #68 Codex P1 fix isolates short acronyms behind \b...\b.
+    for (const name of [
+      "Aperture Photo Service",
+      "MAPS Magazine",
+      "Happenstance Quarterly",
+      "Stafford Gazette",
+      "Tasmania Daily News",
+    ]) {
+      const ctx: RiskTriggerContext = {
+        ...permissiveCtx(),
+        intendedAction: "extract_full_text",
+        sourceName: name,
+      };
+      expect(detectRisks(ctx).map((r) => r.trigger)).not.toContain(
+        "wire_service_full_text"
+      );
+    }
+  });
+
   it("trigger 4: does NOT fire on discovery_fetch (RSS metadata-only)", () => {
     const ctx: RiskTriggerContext = {
       ...permissiveCtx(),
