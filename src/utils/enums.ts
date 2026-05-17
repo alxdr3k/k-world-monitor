@@ -189,6 +189,96 @@ export function isR2UploadDecision(v: unknown): v is R2UploadDecision {
 }
 
 // ---------------------------------------------------------------------------
+// policy_gate enums (ADR-0017 INV-0017-2/3/4/5, AC-023 / TEST-023,
+// INFRA-1B.5.h2-policy-gate-risk-triggers, AI-P1-11 D1a/D2a 결정 lock
+// 2026-05-17)
+//
+// Generic policy_gate decision rows are written via
+// src/pipeline/policy-gate/decision-ledger.ts with intended_action=NULL
+// (operator-policy-gate namespace per v7 ALTER comment + v8 trigger
+// `policy_decisions_intended_action_enum_ins` WHEN NEW.intended_action IS
+// NOT NULL clause — operator-gate rows bypass the r2_upload enum
+// triggers).
+//
+// POLICY_GATE_MODE mirrors the v1 schema CHECK constraint on
+// policy_decisions.policy_gate_mode.
+// ---------------------------------------------------------------------------
+export const POLICY_GATE_MODE = ["inline_block", "inline_warn", "batch_report"] as const;
+export type PolicyGateMode = (typeof POLICY_GATE_MODE)[number];
+export function isPolicyGateMode(v: unknown): v is PolicyGateMode {
+  return typeof v === "string" && (POLICY_GATE_MODE as readonly string[]).includes(v);
+}
+
+// GATE_DECISION = ADR-0017 INV-0017-5 spec (allow/warn/block). The
+// policy_decisions.decision column has no CHECK constraint for
+// operator-gate rows (intended_action IS NULL), so this enum is enforced
+// at the writer boundary only (defense-in-depth — symmetric to the
+// r2_upload decision enum trigger in v8).
+export const GATE_DECISION = ["allow", "warn", "block"] as const;
+export type GateDecision = (typeof GATE_DECISION)[number];
+export function isGateDecision(v: unknown): v is GateDecision {
+  return typeof v === "string" && (GATE_DECISION as readonly string[]).includes(v);
+}
+
+// RISK_TRIGGER = ADR-0017 INV-0017-4 의 List A 8 trigger ID. order
+// matches the canonical list in docs/glossary/policy-gate.md +
+// ADR-0017 §Decision. Each trigger is mode-invariant inline_block per
+// INV-0017-4.
+export const RISK_TRIGGER = [
+  "external_llm_raw_text_unauthorized",
+  "paywalled_source_fetch",
+  "terms_violation",
+  "wire_service_full_text",
+  "article_raw_quote_or_cache",
+  "image_inclusion_without_license",
+  "raw_embedding",
+  "raw_cloud_upload",
+] as const;
+export type RiskTrigger = (typeof RISK_TRIGGER)[number];
+export function isRiskTrigger(v: unknown): v is RiskTrigger {
+  return typeof v === "string" && (RISK_TRIGGER as readonly string[]).includes(v);
+}
+
+// PIPELINE_ACTION = call-site intended_action enum that the policy_gate
+// evaluator accepts. NOT the same as policy_decisions.intended_action
+// column (which is namespace marker — NULL for operator-gate rows,
+// 'r2_upload' for R2 audit hook). The trigger column on the ledger row
+// captures the risk trigger ID (or 'non_risk_action' for stage-default
+// non-risk decisions).
+export const PIPELINE_ACTION = [
+  "discovery_fetch",
+  "extract_full_text",
+  "raw_cache",
+  "chunk_create",
+  "embed",
+  "r2_upload",
+  "external_llm_call_with_raw_text",
+  "external_llm_call_with_excerpt",
+  "quote_storage",
+  "image_inclusion",
+  "publication_preflight",
+] as const;
+export type PipelineAction = (typeof PIPELINE_ACTION)[number];
+export function isPipelineAction(v: unknown): v is PipelineAction {
+  return typeof v === "string" && (PIPELINE_ACTION as readonly string[]).includes(v);
+}
+
+// PIPELINE_STAGE = ADR-0017 INV-0017-3 의 stage enum + default mode
+// mapping. Used by evaluatePolicyGate to choose the gate_mode for
+// non-risk decisions (when no RISK_TRIGGER fires).
+export const PIPELINE_STAGE = [
+  "discovery",
+  "extract_cache_embed_cloud_upload",
+  "interactive_exploration",
+  "content_production",
+  "publication_preflight",
+] as const;
+export type PipelineStage = (typeof PIPELINE_STAGE)[number];
+export function isPipelineStage(v: unknown): v is PipelineStage {
+  return typeof v === "string" && (PIPELINE_STAGE as readonly string[]).includes(v);
+}
+
+// ---------------------------------------------------------------------------
 // Source bidirectional perspective enum (ADR-0019, AC-027)
 // ---------------------------------------------------------------------------
 export const SOURCE_PERSPECTIVE = ["risk_observer", "opportunity_observer", "neutral", "mixed"] as const;

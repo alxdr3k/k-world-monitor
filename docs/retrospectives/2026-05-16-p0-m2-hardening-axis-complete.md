@@ -416,7 +416,7 @@ milestones 표 기준):
 - ✓ INFRA-1B.3.h1-policy-fix (PR #41 — landed)
 - ✓ INFRA-1B.1.h1-source-bootstrap-neo4j (PR #44 — landed)
 - ✓ INFRA-1B.3.h2-queue-cli (PR #45 — landed)
-- ☐ AC-022 / AC-023 / AC-024 evidence 확정 (운영자 검증). **AC-023 evidence 는 신규 `INFRA-1B.5.h2-policy-gate-risk-triggers` slice 가 land 한 후 close (AI-P1-11 D2a 결정 2026-05-17). 본 slice 는 status=planned, engineering PR 진입 대기.**
+- ☐ AC-022 / AC-024 evidence 확정 (운영자 검증). **AC-023 evidence = `INFRA-1B.5.h2-policy-gate-risk-triggers` landed via PR 1b engineering (AC-023 status 'defined' → 'passing' 정정, 53 tests pass, AI-P1-11 D2a 결정 적용 완료).**
 - ☐ SPIKE-001 결과 (AI-P1-10 / 위 C.1). **결정 D3a / D4a: synthetic fixture generator + `docs/context/PERF_RESULTS.md` evidence ledger (2026-05-17 AI-P1-11 lock PR 안에서 일괄 결정). 별도 PR 2 (SPIKE-001 fixture + PERF policy) + PR 3 (SPIKE-001 result + gate accept sync) 으로 분리 진행.**
 - ☑ AC-023 의 8 위험 행동 결정 (AI-P1-11 / 위 C.2) — **resolved 2026-05-17**, List A canonical (ADR-0017 INV-0017-4) + 신규 `INFRA-1B.5.h2-policy-gate-risk-triggers` slice 신설, retrospective List B 는 P0-M6 content-production safety axis 로 defer.
 
