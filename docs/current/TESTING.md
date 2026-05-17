@@ -1,6 +1,6 @@
 # Testing
 
-> Last verified against code: (pending AI-P1-15 code commit on branch `claude/policy-decisions-snap-id-column-v9`) — AI-P1-15 / `INFRA-1B.3.h5-policy-decisions-snap-id-column-v9` (audit schema structural improvement). AI-P1-15 = v9 migration adds `policy_decisions.snap_id TEXT` column + partial INDEX (`WHERE snap_id IS NOT NULL`). recordR2UploadDecision dual-writes (column + rationale prefix for backward-compat). r2-invariant-scanner fetchR2UploadOutcomeAuditRows prefers `snap_id` column, falls back to `parseSnapIdFromRationale()` when column NULL (legacy v8- rows). Closes the AI-P1-13 follow-up where scanner depended on free-form rationale regex; structural column makes future format changes safe. +6 tests = 674 → 680 tests total. Tests breakdown: 2 in audit_policy_decisions_test.ts (snap_id column dual-write + attempted/outcome pair sharing snap_id) + 4 in r2_invariant_scanner_test.ts (v9 column preferred over rationale, legacy v8- rationale fallback, malformed legacy row surfaces Axis 5, mixed v8/v9 resolves via own path). Previous code baseline = 01f029f (AI-P1-14 / INFRA-1B.1.h3-seed-sources-argv-allowlist PR #56 — 662 → 674). Earlier baselines: f081e50 (AI-P1-13 PR #54 — 652 → 662), 2f6ce43 (AI-P0-2 PR #53 — 647 → 652), 6500651 (AI-P1-6 PR #50 — 623 → 647), b660f46 (AI-P1-7 PR #49 — 609 → 623), 31abe60 (AI-P1-12 PR #48 — 569 → 609), AI-P1-1 PR #47 (561 → 569), 090ca5b (AI-P1-3 PR #45 — 544 → 561), 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). **Pre-merge SHA reachability**: `git fetch origin <branch>` resolves the branch SHA while the PR is open; post-squash-merge, the merge commit on main is the canonical reference and the next slice's baseline advances.
+> Last verified against code: (pending Cycle 7 code commit on branch `claude/policy-decisions-snap-id-schema-hardening`) — Cycle 7 / `INFRA-1B.3.h6-policy-decisions-snap-id-schema-hardening` (post-#58 GPT review follow-up). Cycle 7 = AI-P1-15 의 v9 schema 도입을 contract-level 까지 강화: (1) `assertValidSnapId` writer-boundary shape guard 가 `recordR2UploadDecision` 진입에서 fail-fast (pre-Cycle-7 = scanner-side `validSnapIdOrNull` 만 — half-measure 였음); (2) v8→v9 migration integration test 신설 (`tests/unit/migrate_v9_integration_test.ts`) — column / partial INDEX / schema_migrations row / duplicate-column recovery 검증; (3) DATA_MODEL.md 에 v9 column + Cycle 7 writer-boundary 반영. +16 tests = 684 → 700 tests total. Tests breakdown: 4 assertValidSnapId shape (canonical / empty / missing-prefix / invalid chars) + 1 error-message JSON-stringify + 3 recordR2UploadDecision writer-boundary integration (malformed → no INSERT / empty → reject / canonical → INSERT) + 4 v9 fresh-apply (column / index / schema_migrations row / post-v9 INSERT) + 2 re-apply (full SQL throws / migrate.ts recovery branch clean) + 2 version ordering invariants (description anchor / prior-version preserve). Previous code baseline = 8ac999b (Cycle 6 / PR #61 doc state correction — 684 baseline holds, no code change). Earlier baselines: cdd1faf (AI-P1-15 PR #57 — 674 → 684 incl. Codex round 1), 01f029f (AI-P1-14 PR #56 — 662 → 674), f081e50 (AI-P1-13 PR #54 — 652 → 662), 2f6ce43 (AI-P0-2 PR #53 — 647 → 652). Tests breakdown: 2 in audit_policy_decisions_test.ts (snap_id column dual-write + attempted/outcome pair sharing snap_id) + 4 in r2_invariant_scanner_test.ts (v9 column preferred over rationale, legacy v8- rationale fallback, malformed legacy row surfaces Axis 5, mixed v8/v9 resolves via own path). Previous code baseline = 01f029f (AI-P1-14 / INFRA-1B.1.h3-seed-sources-argv-allowlist PR #56 — 662 → 674). Earlier baselines: f081e50 (AI-P1-13 PR #54 — 652 → 662), 2f6ce43 (AI-P0-2 PR #53 — 647 → 652), 6500651 (AI-P1-6 PR #50 — 623 → 647), b660f46 (AI-P1-7 PR #49 — 609 → 623), 31abe60 (AI-P1-12 PR #48 — 569 → 609), AI-P1-1 PR #47 (561 → 569), 090ca5b (AI-P1-3 PR #45 — 544 → 561), 861796a (AI-P1-2 PR #44 — 521 → 544), 327f4b2 (AI-P0-1 PR #41 — 515 → 521), 75706c4 (INFRA-1B.3.x-audit PR #39 — 490 → 515). **Pre-merge SHA reachability**: `git fetch origin <branch>` resolves the branch SHA while the PR is open; post-squash-merge, the merge commit on main is the canonical reference and the next slice's baseline advances.
 
 ## Testing policy
 
@@ -55,7 +55,7 @@ bun run invariant:write
 |---|---|---|---|---|
 | install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
 | typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
-| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 24 file / **684 cases** — Bun native runner (post-AI-P1-15 INFRA-1B.3.h5-policy-decisions-snap-id-column-v9 + Codex PR #57 P1/P2 round 1 fix landed: +10 tests = +2 audit dual-write + +4 scanner v9 column resolution + +4 P2 validSnapIdOrNull guard (validSnapIdOrNull shape + empty-string-fallback + garbage-fallback + both-bad → Axis 5); previous baseline 674 = AI-P1-14 INFRA-1B.1.h3-seed-sources-argv-allowlist). |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 25 file / **700 cases** — Bun native runner (post-Cycle-7 INFRA-1B.3.h6-policy-decisions-snap-id-schema-hardening landed: +16 tests = +8 audit_policy_decisions_test.ts (assertValidSnapId shape × 4 + error msg × 1 + recordR2UploadDecision writer-boundary × 3) + +9 new file migrate_v9_integration_test.ts (fresh-apply × 4 + re-apply × 2 + version ordering × 2 + description anchor × 1); previous baseline 684 = AI-P1-15 INFRA-1B.3.h5 + Codex round 1 P1/P2 fix). |
 | migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v8 schema files parse (v7 = policy_decisions ADD COLUMN intended_action / INFRA-1B.3.x-audit; v8 = policy_decisions ADD COLUMN upload_attempt_id + 3 enum/required triggers / INFRA-1B.3.h3-audit-hardening AI-P1-7) |
 | invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
@@ -73,7 +73,7 @@ Workflow files (활성):
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
 | `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
-| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (684 cases) + migrate dry-run |
+| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (700 cases) + migrate dry-run |
 | `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
 | `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
@@ -109,7 +109,7 @@ advisory).
 - PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
   으로 (1) workflow exists stage 진입.
-- 코드 테스트 (`bun test`) 는 24 file / **684 케이스** — Bun native runner
+- 코드 테스트 (`bun test`) 는 25 file / **700 케이스** — Bun native runner
   1 분 이내 expected. History: 490 → 515 (INFRA-1B.3.x-audit PR #39) →
   521 (INFRA-1B.3.h1-policy-fix PR #41, AI-P0-1) → 544 (INFRA-1B.1.h1-
   source-bootstrap-neo4j PR #44, AI-P1-2) → 561 (INFRA-1B.3.h2-queue-cli
@@ -147,7 +147,7 @@ advisory).
   AI-P1-14 hygiene PR applying PR #45 parseArgs allowlist pattern to
   seed-sources CLI to close the silent-write risk of typoed
   `--dryrun --neo4j`)
-  → **684** (INFRA-1B.3.h5-policy-decisions-snap-id-column-v9 landed
+  → 684 (INFRA-1B.3.h5-policy-decisions-snap-id-column-v9 landed
   2026-05-16: +10 tests = +2 in audit_policy_decisions_test.ts
   (snap_id column dual-write + attempted/outcome pair sharing snap_id)
   + +4 in r2_invariant_scanner_test.ts (v9 column preferred over
@@ -159,7 +159,23 @@ advisory).
   adds policy_decisions.snap_id TEXT column + partial INDEX + Codex
   PR #57 P1 schema_migrations record fix; closes AI-P1-13 follow-up
   where scanner depended on free-form rationale regex — structural
-  column makes future format changes safe).
+  column makes future format changes safe)
+  → **700** (INFRA-1B.3.h6-policy-decisions-snap-id-schema-hardening
+  Cycle 7 landed 2026-05-17: +16 tests = +8 in audit_policy_decisions
+  _test.ts (assertValidSnapId shape validator × 4 [canonical / empty /
+  missing prefix / invalid chars] + error-message JSON-stringify × 1 +
+  recordR2UploadDecision writer-boundary integration × 3 [malformed →
+  no INSERT / empty → reject / canonical → INSERT]) + +9 in new file
+  migrate_v9_integration_test.ts (v9 fresh-apply column / partial
+  index / schema_migrations row / post-v9 INSERT × 4 + re-apply
+  duplicate-column [full SQL throws / migrate.ts recovery branch
+  clean] × 2 + version ordering [description anchor + prior-version
+  preserve] × 2 + 1 description-pattern lock); Cycle 7 closes the
+  AI-P1-15 "first-class structured handle" contract by adding
+  writer-boundary shape fail-fast at recordR2UploadDecision entry
+  + migration path integration test that v8→v9 ALTER works + DATA_MODEL
+  sync. Reader-side validSnapIdOrNull stays as defense-in-depth for
+  legacy / out-of-band SQL writes).
 - External CI owner: same repo (.github/workflows/)
 
 ## Before opening a PR
