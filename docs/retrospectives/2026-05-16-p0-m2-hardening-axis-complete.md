@@ -394,18 +394,18 @@ schema design 또는 FTS index strategy revisit 필요할 수 있음.
 | 결정 | 채택 | 내용 |
 |---|---|---|
 | D1 = D1a | ✅ | Canonical 8 위험 행동 = **ADR-0017 INV-0017-4 + `docs/glossary/policy-gate.md` 의 List A** (source-access 위험 8개: raw cache / embedding / cloud upload / quote storage / wire-service full text / paywalled fetch / scraping ban 위반 / robots disallow 위반). 본 retrospective 의 List B (content-production safety) 는 별도 axis 로 P0-M6 publication 슬라이스에서 처리 (신규 ADR 후보, ADR-0017 범위 밖). |
-| D2 = D2a | ✅ | AC-023 detection 구현 slice 신규 신설 — **`INFRA-1B.7-policy-gate-risk-triggers`** (P0-M2 hardening, status=planned). `docs/04_IMPLEMENTATION_PLAN.md` 의 INFRA-1B.1 row 의 "INFRA-1B.5/1B.6 으로 분리" stale 표기는 본 PR 에서 정정 완료. AC-023 의 8 위험 행동 trigger 구현은 신규 slice 안에서 detection rule + chunker · R2 upload · embed · external LLM call site 통합 + `tests/policy/gate_test.ts` 까지 한 slice 에서 닫는다 (partial evidence accept 회피). |
+| D2 = D2a | ✅ | AC-023 detection 구현 slice 신규 신설 — **`INFRA-1B.5.h2-policy-gate-risk-triggers`** (P0-M2 hardening, status=planned). `docs/04_IMPLEMENTATION_PLAN.md` 의 INFRA-1B.1 row 의 "INFRA-1B.5/1B.6 으로 분리" stale 표기는 본 PR 에서 정정 완료. AC-023 의 8 위험 행동 trigger 구현은 신규 slice 안에서 detection rule + chunker · R2 upload · embed · external LLM call site 통합 + `tests/policy/gate_test.ts` 까지 한 slice 에서 닫는다 (partial evidence accept 회피). |
 | D3 = D3a | ✅ | SPIKE-001 fixture = synthetic generator (`scripts/generate-spike-001-fixture.ts`, 10k graph object, fixed seed, idempotent reset) — operator manual seed 후퇴 안 함. reproducible baseline + commit 간 회귀 비교 가능. |
 | D4 = D4a | ✅ | SPIKE-001 결과 기록 location = **`docs/context/PERF_RESULTS.md` 신설** — NFR evidence ledger 의 첫 사례. RUNBOOK 은 실행 절차, PR description 은 이벤트 로그, PERF_RESULTS 는 성능 evidence ledger 로 역할 분리. 향후 SPIKE-002 / NFR-### 검증도 동일 위치. |
-| D5 = D5b | ✅ | 다음 PR scope 분할 = **4 단계** sliced PR. (1) **본 PR — doc-only AI-P1-11 lock PR**: List A canonical 확정 + List B defer + INFRA-1B.1 stale 표기 정정 + INFRA-1B.7 신규 row + AC-023 본문 layered contract 명료화 + retrospective AI-P1-11 resolved + Cycle 10 fdb847a/PR #66 placeholder backfill, 코드 변경 0건. (2) **PR 1b** — AC-023 engineering PR (`INFRA-1B.7` 구현). (3) **PR 2** — SPIKE-001 fixture + PERF policy PR. (4) **PR 3** — SPIKE-001 result + P0-M2 gate accept sync PR. |
+| D5 = D5b | ✅ | 다음 PR scope 분할 = **4 단계** sliced PR. (1) **본 PR — doc-only AI-P1-11 lock PR**: List A canonical 확정 + List B defer + INFRA-1B.1 stale 표기 정정 + `INFRA-1B.5.h2-policy-gate-risk-triggers` 신규 row + AC-023 본문 layered contract 명료화 + retrospective AI-P1-11 resolved + Cycle 10 fdb847a/PR #66 placeholder backfill, 코드 변경 0건. (2) **PR 1b** — AC-023 engineering PR (`INFRA-1B.5.h2-policy-gate-risk-triggers` 구현). (3) **PR 2** — SPIKE-001 fixture + PERF policy PR. (4) **PR 3** — SPIKE-001 result + P0-M2 gate accept sync PR. |
 
 **Resolution 의 변경 본문 anchor (본 doc-only PR 안에서 land)**:
 - `docs/adr/0017-source-policy-gate-mode-aware.md` INV-0017-4 — List A canonical 유지 (변경 없음, 이미 lock).
 - `docs/glossary/policy-gate.md` — List A 8개 enumerated (변경 없음, 이미 lock).
-- `docs/04_IMPLEMENTATION_PLAN.md` INFRA-1B.1 row — "INFRA-1B.5/1B.6 으로 분리" stale 표기 정정 완료, AC-023 evidence pointer 를 신규 `INFRA-1B.7` 로 redirect.
-- `docs/04_IMPLEMENTATION_PLAN.md` `INFRA-1B.7-policy-gate-risk-triggers` 신규 row 신설 (P0-M2 hardening, status=planned).
-- `docs/06_ACCEPTANCE_TESTS.md` AC-023 본문 layered contract 명료화 (위험 inline_block 고정 + 비위험 stage-default + 모든 결정 ledger 기록 + evidence source = INFRA-1B.7).
-- `docs/context/current-state.md` Cycle 10 SHA placeholder backfill + AC-023 evidence pointer = INFRA-1B.7 명시.
+- `docs/04_IMPLEMENTATION_PLAN.md` INFRA-1B.1 row — "INFRA-1B.5/1B.6 으로 분리" stale 표기 정정 완료, AC-023 evidence pointer 를 신규 `INFRA-1B.5.h2-policy-gate-risk-triggers` 로 redirect.
+- `docs/04_IMPLEMENTATION_PLAN.md` `INFRA-1B.5.h2-policy-gate-risk-triggers` 신규 row 신설 (P0-M2 hardening, status=planned). **slice ID rename note** (Codex PR #67 P2 + GPT 옵션 1 채택): 초기 안 `INFRA-1B.7-policy-gate-risk-triggers` 는 기존 P0-M4 Search/Query umbrella `INFRA-1B.7` 및 7a~e split 과 prefix 충돌 risk 가 있어 `INFRA-1B.5.h2-policy-gate-risk-triggers` 로 rename — INFRA-1B.5 (access_intervention + batch_report mode) 의 hardening 2 로 cohesive. D2a 의 본질 (= AC-023 구현 slice 신설) 은 보존, literal ID 만 정정.
+- `docs/06_ACCEPTANCE_TESTS.md` AC-023 본문 layered contract 명료화 (위험 inline_block 고정 + 비위험 stage-default + 모든 결정 ledger 기록 + evidence source = `INFRA-1B.5.h2-policy-gate-risk-triggers`).
+- `docs/context/current-state.md` Cycle 10 SHA placeholder backfill + AC-023 evidence pointer = `INFRA-1B.5.h2-policy-gate-risk-triggers` 명시.
 - 본 retrospective C.2 entry (resolved 2026-05-17) + C.3 checklist 갱신.
 
 ### C.3 P0-M2 gate accept evidence checklist (운영자 작업)
@@ -416,9 +416,9 @@ milestones 표 기준):
 - ✓ INFRA-1B.3.h1-policy-fix (PR #41 — landed)
 - ✓ INFRA-1B.1.h1-source-bootstrap-neo4j (PR #44 — landed)
 - ✓ INFRA-1B.3.h2-queue-cli (PR #45 — landed)
-- ☐ AC-022 / AC-023 / AC-024 evidence 확정 (운영자 검증). **AC-023 evidence 는 신규 `INFRA-1B.7-policy-gate-risk-triggers` slice 가 land 한 후 close (AI-P1-11 D2a 결정 2026-05-17). 본 slice 는 status=planned, engineering PR 진입 대기.**
+- ☐ AC-022 / AC-023 / AC-024 evidence 확정 (운영자 검증). **AC-023 evidence 는 신규 `INFRA-1B.5.h2-policy-gate-risk-triggers` slice 가 land 한 후 close (AI-P1-11 D2a 결정 2026-05-17). 본 slice 는 status=planned, engineering PR 진입 대기.**
 - ☐ SPIKE-001 결과 (AI-P1-10 / 위 C.1). **결정 D3a / D4a: synthetic fixture generator + `docs/context/PERF_RESULTS.md` evidence ledger (2026-05-17 AI-P1-11 lock PR 안에서 일괄 결정). 별도 PR 2 (SPIKE-001 fixture + PERF policy) + PR 3 (SPIKE-001 result + gate accept sync) 으로 분리 진행.**
-- ☑ AC-023 의 8 위험 행동 결정 (AI-P1-11 / 위 C.2) — **resolved 2026-05-17**, List A canonical (ADR-0017 INV-0017-4) + 신규 `INFRA-1B.7-policy-gate-risk-triggers` slice 신설, retrospective List B 는 P0-M6 content-production safety axis 로 defer.
+- ☑ AC-023 의 8 위험 행동 결정 (AI-P1-11 / 위 C.2) — **resolved 2026-05-17**, List A canonical (ADR-0017 INV-0017-4) + 신규 `INFRA-1B.5.h2-policy-gate-risk-triggers` slice 신설, retrospective List B 는 P0-M6 content-production safety axis 로 defer.
 
 **P0-M2-hardening 의 추가 landed slice (지금까지 obligatory evidence 미등록
 — 운영자 결정 시 promote 가능)**:
