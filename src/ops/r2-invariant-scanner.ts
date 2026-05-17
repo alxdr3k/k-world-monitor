@@ -3,11 +3,16 @@
 // Cycle 8 / OPS-1B.h3-r2-orphan-axis-repairability: skipped_toctou axis split
 // + cause-qualified naming for Axis 4 + expectedR2Key in violation details
 // for direct operator-CLI / repair-CLI consumption.
+// Cycle 9 / OPS-1B.h4-r2-audit-column-rationale-drift-axis: Axis 6 surfaces
+// dual-write contract violations between v9 `snap_id` column and rationale
+// prefix (recordR2UploadDecision dual-writes both atomically; divergence
+// means manual SQL repair, writer format regression, or fixture/backfill
+// touched only one side).
 //
 // Reconciles 3 stores against ADR-0012 INV-0012-3 + INV-0012-4 (permitted-
 // artifact gate). Read-only scan — does NOT modify Neo4j / SQLite / R2.
 //
-// The 6 axes:
+// The 7 axes:
 //
 // Axis 1: r2_key_without_audit
 //   Snapshot.r2_key IS NOT NULL but no policy_decisions row claims the upload
@@ -84,6 +89,23 @@
 //   violation so operators can repair the audit ledger (or, if the format
 //   change was intentional, update the parser).
 //
+// Axis 6: r2_audit_column_rationale_drift (Cycle 9 / OPS-1B.h4)
+//   Both the v9 `snap_id` column AND the rationale prefix are well-formed
+//   but carry DIFFERENT snap_id values. `recordR2UploadDecision` dual-
+//   writes both atomically (Cycle 7 `assertValidSnapId` guarantees both
+//   sides receive the same well-formed input). A divergence is an
+//   explicit dual-write contract violation — likely causes: manual SQL
+//   UPDATE / repair script that touched only one field, writer format
+//   regression where `formatRationale()` diverges from the column write,
+//   or fixture/backfill that populated one source. Without Axis 6 the
+//   column-preferred resolution would silently mask the rationale
+//   anomaly — v8- legacy consumers parsing rationale would see a
+//   different snap_id than scanner. Axis 6 makes the dual-write contract
+//   auditable. Triggers only when both raw sources are well-formed and
+//   differ; canonical post-v9 happy paths (column populated + rationale
+//   populated + same value, or column-only with arbitrary rationale, or
+//   v8- legacy column-NULL + rationale-only) all stay silent.
+//
 // CLI consumer: `bun run audit:r2-invariants` (read-only, exit 1 on
 // violations) — see src/ops/run-r2-invariants.ts.
 
@@ -100,6 +122,7 @@ export type R2InvariantViolationType =
   | "r2_key_with_restricted_source"
   | "r2_object_without_graph_key_set_failed"
   | "r2_object_without_graph_key_policy_recheck_skipped"
+  | "r2_audit_column_rationale_drift"
   | "malformed_r2_upload_audit_row";
 
 export interface R2InvariantViolation {
@@ -194,13 +217,27 @@ export type R2UploadOutcomeDecision =
 
 export interface R2UploadOutcomeAuditRow {
   /**
-   * snap_id parsed from the canonical rationale prefix, or null when
-   * rationale is malformed (cannot be parsed). Malformed rows are returned
-   * (not silently dropped) so reconcile() can surface them as
-   * `malformed_r2_upload_audit_row` violations — defensive coding rule:
-   * read-only scanner exposes anomalies, never aborts or hides them.
+   * Resolved snap_id via column-preferred + rationale fallback (AI-P1-15 +
+   * Codex P2 round 1 `validSnapIdOrNull` shape guard). null when both
+   * sources fail to yield a well-formed value — surfaced as
+   * `malformed_r2_upload_audit_row` violation (Axis 5).
    */
   snapId: string | null;
+  /**
+   * Raw v9 `snap_id` column value after `validSnapIdOrNull()` shape guard
+   * — null when column is NULL, empty, or malformed shape. Cycle 9
+   * (OPS-1B.h4) exposes this alongside `rationaleSnapId` so reconcile()
+   * can detect column ↔ rationale drift (Axis 6) — both fields preserved
+   * even after `snapId` resolution to give the comparator both raw inputs.
+   */
+  columnSnapId: string | null;
+  /**
+   * snap_id parsed from rationale prefix. null when rationale is missing
+   * or malformed. Cycle 9 surfaces the raw rationale parse result (not
+   * the resolved fallback) so column-vs-rationale mismatch is visible
+   * even when scanner uses the column value as the canonical resolution.
+   */
+  rationaleSnapId: string | null;
   uploadAttemptId: string | null;
   rationale: string;
   decisionId: string;
@@ -275,19 +312,24 @@ export function fetchR2UploadOutcomeAuditRows(): R2UploadOutcomeAuditRow[] {
          AND decision IN ('uploaded', 'set_r2_key_failed_neo4j', 'skipped_toctou')`
     )
     .all();
-  return rows.map((r) => ({
-    // AI-P1-15: snap_id column preferred; rationale parsing is legacy
-    // fallback for v8- rows where the column is NULL. AI-P1-15 P2 (Codex
-    // PR #57): validSnapIdOrNull() guards against empty-string / garbage
-    // column values so a malformed column does not get silently used as
-    // canonical — falls back to rationale, then to Axis 5 if both fail.
-    snapId:
-      validSnapIdOrNull(r.snap_id) ?? parseSnapIdFromRationale(r.rationale),
-    uploadAttemptId: r.upload_attempt_id,
-    rationale: r.rationale ?? "",
-    decisionId: r.decision_id,
-    decision: r.decision as R2UploadOutcomeDecision,
-  }));
+  return rows.map((r) => {
+    // AI-P1-15 + Codex PR #57 P2: column-preferred + rationale fallback +
+    // shape guard. Cycle 9 (OPS-1B.h4) additionally exposes both raw
+    // inputs (`columnSnapId`, `rationaleSnapId`) so reconcile() can detect
+    // column ↔ rationale drift as a separate axis without losing the
+    // resolved-value contract callers depend on.
+    const columnSnapId = validSnapIdOrNull(r.snap_id);
+    const rationaleSnapId = parseSnapIdFromRationale(r.rationale);
+    return {
+      snapId: columnSnapId ?? rationaleSnapId,
+      columnSnapId,
+      rationaleSnapId,
+      uploadAttemptId: r.upload_attempt_id,
+      rationale: r.rationale ?? "",
+      decisionId: r.decision_id,
+      decision: r.decision as R2UploadOutcomeDecision,
+    };
+  });
 }
 
 /**
@@ -478,6 +520,44 @@ export function reconcile(input: ReconcileInput): R2InvariantViolation[] {
         uploadAttemptId: audit.uploadAttemptId,
         auditDecisionId: audit.decisionId,
         rationalePrefix: audit.rationale.slice(0, 120),
+      },
+    });
+  }
+
+  // Axis 6 (Cycle 9 / OPS-1B.h4): r2_audit_column_rationale_drift —
+  // both v9 `snap_id` column and rationale prefix are well-formed but
+  // carry DIFFERENT snap_id values. recordR2UploadDecision dual-writes
+  // both fields atomically so a drift between them is an explicit
+  // backward-compat contract violation:
+  //   - manual SQL UPDATE / repair script that touched only one field
+  //   - format regression in the writer (column ≠ formatRationale output)
+  //   - test fixture / migration backfill that populated one source
+  //
+  // Without surfacing this, the column-preferred resolution would
+  // silently mask the rationale anomaly — v8- legacy consumers parsing
+  // rationale would see a different snap_id than scanner. Axis 6 makes
+  // the dual-write contract auditable.
+  //
+  // Both NULL or both same: silent. Column-only well-formed (v9 happy
+  // path, rationale could be anything since column takes precedence):
+  // silent — this is the canonical post-v9 shape. Rationale-only well-
+  // formed (v8- legacy row): silent — column is NULL by construction.
+  // Both well-formed AND different: violation.
+  for (const audit of input.r2UploadOutcomeAuditRows) {
+    if (audit.columnSnapId === null || audit.rationaleSnapId === null) continue;
+    if (audit.columnSnapId === audit.rationaleSnapId) continue;
+    violations.push({
+      type: "r2_audit_column_rationale_drift",
+      // Use column value as canonical handle (existing column-preferred
+      // resolution convention); details preserves both for operator
+      // triage.
+      snapId: audit.columnSnapId,
+      details: {
+        decision: audit.decision,
+        uploadAttemptId: audit.uploadAttemptId,
+        auditDecisionId: audit.decisionId,
+        columnSnapId: audit.columnSnapId,
+        rationaleSnapId: audit.rationaleSnapId,
       },
     });
   }

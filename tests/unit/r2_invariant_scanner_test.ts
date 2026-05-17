@@ -179,7 +179,7 @@ describe("reconcile — aligned state", () => {
       { snapId: "snap_A", r2Key: "permitted_artifact/derived/snapshot/snap_A", linkedSourceIds: ["src_A"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_A", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
+      { snapId: "snap_A", columnSnapId: "snap_A", rationaleSnapId: "snap_A", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       { sourceId: "src_A", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "allowed_public_data_only" },
@@ -220,7 +220,7 @@ describe("reconcile — Axis 1: r2_key_without_audit", () => {
       { snapId: "snap_A", r2Key: "k1", linkedSourceIds: ["src_A"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_A", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
+      { snapId: "snap_A", columnSnapId: "snap_A", rationaleSnapId: "snap_A", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       { sourceId: "src_A", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "allowed_public_data_only" },
@@ -234,7 +234,7 @@ describe("reconcile — Axis 2: audit_uploaded_without_r2_key", () => {
   it("flags uploaded audit row without matching r2-backed Snapshot", () => {
     const snapshots: R2BackedSnapshot[] = []; // no r2-backed snapshot
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_GHOST", uploadAttemptId: "uatt_ghost", rationale: "", decisionId: "pdec_ghost", decision: "uploaded" as const },
+      { snapId: "snap_GHOST", columnSnapId: "snap_GHOST", rationaleSnapId: "snap_GHOST", uploadAttemptId: "uatt_ghost", rationale: "", decisionId: "pdec_ghost", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [];
     const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
@@ -254,7 +254,7 @@ describe("reconcile — Axis 3: r2_key_with_restricted_source", () => {
       { snapId: "snap_RESTRICTED", r2Key: "k1", linkedSourceIds: ["src_TIGHTENED"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_RESTRICTED", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
+      { snapId: "snap_RESTRICTED", columnSnapId: "snap_RESTRICTED", rationaleSnapId: "snap_RESTRICTED", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       // src_TIGHTENED was operator-changed to metadata_only AFTER the upload.
@@ -277,7 +277,7 @@ describe("reconcile — Axis 3: r2_key_with_restricted_source", () => {
       { snapId: "snap_X", r2Key: "k1", linkedSourceIds: ["src_X"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_X", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
+      { snapId: "snap_X", columnSnapId: "snap_X", rationaleSnapId: "snap_X", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       { sourceId: "src_X", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "always_prohibited" },
@@ -292,7 +292,7 @@ describe("reconcile — Axis 3: r2_key_with_restricted_source", () => {
       { snapId: "snap_UNREG", r2Key: "k1", linkedSourceIds: ["src_DELETED"] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_UNREG", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
+      { snapId: "snap_UNREG", columnSnapId: "snap_UNREG", rationaleSnapId: "snap_UNREG", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = []; // src_DELETED row was operator-removed
     const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
@@ -310,7 +310,7 @@ describe("reconcile — Axis 3: r2_key_with_restricted_source", () => {
       { snapId: "snap_NOLINK", r2Key: "k1", linkedSourceIds: [] },
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_NOLINK", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
+      { snapId: "snap_NOLINK", columnSnapId: "snap_NOLINK", rationaleSnapId: "snap_NOLINK", uploadAttemptId: "uatt_1", rationale: "", decisionId: "pdec_1", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [];
     const violations = reconcile({ r2BackedSnapshots: snapshots, r2UploadOutcomeAuditRows: audits, sourcePolicies: policies });
@@ -327,8 +327,8 @@ describe("reconcile — combined violations", () => {
       { snapId: "snap_RESTRICTED", r2Key: "k2", linkedSourceIds: ["src_B"] }, // → axis 3
     ];
     const audits: UploadedAuditRow[] = [
-      { snapId: "snap_GHOST", uploadAttemptId: "uatt_g", rationale: "", decisionId: "pdec_g", decision: "uploaded" as const }, // → axis 2
-      { snapId: "snap_RESTRICTED", uploadAttemptId: "uatt_r", rationale: "", decisionId: "pdec_r", decision: "uploaded" as const },
+      { snapId: "snap_GHOST", columnSnapId: "snap_GHOST", rationaleSnapId: "snap_GHOST", uploadAttemptId: "uatt_g", rationale: "", decisionId: "pdec_g", decision: "uploaded" as const }, // → axis 2
+      { snapId: "snap_RESTRICTED", columnSnapId: "snap_RESTRICTED", rationaleSnapId: "snap_RESTRICTED", uploadAttemptId: "uatt_r", rationale: "", decisionId: "pdec_r", decision: "uploaded" as const },
     ];
     const policies: SourcePolicy[] = [
       { sourceId: "src_A", archivePolicy: "full_snapshot_allowed", rawCloudPolicy: "allowed_public_data_only" },
@@ -566,6 +566,8 @@ describe("reconcile — Axis 4: r2_object_without_graph_key_set_failed (AI-P1-13
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: "snap_ORPHAN_R2_OBJECT",
+        columnSnapId: "snap_ORPHAN_R2_OBJECT",
+        rationaleSnapId: "snap_ORPHAN_R2_OBJECT",
         uploadAttemptId: "uatt_orphan",
         rationale: "snap_id=snap_ORPHAN_R2_OBJECT; archive_policy=full_snapshot_allowed",
         decisionId: "pdec_failed_set",
@@ -604,6 +606,8 @@ describe("reconcile — Axis 4: r2_object_without_graph_key_set_failed (AI-P1-13
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: "snap_RECOVERED",
+        columnSnapId: "snap_RECOVERED",
+        rationaleSnapId: "snap_RECOVERED",
         uploadAttemptId: "uatt_x",
         rationale: "snap_id=snap_RECOVERED; ...",
         decisionId: "pdec_failed_recovered",
@@ -634,6 +638,8 @@ describe("reconcile — Axis 4: r2_object_without_graph_key_set_failed (AI-P1-13
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: "snap_GHOST",
+        columnSnapId: "snap_GHOST",
+        rationaleSnapId: "snap_GHOST",
         uploadAttemptId: "uatt_g",
         rationale: "snap_id=snap_GHOST; ...",
         decisionId: "pdec_g",
@@ -656,6 +662,8 @@ describe("reconcile — Axis 4: r2_object_without_graph_key_set_failed (AI-P1-13
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: "snap_SKIPPED",
+        columnSnapId: "snap_SKIPPED",
+        rationaleSnapId: "snap_SKIPPED",
         uploadAttemptId: "uatt_s",
         rationale: "snap_id=snap_SKIPPED; ...",
         decisionId: "pdec_s",
@@ -684,6 +692,8 @@ describe("reconcile — Axis 4b: r2_object_without_graph_key_policy_recheck_skip
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: "snap_TOCTOU_ORPHAN",
+        columnSnapId: "snap_TOCTOU_ORPHAN",
+        rationaleSnapId: "snap_TOCTOU_ORPHAN",
         uploadAttemptId: "uatt_toctou",
         rationale: "snap_id=snap_TOCTOU_ORPHAN; ...",
         decisionId: "pdec_toctou",
@@ -713,6 +723,8 @@ describe("reconcile — Axis 4b: r2_object_without_graph_key_policy_recheck_skip
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: "snap_FAILED",
+        columnSnapId: "snap_FAILED",
+        rationaleSnapId: "snap_FAILED",
         uploadAttemptId: "uatt_f",
         rationale: "snap_id=snap_FAILED; ...",
         decisionId: "pdec_f",
@@ -733,6 +745,8 @@ describe("reconcile — Axis 4b: r2_object_without_graph_key_policy_recheck_skip
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: null,
+        columnSnapId: null,
+        rationaleSnapId: null,
         uploadAttemptId: "uatt_bad_toc",
         rationale: "garbage_rationale_no_snap",
         decisionId: "pdec_bad_toc",
@@ -755,6 +769,8 @@ describe("reconcile — Axis 5: malformed_r2_upload_audit_row (AI-P1-13)", () =>
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: null,
+        columnSnapId: null,
+        rationaleSnapId: null,
         uploadAttemptId: "uatt_bad",
         rationale: "no_snap_id_here_at_all",
         decisionId: "pdec_malformed_up",
@@ -782,6 +798,8 @@ describe("reconcile — Axis 5: malformed_r2_upload_audit_row (AI-P1-13)", () =>
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: null,
+        columnSnapId: null,
+        rationaleSnapId: null,
         uploadAttemptId: "uatt_bad_fail",
         rationale: "garbage_rationale_format",
         decisionId: "pdec_malformed_fail",
@@ -807,6 +825,8 @@ describe("reconcile — Axis 5: malformed_r2_upload_audit_row (AI-P1-13)", () =>
     const audits: R2UploadOutcomeAuditRow[] = [
       {
         snapId: null,
+        columnSnapId: null,
+        rationaleSnapId: null,
         uploadAttemptId: null,
         rationale: longRationale,
         decisionId: "pdec_long",
@@ -979,5 +999,161 @@ describe("fetchR2UploadOutcomeAuditRows — v9 snap_id column resolution (AI-P1-
     const rows = fetchR2UploadOutcomeAuditRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]!.snapId).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cycle 9 / OPS-1B.h4-r2-audit-column-rationale-drift-axis
+//
+// Axis 6 (r2_audit_column_rationale_drift) — dual-write contract violation
+// surface. `recordR2UploadDecision` dual-writes the v9 snap_id column AND
+// the rationale prefix; divergence means manual SQL repair, writer format
+// regression, or fixture / backfill that touched only one side. Without
+// this axis, column-preferred resolution would silently mask rationale
+// anomalies that v8- legacy consumers parsing rationale would still see.
+// ---------------------------------------------------------------------------
+
+describe("reconcile — Axis 6: r2_audit_column_rationale_drift (Cycle 9 / OPS-1B.h4)", () => {
+  it("flags row where column and rationale carry different well-formed snap_ids", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_FROM_COLUMN",
+        columnSnapId: "snap_FROM_COLUMN",
+        rationaleSnapId: "snap_FROM_RATIONALE_DIFFERENT",
+        uploadAttemptId: "uatt_drift",
+        rationale: "snap_id=snap_FROM_RATIONALE_DIFFERENT; ...",
+        decisionId: "pdec_drift",
+        decision: "uploaded",
+      },
+    ];
+
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+
+    const drift = violations.filter((v) => v.type === "r2_audit_column_rationale_drift");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.snapId).toBe("snap_FROM_COLUMN");
+    expect(drift[0]!.details.columnSnapId).toBe("snap_FROM_COLUMN");
+    expect(drift[0]!.details.rationaleSnapId).toBe("snap_FROM_RATIONALE_DIFFERENT");
+    expect(drift[0]!.details.auditDecisionId).toBe("pdec_drift");
+    expect(drift[0]!.details.decision).toBe("uploaded");
+  });
+
+  it("silent when column and rationale are the same well-formed value (canonical v9 happy path)", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_SAME",
+        columnSnapId: "snap_SAME",
+        rationaleSnapId: "snap_SAME",
+        uploadAttemptId: "uatt_same",
+        rationale: "snap_id=snap_SAME; ...",
+        decisionId: "pdec_same",
+        decision: "uploaded",
+      },
+    ];
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+    expect(violations.filter((v) => v.type === "r2_audit_column_rationale_drift")).toHaveLength(0);
+  });
+
+  it("silent when column is null (v8- legacy row, rationale-only resolution)", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_LEGACY",
+        columnSnapId: null,
+        rationaleSnapId: "snap_LEGACY",
+        uploadAttemptId: "uatt_legacy",
+        rationale: "snap_id=snap_LEGACY; ...",
+        decisionId: "pdec_legacy",
+        decision: "uploaded",
+      },
+    ];
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+    expect(violations.filter((v) => v.type === "r2_audit_column_rationale_drift")).toHaveLength(0);
+  });
+
+  it("silent when rationale is null/malformed but column is well-formed (column-preferred resolution)", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_COL_ONLY",
+        columnSnapId: "snap_COL_ONLY",
+        rationaleSnapId: null,
+        uploadAttemptId: "uatt_col_only",
+        rationale: "broken_rationale_format",
+        decisionId: "pdec_col_only",
+        decision: "uploaded",
+      },
+    ];
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+    // Axis 6 silent (no contradicting values). Axis 5 also silent (snapId
+    // resolved to column value). This is the canonical "column-preferred
+    // resolution masks rationale anomaly" tolerance.
+    expect(violations.filter((v) => v.type === "r2_audit_column_rationale_drift")).toHaveLength(0);
+    expect(violations.filter((v) => v.type === "malformed_r2_upload_audit_row")).toHaveLength(0);
+  });
+
+  it("silent when both column and rationale are null (Axis 5 fires instead — separation of concerns)", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: null,
+        columnSnapId: null,
+        rationaleSnapId: null,
+        uploadAttemptId: "uatt_both_null",
+        rationale: "no_snap_id_anywhere",
+        decisionId: "pdec_both_null",
+        decision: "uploaded",
+      },
+    ];
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+    const types = violations.map((v) => v.type);
+    expect(types).toContain("malformed_r2_upload_audit_row");
+    expect(types).not.toContain("r2_audit_column_rationale_drift");
+  });
+
+  it("integration via fetchR2UploadOutcomeAuditRows: writer-side drift surfaces through SQLite read path", () => {
+    // Insert directly to DB so column and rationale snap_id values can be
+    // set independently (simulates manual SQL repair / format regression /
+    // fixture mistake).
+    getDb()
+      .prepare(
+        `INSERT INTO policy_decisions
+         (decision_id, source_id, url, trigger_type, policy_gate_mode,
+          decision, rationale, intended_action, upload_attempt_id, snap_id)
+         VALUES ('pdec_drift_db', 'src_x', 'https://example.com', 'r2_upload', 'batch_report',
+                 'uploaded',
+                 'snap_id=snap_RAT_DIFFERENT; archive_policy=full_snapshot_allowed',
+                 'r2_upload', 'uatt_drift_db', 'snap_COL')`,
+      )
+      .run();
+
+    const rows = fetchR2UploadOutcomeAuditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.columnSnapId).toBe("snap_COL");
+    expect(rows[0]!.rationaleSnapId).toBe("snap_RAT_DIFFERENT");
+
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: rows,
+      sourcePolicies: [],
+    });
+    expect(violations.filter((v) => v.type === "r2_audit_column_rationale_drift")).toHaveLength(1);
   });
 });
