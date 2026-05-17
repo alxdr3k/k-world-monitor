@@ -36,7 +36,7 @@ invariants:
     statement: 단계별 default policy_gate_mode — Discovery/Initial fetch=inline_warn / Extract/Cache/Embed/Cloud upload=inline_block / 탐색(scenario·thesis interactive)=batch_report / 콘텐츠 제작 추가 fetch=batch_report (단 위험 행동은 inline_block) / Publication preflight=inline_block
     status: active
   - id: INV-0017-4
-    statement: 위험 행동(raw cache / embedding / cloud upload / quote storage / wire-service full text / paywalled fetch / scraping ban 위반 / robots disallow 위반)은 어느 mode에서도 inline_block 유지 (R14/Q9-5 알림 트리거 8개)
+    statement: 위험 행동(source policy unknown 또는 unauthorized 상태의 raw external LLM 전송 / paywalled·proprietary full-text fetch / terms violation(no scraping·no AI·no archive·no redistribution) / wire-service full text / article·report 원문 quote·cache / 기사·리포트 도표·스크린샷 콘텐츠 추가 / raw source embedding·indexing / raw source cloud upload)은 어느 mode에서도 inline_block 유지 (R14/Q9-5 알림 트리거 8개 — body §Decision 8 항목이 canonical, 본 frontmatter statement 와 일치. pre-PR-#68 의 'scraping ban / robots disallow' 표현은 stale compressed summary 였음 — 옵션 D 운영자 결정 2026-05-17, robots.txt disallow 는 ADR-0028 safe-fetch boundary 별도 enforcement, ledger coupling 은 `INFRA-1B.5.h3-robots-disallow-ledger-coupling` follow-up anchor)
     status: active
   - id: INV-0017-5
     statement: 모든 policy_gate 결정은 policy_decisions ledger에 기록한다 — (decision_id, session_id, source_id, url, intended_action, decision, gate_mode, risk_level, reason, created_at)

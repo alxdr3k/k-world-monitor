@@ -32,15 +32,17 @@
 // intended_action=NULL (operator-gate namespace, v7 ALTER comment +
 // v8 enum trigger WHEN clause).
 
-import type {
-  ArchivePolicy,
-  ExternalLlmPolicy,
-  PipelineAction,
-  PipelineStage,
-  PolicyGateMode,
-  RawCloudPolicy,
-  RiskTrigger,
-  GateDecision,
+import {
+  isPipelineAction,
+  isPipelineStage,
+  type ArchivePolicy,
+  type ExternalLlmPolicy,
+  type PipelineAction,
+  type PipelineStage,
+  type PolicyGateMode,
+  type RawCloudPolicy,
+  type RiskTrigger,
+  type GateDecision,
 } from "../../utils/enums";
 
 // ---------------------------------------------------------------------------
@@ -83,28 +85,41 @@ export interface DetectedRisk {
 // Wire-service allowlist (INV-0017-4 trigger 4).
 //
 // v0 hardcoded — case-insensitive match on RiskTriggerContext.sourceName.
-// Two-tier match strategy to balance recall (must catch operator naming
-// variants) vs precision (must NOT false-positive on common English words
-// containing the same letter sequences):
+// Three-tier match strategy to balance recall (must catch operator naming
+// variants) vs precision (must NOT false-positive on Reuters-adjacent
+// research/institute names or common English words containing the same
+// letter sequences):
 //
 //   1. Long-canonical substrings (≥6 chars, unlikely to false-positive):
 //      simple `lower.includes(p)` match. Covers "associated press",
 //      "agence france-presse", "yonhap news agency", etc.
 //
 //   2. Short acronyms (≤4 chars, high false-positive risk):
-//      word-boundary regex match. Codex PR #68 P1 finding: bare "AP" was
-//      missing from tier 1 because adding "ap" as a substring would match
-//      "Aperture" / "MAPS" / "happenstance". `\bap\b` matches "AP" /
-//      "AP News" / " AP " but not "Aperture" / "happen". Same hardening
-//      applied to AFP (vs "Stafford") and TASS.
+//      word-boundary regex match. Codex PR #68 round 1 P1 finding:
+//      bare "AP" was missing from tier 1 because adding "ap" as a
+//      substring would match "Aperture" / "MAPS" / "happenstance".
+//      `\bap\b` matches "AP" / "AP News" / " AP " but not "Aperture" /
+//      "happen". Same hardening applied to AFP (vs "Stafford") and TASS.
+//
+//   3. Reuters specialization regex with Institute deny-list (GPT review
+//      post-PR-#68 finding 1): plain `reuters` substring matches
+//      "Reuters Institute Digital News Report" (Oxford Reuters Institute
+//      — research/study org, NOT wire service). Use a `\breuters\b`
+//      word-boundary with `(?!\s+institute)` negative lookahead so
+//      "Reuters" / "Reuters News" / "Reuters Wire" fire but
+//      "Reuters Institute" / "Reuters Institute for the Study of
+//      Journalism" do not. Other long-canonical entries (associated
+//      press / bloomberg / yonhap / kyodo / xinhua / interfax / agence
+//      france-presse) have low Institute-like false-positive risk in
+//      current seed and global naming conventions — kept in tier 1.
 //
 // Future hardening: derive from data/source-profiles.yaml
 // source_role='wire_service' first-class flag (anchor
-// INFRA-1B.1.h2-source-profile / AI-P1-4) — both tiers become unnecessary
-// once source profile carries explicit wire_service classification.
+// INFRA-1B.1.h2-source-profile / AI-P1-4) — all three tiers become
+// unnecessary once source profile carries explicit wire_service
+// classification.
 // ---------------------------------------------------------------------------
 const WIRE_SERVICE_SUBSTRINGS = [
-  "reuters",
   "associated press",
   "agence france-presse",
   "bloomberg",
@@ -114,19 +129,24 @@ const WIRE_SERVICE_SUBSTRINGS = [
   "interfax",
 ] as const;
 
-// Word-boundary regexes for short acronyms (PR #68 Codex P1 finding —
-// "AP" / "AFP" / "TASS" common false-positive risks: Aperture / MAPS /
-// happen / Stafford / atlas-like words). Case-insensitive.
+// Word-boundary regexes for short acronyms (PR #68 round 1 Codex P1
+// finding — "AP" / "AFP" / "TASS" common false-positive risks:
+// Aperture / MAPS / happen / Stafford / atlas-like words). Case-insensitive.
 const WIRE_SERVICE_WORD_BOUNDARY_REGEXES = [
   /\bap\b/i,    // Associated Press bare alias
   /\bafp\b/i,   // Agence France-Presse bare alias
   /\btass\b/i,  // TASS bare alias
 ] as const;
 
+// Reuters specialization with Institute deny-list (GPT review post-PR-#68
+// finding 1) — see tier 3 comment above for rationale.
+const WIRE_SERVICE_REUTERS_REGEX = /\breuters\b(?!\s+institute)/i;
+
 function isWireService(sourceName: string | undefined): boolean {
   if (!sourceName) return false;
   const lower = sourceName.toLowerCase();
   if (WIRE_SERVICE_SUBSTRINGS.some((p) => lower.includes(p))) return true;
+  if (WIRE_SERVICE_REUTERS_REGEX.test(sourceName)) return true;
   return WIRE_SERVICE_WORD_BOUNDARY_REGEXES.some((re) => re.test(sourceName));
 }
 
@@ -222,6 +242,19 @@ function detectPaywalledSourceFetch(
  * outcome of these terms during source registration. v0 schema does not
  * store free-form terms text — future hardening anchor =
  * data/source-profiles.yaml (terms_clauses field, AI-P1-4).
+ *
+ * **robots.txt disallow scope boundary** (GPT review post-PR-#68 +
+ * 운영자 결정 옵션 b+ 2026-05-17): robots.txt disallow violations are
+ * enforced at the discovery safe-fetch boundary (ADR-0028
+ * `safe-fetch.ts` `isRobotsPathDisallowed()` + `RobotsDisallowedError`),
+ * NOT as a standalone ADR-0017 RiskTrigger in v0. Source-level "no
+ * scraping" / "no AI" / "no archive" / "no redistribution" terms are
+ * codified at source registration time as
+ * `archive_policy='do_not_collect'` and detected here as
+ * terms_violation. Future ledger coupling of robots.txt enforcement
+ * (safe-fetch RobotsDisallowedError → policy_decisions ledger row) is
+ * tracked as `INFRA-1B.5.h3-robots-disallow-ledger-coupling` follow-up
+ * anchor (planned, NOT gate-blocking, see IMPL_PLAN).
  *
  * Fires for any non-discovery collection-class action — discovery_fetch
  * (metadata-only RSS poll) is a borderline case but ADR-0017 §Decision
@@ -409,6 +442,13 @@ export function detectRisks(ctx: RiskTriggerContext): DetectedRisk[] {
 /**
  * Per-stage default policy_gate_mode for non-risk actions. Risk actions
  * (any DetectedRisk fires) override this to inline_block per INV-0017-4.
+ *
+ * Runtime fail-closed guard (GPT review post-PR-#68 P2 finding 3 —
+ * 운영자 결정 옵션 b+ 2026-05-17): the `default` branch is a TypeScript
+ * `never`-exhaustiveness check at compile time + a runtime throw for
+ * JS/raw callers that bypass the type system. Policy gate is a safety
+ * boundary — any unknown stage MUST fail-closed (throw) rather than
+ * default to a permissive mode.
  */
 export function stageDefaultMode(stage: PipelineStage): PolicyGateMode {
   switch (stage) {
@@ -422,6 +462,12 @@ export function stageDefaultMode(stage: PipelineStage): PolicyGateMode {
       return "batch_report";
     case "publication_preflight":
       return "inline_block";
+    default: {
+      const _exhaustive: never = stage;
+      throw new Error(
+        `stageDefaultMode: invalid stage (must be PIPELINE_STAGE enum): ${String(_exhaustive)}`
+      );
+    }
   }
 }
 
@@ -477,6 +523,22 @@ export interface PolicyGateResult {
 export function evaluatePolicyGate(
   input: EvaluatePolicyGateInput
 ): PolicyGateResult {
+  // Runtime fail-closed boundary guards (GPT review post-PR-#68 P2 finding
+  // 3 — 운영자 결정 옵션 b+ 2026-05-17): TypeScript types catch this at
+  // compile time, but JS / raw callers (test fixtures, future cross-
+  // language bindings, manual REPL) MUST fail-closed on unknown stage
+  // or intended_action. Policy gate is a safety boundary — silent
+  // fallthrough to default mode would be a legal-safety regression.
+  if (!isPipelineStage(input.stage)) {
+    throw new Error(
+      `evaluatePolicyGate: invalid stage (must be PIPELINE_STAGE enum): ${JSON.stringify(input.stage)}`
+    );
+  }
+  if (!isPipelineAction(input.ctx.intendedAction)) {
+    throw new Error(
+      `evaluatePolicyGate: invalid intendedAction (must be PIPELINE_ACTION enum): ${JSON.stringify(input.ctx.intendedAction)}`
+    );
+  }
   const triggers = detectRisks(input.ctx);
   if (triggers.length > 0) {
     return {

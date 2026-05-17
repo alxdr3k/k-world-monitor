@@ -391,6 +391,41 @@ describe("detectRisks (ADR-0017 INV-0017-4 List A — 8 risk triggers)", () => {
     }
   });
 
+  it("trigger 4: does NOT false-positive on 'Reuters Institute' research org (GPT review post-PR-#68 finding 1 — negative lookahead)", () => {
+    // Reuters Institute Digital News Report / Reuters Institute for the
+    // Study of Journalism (Oxford) are research orgs, NOT wire-service
+    // full-text sources. Pre-finding `reuters` substring match would
+    // mis-classify these. Post-fix `/\breuters\b(?!\s+institute)/i`
+    // excludes Institute-suffixed names.
+    for (const name of [
+      "Reuters Institute Digital News Report",
+      "Reuters Institute for the Study of Journalism",
+      "Reuters Institute",
+    ]) {
+      const ctx: RiskTriggerContext = {
+        ...permissiveCtx(),
+        intendedAction: "extract_full_text",
+        sourceName: name,
+      };
+      expect(detectRisks(ctx).map((r) => r.trigger)).not.toContain(
+        "wire_service_full_text"
+      );
+    }
+  });
+
+  it("trigger 4: STILL fires on 'Reuters' / 'Reuters News' / 'Reuters Wire' (wire service proper)", () => {
+    for (const name of ["Reuters", "Reuters News", "Reuters Wire", "Reuters World"]) {
+      const ctx: RiskTriggerContext = {
+        ...permissiveCtx(),
+        intendedAction: "extract_full_text",
+        sourceName: name,
+      };
+      expect(detectRisks(ctx).map((r) => r.trigger)).toContain(
+        "wire_service_full_text"
+      );
+    }
+  });
+
   it("trigger 4: does NOT fire on discovery_fetch (RSS metadata-only)", () => {
     const ctx: RiskTriggerContext = {
       ...permissiveCtx(),
@@ -639,6 +674,36 @@ describe("evaluatePolicyGate (ADR-0017 INV-0017-3 + INV-0017-4 합산)", () => {
       expect(result.gateMode).toBe("inline_block");
       expect(result.decision).toBe("block");
     }
+  });
+
+  it("evaluatePolicyGate: throws on invalid stage (runtime fail-closed boundary guard, GPT review post-PR-#68 finding 3)", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        // @ts-expect-error — runtime validation test
+        stage: "bogus_stage",
+        ctx: permissiveCtx(),
+      })
+    ).toThrow(/invalid stage/);
+  });
+
+  it("evaluatePolicyGate: throws on invalid intendedAction (runtime fail-closed boundary guard)", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "discovery",
+        ctx: {
+          ...permissiveCtx(),
+          // @ts-expect-error — runtime validation test
+          intendedAction: "made_up_action",
+        },
+      })
+    ).toThrow(/invalid intendedAction/);
+  });
+
+  it("stageDefaultMode: throws on invalid stage (runtime safety boundary)", () => {
+    expect(() =>
+      // @ts-expect-error — runtime validation test
+      stageDefaultMode("not_a_stage")
+    ).toThrow(/invalid stage/);
   });
 
   it("rationale includes all triggered risk IDs when multiple fire", () => {

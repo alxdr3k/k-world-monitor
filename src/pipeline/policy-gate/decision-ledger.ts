@@ -27,6 +27,30 @@
 // captured in `rationale` text instead. Future hardening anchor =
 // v10 migration `policy_decisions_risk_level_intervention_id` (separate
 // schema slice; see PR follow-up).
+//
+// **Multi-trigger ledger semantics — Option A: one row per evaluation**
+// (GPT review post-PR-#68 P2 finding 4 — 운영자 결정 옵션 b+ 2026-05-17):
+// when `evaluatePolicyGate()` returns a `PolicyGateResult` with multiple
+// `triggers[]` (e.g., raw_cache on a do_not_collect source fires both
+// trigger 3 terms_violation AND trigger 5 article_raw_quote_or_cache),
+// the caller writes ONE `recordPolicyGateDecision()` row per evaluation
+// with:
+//   - `triggerType` = the **primary** (first detected) trigger, ordered
+//     by ADR-0017 INV-0017-4 List A canonical sequence (DETECTORS array
+//     order in risk-triggers.ts).
+//   - `rationale` = the full `PolicyGateResult.rationale` string, which
+//     serializes ALL detected triggers (format:
+//     `[trigger_id] rationale | [trigger_id] rationale | ...`).
+// Operator multi-trigger audit aggregation queries the `rationale` text
+// via `LIKE '%[trigger_id]%'`. This Option A keeps the policy_decisions
+// row count proportional to evaluator calls (not detected risks), which
+// matches ADR-0012 INV-0012-3 audit-by-absence proportionality.
+//
+// Option B (one row per detected trigger) is deferred until an operator-
+// driven multi-trigger aggregation use case emerges (e.g., per-trigger
+// fp/fn analytics, per-trigger rule-mining). v0 audit queries can
+// achieve trigger-level aggregation through `rationale` LIKE filters
+// without schema change.
 
 import { monotonicFactory } from "ulid";
 import { getDb } from "../../storage/sqlite/connection";
