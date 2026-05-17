@@ -1,120 +1,30 @@
-# Dev Cycle Briefs 20260517T031649Z-3597
+# Dev Cycle Briefs 20260517T051743Z-2123
 
-사이클 1 브리핑
+사이클 1 브리핑 (Cycle 10 — INFRA-1B.3.h7-gate-evidence-hardening)
 
-- 결과: 반영 완료 (landed)
+- 결과: 구현 완료 (PR 생성 대기)
 - 이번에 한 일:
-  - P0-M2-hardening state correction PR — current-state.md line 38 의 'sub-phase 미완료' framing 제거 + 'engineering sequence complete for unblocked P0/P1 hardening slices (12 PR landed)' 로 교체. AC-031/h4 = planned follow-up anchor + blocked-on-h2 + gate accept evidence 제외 명시. IMPL_PLAN line 80 sub-phase row Planned section + line 134 h4 slice row 에 NOT gate-blocking + blocked-on-h2 명시. .dev-cycle/dev-cycle-briefs.md 에 사후 correction entry append.
-  - post-PR #58 GPT static review 가 식별한 source-of-truth drift (ALL CLEAR vs sub-phase 미완료 2 갈래) 정정. operator decision package: Issue 1 = option (c) + blocked-on-h2 explanatory note 채택
-  - PR #61 Codex review pass 'Didn\'t find any major issues' → squash merge
-- 결론: P0-M2-hardening state correction landed (PR #61 → main commit 8ac999b). h4/AC-031 의 gate accept semantics 명확화 — planned follow-up only, NOT gate-blocking, blocked-on-h2. ALL CLEAR vs sub-phase 미완료 drift 종결.
-- 변경 범위: docs_only_contract (3 files), contract surface
-- 검증 계획: docs_contract, full CI 필요
-- 다음 검토 후보:
-  - INFRA-1B.3.h6-policy-decisions-snap-id-schema-hardening (Cycle 7 - 묶음 A+C+DATA_MODEL): recordR2UploadDecision write-time snapId validation + v8→v9 migration integration test + DATA_MODEL.md v9 sync. P1 - 새 schema column 도입 + writer boundary + migration path validation 부재 종결 (ready) 시작 조건: PR #61 land 후 즉시
-  - OPS-1B.h3-r2-orphan-axis-repairability (Cycle 8 - 묶음 B+skipped_toctou): Axis 4 expectedR2Key + CLI formatter + skipped_toctou 별도 axis (r2_object_without_graph_key_policy_recheck_skipped) + cause-qualified naming rename (planned) 시작 조건: Cycle 7 land 후
-  - OPS-1B.h4-r2-audit-column-rationale-drift-axis (Cycle 9 - 묶음 D): column 정상 + rationale 깨진 row 의 mismatch warning axis (planned) 시작 조건: Cycle 8 land 후
-- 자동 승격 검토: 후보 없음
-- 자동 승격: 없음
-- 검증:
-  - bun test 684 pass (no code change)
-  - tsc --noEmit clean
-  - invariant:check 0 errors, 5 warnings (pre-existing)
-  - GitHub Actions 4/4 check success
-- 리뷰/반영: PR #61 squash merge → main commit 8ac999b. Codex 1 round pass.
-- 리스크: 없음
-
-사이클 2 브리핑
-
-- 결과: 반영 완료 (landed)
-- 이번에 한 일:
-  - INFRA-1B.3.h6-policy-decisions-snap-id-schema-hardening 구현 — 3 P1 finding 처리: (1) `assertValidSnapId` writer-boundary shape guard 가 `recordR2UploadDecision` 진입에서 fail-fast — AI-P1-15 의 'first-class structured handle' 주장에 writer-boundary 만 누락된 half-measure 종결. (2) v8→v9 migration integration test 신설 (`tests/unit/migrate_v9_integration_test.ts`) — fresh-apply + re-apply duplicate-column + migrate.ts recovery branch + version ordering 검증. (3) DATA_MODEL.md v9 sync — v9 migration row + policy_decisions table description + audit ledger entry 갱신.
-  - +16 tests = +8 audit_policy_decisions_test.ts (assertValidSnapId × 4 shape + error msg × 1 + recordR2UploadDecision writer-boundary × 3) + +9 new file migrate_v9_integration_test.ts (fresh-apply × 4 + re-apply × 2 + version ordering × 2 + description anchor × 1)
-  - PR #62 Codex review pass 'Didn\'t find any major issues' 1 round → squash merge
-- 결론: Cycle 7 v9 schema hardening landed (PR #62 → main commit d3ae654). post-#58 GPT review 의 P1 findings 3건 (writer boundary + migration test + DATA_MODEL sync) 처리 완료. v9 column 의 first-class structured handle 주장이 contract level 까지 enforced 됨.
-- 변경 범위: src_with_tests_and_docs (5 files), contract surface
+  - INFRA-1B.3.h7-gate-evidence-hardening 구현 — post-PR #65 GPT review 5 finding hotfix bundle:
+    - Finding 1 (P1): `src/ops/r2-invariant-scanner.ts` `SNAP_ID_RATIONALE_PREFIX` regex 에 `(?=;|$)` lookahead 추가 — `snap_id=snap_xxx@evil` / `snap_xxx.bad` / `snap_xxx/extra` / `snap_xxx=value` / `snap_xxx whitespace` 같은 trailing garbage 가 well-formed 으로 통과하던 hole 종결. Axis 6 column ↔ rationale drift detection 의 정확도 회복.
+    - Finding 2 (P1/P2): TESTING/RUNTIME/DATA_MODEL header SHA backfill (17a31ef / d3ae654) + Thin-doc edits since marker 추가. RUNTIME.md 운영자 CLI flow 의 `6-axis` → `7-axis` 정정. current-state.md (line 38, 68, 221) + IMPL_PLAN.md (line 80, 137) 의 "12 slices 모두 landed" → "16 slices 모두 landed" 정정 (Cycle 10 포함). DATA_MODEL.md source-of-truth `v{1..6}` → `v{1..9}` + AGENTS.md Sync timing 정책 reference.
+    - Finding 3 (P2): `src/discovery/worker/snapshot-fingerprint.ts` skipped_toctou rationale 의 `mergeMatchedExisting` 조건 분기 — dedup-link 경로 vs first-create 경로의 audit triage source 구분 회복.
+    - Finding 4 (P2): TESTING.md 의 "migration integration test" 표현 → "unit-level simulation of duplicate-column recovery" 로 정정 (실제 `migrate_v9_integration_test.ts` 가 `stripAlterTable()` helper 로 simulate). 본문 dry-run claim 도 "pending migration listing only" 로 corrected.
+    - Finding 5 (P3): `src/storage/audit/policy-decisions.ts` `SNAP_ID_SHAPE` + `src/ops/r2-invariant-scanner.ts` `SNAP_ID_RATIONALE_PREFIX` docstring 의 `snap_<ULID>` 표현을 실 regex (`^snap_[A-Za-z0-9_-]+$`) 와 일치하도록 정정.
+    - Finding 6 (P3): `INFRA-1A.x-shared-snapshot-id-constants` planned anchor only — IMPL_PLAN P0-M2-hardening row Planned section + DATA_MODEL Pending section 에 등록. NOT gate-blocking.
+  - +7 regression tests (tests/unit/r2_invariant_scanner_test.ts parseSnapIdFromRationale describe block: invalid trailing char @ / . / / / = / whitespace-no-semicolon + end-of-string lone snap_id + canonical happy path)
+  - +2 regression assertions (tests/unit/snapshot_fingerprint_test.ts new-path first-create TOCTOU rejected: rationale 가 "first-create post-r2Put window" 포함 + "MERGE-matched existing snapshot" 미포함 검증)
+  - IMPL_PLAN slice 표 INFRA-1B.3.h7 row 신설 + Milestones row 15 → 16 slice landed + current-state hardening list Cycle 10 entry 추가 (AGENTS.md Cycle 8 sync 의무 ruleset 준수)
+- 결론: Cycle 10 hotfix bundle 구현 완료. test 710 → 717 (+7) pass / typecheck clean / invariant 0 error. post-#65 GPT review Findings 1~5 종결 + Finding 6 planned anchor only. P0-M2-hardening engineering sequence = 16 code hardening slice landed (PR 머지 시).
+- 변경 범위: src_with_tests_and_docs (10 files), contract surface
 - 검증 계획: full_ci, full CI 필요
 - 다음 검토 후보:
-  - OPS-1B.h3-r2-orphan-axis-repairability (Cycle 8 - 묶음 B+skipped_toctou): Axis 4 expectedR2Key + CLI formatter + skipped_toctou 별도 axis (`r2_object_without_graph_key_policy_recheck_skipped`) + cause-qualified naming rename (ready) 시작 조건: PR #62 land 후 즉시
-  - OPS-1B.h4-r2-audit-column-rationale-drift-axis (Cycle 9 - 묶음 D): column 정상 + rationale 깨진 row 의 mismatch warning axis (planned) 시작 조건: Cycle 8 land 후
-  - canonical register batch 4 (h6 + h3 + h4 row 등록): Cycle 9 land 후 4-slice batch register (h6 + h3 + h4 + h4 후속 슬라이스 row) (planned) 시작 조건: Cycle 9 land 후
+  - `INFRA-1A.x-shared-snapshot-id-constants` (Finding 6 defer, planned only): 3 site shared constants module — gate-blocking 아니므로 ready 시점 미지정
+  - P0-M2 gate accept evidence 확정 (AC-022/023/024 + SPIKE-001) — 별도 슬라이스
 - 자동 승격 검토: 후보 없음
 - 자동 승격: 없음
 - 검증:
-  - bun test 684 → 700 pass (+16)
+  - bun test 710 → 717 pass (+7)
   - tsc --noEmit clean
   - invariant:check 0 errors, 5 warnings (pre-existing)
-  - GitHub Actions 4/4 success
-- 리뷰/반영: PR #62 squash merge → main commit d3ae654. Codex 1 round pass.
+- 리뷰/반영: 대기 (PR 생성 후 Codex review)
 - 리스크: 없음
-
-사이클 3 브리핑
-
-- 결과: 반영 완료 (landed)
-- 이번에 한 일:
-  - OPS-1B.h3-r2-orphan-axis-repairability 구현 — scanner SQL `decision IN ('uploaded', 'set_r2_key_failed_neo4j', 'skipped_toctou')` 확장 + Axis 4 cause-qualified rename → `r2_object_without_graph_key_set_failed` + 신규 Axis 4b `r2_object_without_graph_key_policy_recheck_skipped` (skipped_toctou orphan, remediation 분리 — rerun-SET 금지) + 양 orphan axis details 에 `expectedR2Key` 출력 (repair-CLI 직접 사용) + ScanCounts.skippedToctouAuditRows + CLI formatter 2 cases + scanner top-level 5 → 6 axes docstring rewrite
-  - Codex PR #63 round 1 2 findings 처리 + 사용자 옵션 (a)+(c) 합산: (P1) RUNTIME.md scanner section 신설 (6 axes runtime behavior + r2_upload audit lifecycle + operator CLI flow, historical gap backfill); (P2) TESTING.md SHA placeholder `(pending Cycle 8 ...)` → `2e61825 (2026-05-17)` + Thin-doc edits since marker; (옵션 a) IMPL_PLAN slice 표 row 2개 등록 (h6 Cycle 7 PR #62 + OPS-1B.h3 Cycle 8 본 PR) + Milestones row 12 → 14 slice + current-state hardening list 확장; (옵션 c) AGENTS.md 'When changing code' 에 'Sync timing for slice-level doc anchors' sub-section 추가 — engineering slice PR sync 의무 + canonical register batch PR use case 제한
-  - +4 tests in r2_invariant_scanner_test.ts (Axis 4 does NOT flag skipped_toctou + Axis 4b skipped_toctou orphan + expectedR2Key + does NOT mix with Axis 4 + malformed skipped_toctou → Axis 5 only)
-  - PR #63 Codex review 2 round: round 1 P1/P2 finding 정확 — RUNTIME.md historical gap + SHA placeholder. round 2 'Didn\'t find any major issues' pass → squash merge
-- 결론: Cycle 8 + 정책 강화 landed (PR #63 → main commit 116c9ed). post-#58 GPT review 의 Issue 3 (axis name vs scope + skipped_toctou) 종결 + 사용자가 raise 한 defer 정책 갭 (옵션 c) 도 AGENTS.md 갱신으로 정책 lock. main 의 P0-M2-hardening engineering sequence = 14 code hardening slice landed.
-- 변경 범위: src_with_tests_and_docs_and_policy (8 files), contract surface
-- 검증 계획: full_ci, full CI 필요
-- 다음 검토 후보:
-  - OPS-1B.h4-r2-audit-column-rationale-drift-axis (Cycle 4 - 묶음 D, 마지막 P2): column 정상 + rationale 깨진 row 의 mismatch warning axis 신설 — backward-compat contract hygiene. post-#58 GPT review 의 마지막 남은 finding 처리. (ready) 시작 조건: PR #63 land 후 즉시
-  - P0-M2 gate accept (operator-driven): AI-P1-10 SPIKE-001 + AI-P1-11 AC-023 결정 + AC-022/023/024 evidence 확정 + 8+ 추가 landed slice 의 obligatory evidence list promotion 결정 (blocked) 시작 조건: Cycle 4 land 후 + 운영자 manual task
-- 자동 승격 검토: 후보 없음
-- 자동 승격: 없음
-- 검증:
-  - bun test 700 → 704 pass (+4)
-  - tsc --noEmit clean
-  - invariant:check 0 errors, 5 warnings (pre-existing)
-  - GitHub Actions 4/4 success
-- 리뷰/반영: PR #63 squash merge → main commit 116c9ed. Codex 2 round review (round 1 P1+P2 fixed alongside option a+c, round 2 pass).
-- 리스크: 없음
-
-사이클 4 브리핑
-
-- 결과: 반영 완료 (landed)
-- 이번에 한 일:
-  - OPS-1B.h4-r2-audit-column-rationale-drift-axis 구현 — scanner Axis 6 `r2_audit_column_rationale_drift` 신설. R2UploadOutcomeAuditRow shape 에 raw columnSnapId + rationaleSnapId fields 노출 (snapId resolved 값 backward-compat 유지). reconcile() 에 Axis 6 분기 (양 sources 가 well-formed AND 다를 때만 fire). CLI formatter case + scanner top-level 6 → 7 axes docstring rewrite + RUNTIME.md scanner section 7 axes 갱신.
-  - +6 new tests in r2_invariant_scanner_test.ts (Axis 6 drift detection + 4 silent cases [happy path / v8- legacy / column-only column-preferred tolerance / both-null Axis 5 separation] + 1 fetchR2UploadOutcomeAuditRows integration) + 16 existing tests refactored via python bulk script (columnSnapId/rationaleSnapId field 추가 — canonical happy path: snapId === both raw fields)
-  - AGENTS.md Cycle 8 정책 (engineering slice PR sync 의무) 따라 본 PR 안에서 IMPL_PLAN + current-state + RUNTIME + TESTING 동시 sync — defer 없음. canonical register batch PR 으로 미루지 않음.
-  - PR #64 Codex review 1 round pass 'Didn\'t find any major issues' → squash merge
-- 결론: Cycle 9 v9 column ↔ rationale dual-write drift detection landed (PR #64 → main commit 17a31ef). post-#58 GPT review 의 마지막 (Issue 6 P2) finding 종결. P0-M2-hardening engineering sequence = 15 code hardening slice landed. **post-#58 GPT review followup sequence (Cycle 6/7/8/9) 100% complete.**
-- 변경 범위: src_with_tests_and_docs (7 files), contract surface
-- 검증 계획: full_ci, full CI 필요
-- 다음 검토 후보:
-  - P0-M2 gate accept (operator-driven): AI-P1-10 SPIKE-001 + AI-P1-11 AC-023 결정 + AC-022/023/024 evidence 확정 + 11+ 추가 landed slice 의 obligatory evidence list promotion 결정 (blocked) 시작 조건: 운영자 manual task 수행
-  - P1-MVP-prep Week 4 sequence: 원 action-items Week 4: AI-P1-5 (DEPLOY-1A.0-migration-validation), AI-P1-4 (INFRA-1B.1.h2-source-profile, Q-054 lock 후), AI-P2-1 (HLD Data Model), AI-P2-10 (supply chain audit), AI-P2-5 (validator extension + glossary backfill) (planned) 시작 조건: P0-M2 gate accept 후 또는 운영자 P1 진입 신호
-- 자동 승격 검토: 후보 없음
-- 자동 승격: 없음
-- 검증:
-  - bun test 704 → 710 pass (+6)
-  - tsc --noEmit clean
-  - invariant:check 0 errors, 5 warnings (pre-existing)
-  - GitHub Actions 4/4 success
-- 리뷰/반영: PR #64 squash merge → main commit 17a31ef. Codex 1 round pass.
-- 리스크: 없음
-
-사이클 5 브리핑
-
-- 결과: ALL CLEAR
-- 이번에 한 일:
-  - manual discovery — post-#58 GPT review followup sequence (Cycle 6/7/8/9) 종료 후 ready engineering slice 검색
-  - ready engineering slice 후보 검토: (a) P0-M2 gate accept = blocked (operator manual: SPIKE-001 + AC-023 + AC-022/023/024 evidence + 11+ landed slice promotion 결정) / (b) P1-MVP-prep Week 4 = planned (operator P1 진입 신호 대기, Q-054 lock 등 외부 결정 dependency) / (c) P2/P3 batch = DEC-024 D8 attention budget rule 따라 P0-M2 gate accept 전 진입 금지
-  - Auto-Promotion Gate 검토: status-only doc 승격 가능 항목 없음. 모든 candidate 가 외부 결정 (operator manual task, P1 진입 신호, Q-054 lock 등) 의존 → 기계적 status-only 승격 대상 아님
-- 결론: ALL CLEAR. post-#58 GPT review followup sequence (Cycle 6/7/8/9) 100% complete. 모든 ready engineering slice 종료. 다음 진행 = 운영자 manual task (P0-M2 gate accept 또는 P1-MVP-prep 진입 신호). 기계적 자동 승격 가능 항목 없음 → loop 종료.
-- 변경 범위: none (0 files)
-- 검증 계획: none, full CI 필요
-- 다음 검토 후보:
-  - P0-M2 gate accept (operator-driven): AI-P1-10 SPIKE-001 (Neo4j FTS p95 < 1s 측정) + AI-P1-11 AC-023 결정 (REQ-018 8 위험 행동) + AC-022/023/024 evidence 확정 + 11+ 추가 landed slice 의 obligatory evidence list promotion 결정 (blocked) 시작 조건: 운영자 manual task 수행
-  - P1-MVP-prep Week 4 — AI-P1-5 DEPLOY-1A.0-migration-validation: migrate dry-run 의 실제 parse 검증 (현재 CI 주석 / TESTING 가 검증처럼 명시되어 있으나 실제 parse 없음) (planned) 시작 조건: P0-M2 gate accept 후 또는 운영자 P1 진입 신호
-  - P1-MVP-prep Week 4 — AI-P1-4 INFRA-1B.1.h2-source-profile: Source profile canonical store (Q-054 D3 + Q-058 D7) — `data/categories.yaml` 도입. h4 (AC-031) unblock 의 전제 (planned) 시작 조건: Q-054 lock + P0-M2 gate accept 후
-- 자동 승격 검토: 후보 없음
-- 자동 승격: 없음
-- 검증:
-  - main 동기화 + git log review = post-PR #64 cleanly applied, working tree clean
-  - bun test baseline 710 pass (post-PR #64 main 상태)
-- 리뷰/반영: ALL CLEAR — review/land 대상 없음
-- 리스크: 없음
-

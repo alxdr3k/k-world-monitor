@@ -884,6 +884,14 @@ describe("createSnapshotFingerprint — audit hook integration (INFRA-1B.3.x-aud
     const audit = readAuditRows();
     expect(audit.map((r) => r.decision)).toEqual(["attempted", "skipped_toctou"]);
     expect(audit[0]!.rationale).toContain("new-path; first create");
+    // Cycle 10 (INFRA-1B.3.h7-gate-evidence-hardening): skipped_toctou
+    // outcome rationale must reflect the actual branch (first-create vs
+    // MERGE-matched). Pre-Cycle-10 the rationale was hardcoded to
+    // "MERGE-matched existing snapshot" for both branches, which broke
+    // operator audit trail attribution. This regression locks the
+    // first-create branch's rationale.
+    expect(audit[1]!.rationale).toContain("new-path; first-create post-r2Put window");
+    expect(audit[1]!.rationale).not.toContain("MERGE-matched existing snapshot");
   });
 
   // AI-P1-7 (INFRA-1B.3.h3-audit-hardening, v8 migration): both audit rows

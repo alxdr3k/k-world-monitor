@@ -251,7 +251,22 @@ export interface R2UploadOutcomeAuditRow {
  */
 export type UploadedAuditRow = R2UploadOutcomeAuditRow;
 
-const SNAP_ID_RATIONALE_PREFIX = /^snap_id=(snap_[A-Za-z0-9_-]+)/;
+// Cycle 10 (INFRA-1B.3.h7-gate-evidence-hardening) — delimiter-anchored
+// rationale parser. Pre-Cycle-10 regex `^snap_id=(snap_[A-Za-z0-9_-]+)`
+// allowed JS partial match — `snap_id=snap_A@bad; ...` would yield "snap_A"
+// (the `@` ends character-class match silently, but JS regex returns the
+// matched prefix anyway). That misclassified malformed rationale rows as
+// valid for Axis 5 surfacing AND fed truncated values into Axis 6 drift
+// detection (column "snap_X" vs rationale "snap_A@bad" → both compared as
+// "snap_X" vs "snap_A", which is still drift but for the wrong reason).
+//
+// recordR2UploadDecision always writes `snap_id=<id>;` + space-delimited
+// trailing fields, so the delimiter lookahead `(?=;|$)` is a strict
+// contract assertion: a well-formed snap_id ends at `;` or end-of-string,
+// nothing else. Invalid trailing chars (`@`, `.`, `/`, `=`, etc.) no
+// longer extract a truncated value — they fall through to Axis 5
+// (malformed_r2_upload_audit_row).
+const SNAP_ID_RATIONALE_PREFIX = /^snap_id=(snap_[A-Za-z0-9_-]+)(?=;|$)/;
 const SNAP_ID_SHAPE = /^snap_[A-Za-z0-9_-]+$/;
 
 /**
