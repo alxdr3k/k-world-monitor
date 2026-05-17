@@ -72,3 +72,49 @@
 - 리뷰/반영: PR #63 squash merge → main commit 116c9ed. Codex 2 round review (round 1 P1+P2 fixed alongside option a+c, round 2 pass).
 - 리스크: 없음
 
+사이클 4 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일:
+  - OPS-1B.h4-r2-audit-column-rationale-drift-axis 구현 — scanner Axis 6 `r2_audit_column_rationale_drift` 신설. R2UploadOutcomeAuditRow shape 에 raw columnSnapId + rationaleSnapId fields 노출 (snapId resolved 값 backward-compat 유지). reconcile() 에 Axis 6 분기 (양 sources 가 well-formed AND 다를 때만 fire). CLI formatter case + scanner top-level 6 → 7 axes docstring rewrite + RUNTIME.md scanner section 7 axes 갱신.
+  - +6 new tests in r2_invariant_scanner_test.ts (Axis 6 drift detection + 4 silent cases [happy path / v8- legacy / column-only column-preferred tolerance / both-null Axis 5 separation] + 1 fetchR2UploadOutcomeAuditRows integration) + 16 existing tests refactored via python bulk script (columnSnapId/rationaleSnapId field 추가 — canonical happy path: snapId === both raw fields)
+  - AGENTS.md Cycle 8 정책 (engineering slice PR sync 의무) 따라 본 PR 안에서 IMPL_PLAN + current-state + RUNTIME + TESTING 동시 sync — defer 없음. canonical register batch PR 으로 미루지 않음.
+  - PR #64 Codex review 1 round pass 'Didn\'t find any major issues' → squash merge
+- 결론: Cycle 9 v9 column ↔ rationale dual-write drift detection landed (PR #64 → main commit 17a31ef). post-#58 GPT review 의 마지막 (Issue 6 P2) finding 종결. P0-M2-hardening engineering sequence = 15 code hardening slice landed. **post-#58 GPT review followup sequence (Cycle 6/7/8/9) 100% complete.**
+- 변경 범위: src_with_tests_and_docs (7 files), contract surface
+- 검증 계획: full_ci, full CI 필요
+- 다음 검토 후보:
+  - P0-M2 gate accept (operator-driven): AI-P1-10 SPIKE-001 + AI-P1-11 AC-023 결정 + AC-022/023/024 evidence 확정 + 11+ 추가 landed slice 의 obligatory evidence list promotion 결정 (blocked) 시작 조건: 운영자 manual task 수행
+  - P1-MVP-prep Week 4 sequence: 원 action-items Week 4: AI-P1-5 (DEPLOY-1A.0-migration-validation), AI-P1-4 (INFRA-1B.1.h2-source-profile, Q-054 lock 후), AI-P2-1 (HLD Data Model), AI-P2-10 (supply chain audit), AI-P2-5 (validator extension + glossary backfill) (planned) 시작 조건: P0-M2 gate accept 후 또는 운영자 P1 진입 신호
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증:
+  - bun test 704 → 710 pass (+6)
+  - tsc --noEmit clean
+  - invariant:check 0 errors, 5 warnings (pre-existing)
+  - GitHub Actions 4/4 success
+- 리뷰/반영: PR #64 squash merge → main commit 17a31ef. Codex 1 round pass.
+- 리스크: 없음
+
+사이클 5 브리핑
+
+- 결과: ALL CLEAR
+- 이번에 한 일:
+  - manual discovery — post-#58 GPT review followup sequence (Cycle 6/7/8/9) 종료 후 ready engineering slice 검색
+  - ready engineering slice 후보 검토: (a) P0-M2 gate accept = blocked (operator manual: SPIKE-001 + AC-023 + AC-022/023/024 evidence + 11+ landed slice promotion 결정) / (b) P1-MVP-prep Week 4 = planned (operator P1 진입 신호 대기, Q-054 lock 등 외부 결정 dependency) / (c) P2/P3 batch = DEC-024 D8 attention budget rule 따라 P0-M2 gate accept 전 진입 금지
+  - Auto-Promotion Gate 검토: status-only doc 승격 가능 항목 없음. 모든 candidate 가 외부 결정 (operator manual task, P1 진입 신호, Q-054 lock 등) 의존 → 기계적 status-only 승격 대상 아님
+- 결론: ALL CLEAR. post-#58 GPT review followup sequence (Cycle 6/7/8/9) 100% complete. 모든 ready engineering slice 종료. 다음 진행 = 운영자 manual task (P0-M2 gate accept 또는 P1-MVP-prep 진입 신호). 기계적 자동 승격 가능 항목 없음 → loop 종료.
+- 변경 범위: none (0 files)
+- 검증 계획: none, full CI 필요
+- 다음 검토 후보:
+  - P0-M2 gate accept (operator-driven): AI-P1-10 SPIKE-001 (Neo4j FTS p95 < 1s 측정) + AI-P1-11 AC-023 결정 (REQ-018 8 위험 행동) + AC-022/023/024 evidence 확정 + 11+ 추가 landed slice 의 obligatory evidence list promotion 결정 (blocked) 시작 조건: 운영자 manual task 수행
+  - P1-MVP-prep Week 4 — AI-P1-5 DEPLOY-1A.0-migration-validation: migrate dry-run 의 실제 parse 검증 (현재 CI 주석 / TESTING 가 검증처럼 명시되어 있으나 실제 parse 없음) (planned) 시작 조건: P0-M2 gate accept 후 또는 운영자 P1 진입 신호
+  - P1-MVP-prep Week 4 — AI-P1-4 INFRA-1B.1.h2-source-profile: Source profile canonical store (Q-054 D3 + Q-058 D7) — `data/categories.yaml` 도입. h4 (AC-031) unblock 의 전제 (planned) 시작 조건: Q-054 lock + P0-M2 gate accept 후
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증:
+  - main 동기화 + git log review = post-PR #64 cleanly applied, working tree clean
+  - bun test baseline 710 pass (post-PR #64 main 상태)
+- 리뷰/반영: ALL CLEAR — review/land 대상 없음
+- 리스크: 없음
+
