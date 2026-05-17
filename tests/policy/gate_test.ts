@@ -183,6 +183,20 @@ describe("detectRisks (ADR-0017 INV-0017-4 List A — 8 risk triggers)", () => {
     );
   });
 
+  it("trigger 1: fires on sourceId=null even when externalLlmPolicy='allowed' is incorrectly populated (Codex PR #68 round 2 P2 — fail-closed for unregistered)", () => {
+    const ctx: RiskTriggerContext = {
+      ...permissiveCtx(),
+      sourceId: null,
+      intendedAction: "external_llm_call_with_raw_text",
+      externalLlmPolicy: "allowed", // mistakenly populated by buggy caller
+    };
+    const risks = detectRisks(ctx);
+    expect(risks.map((r) => r.trigger)).toContain(
+      "external_llm_raw_text_unauthorized"
+    );
+    expect(risks[0]?.rationale).toContain("source unregistered");
+  });
+
   it("trigger 2 (paywalled_source_fetch): fires on extract_full_text with archive_policy=metadata_only", () => {
     const ctx: RiskTriggerContext = {
       ...permissiveCtx(),
@@ -231,6 +245,26 @@ describe("detectRisks (ADR-0017 INV-0017-4 List A — 8 risk triggers)", () => {
     expect(detectRisks(ctx).map((r) => r.trigger)).not.toContain(
       "terms_violation"
     );
+  });
+
+  it("trigger 3: fires on external_llm_call_with_raw_text + do_not_collect (Codex PR #68 round 2 P1 — terms 'no AI' clause)", () => {
+    const ctx: RiskTriggerContext = {
+      ...permissiveCtx(),
+      intendedAction: "external_llm_call_with_raw_text",
+      archivePolicy: "do_not_collect",
+      externalLlmPolicy: "allowed", // would otherwise bypass trigger 1
+    };
+    expect(detectRisks(ctx).map((r) => r.trigger)).toContain("terms_violation");
+  });
+
+  it("trigger 3: fires on external_llm_call_with_excerpt + do_not_collect (Codex PR #68 round 2 P1)", () => {
+    const ctx: RiskTriggerContext = {
+      ...permissiveCtx(),
+      intendedAction: "external_llm_call_with_excerpt",
+      archivePolicy: "do_not_collect",
+      externalLlmPolicy: "allowed",
+    };
+    expect(detectRisks(ctx).map((r) => r.trigger)).toContain("terms_violation");
   });
 
   it("trigger 4 (wire_service_full_text): fires on Reuters extract_full_text", () => {

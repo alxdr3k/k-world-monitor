@@ -140,17 +140,30 @@ function isWireService(sourceName: string | undefined): boolean {
  * Trigger 1: source policy unknown OR external_llm_policy != 'allowed' AND
  * intended action sends raw text to external LLM.
  *
+ * "source policy unknown" 의 fail-closed 해석 (Codex PR #68 round 2 P2
+ * finding): `sourceId === null` (unregistered source — no
+ * source_material_policy row) 인 경우 caller 가 externalLlmPolicy 를
+ * 'allowed' 로 잘못 채워도 fail-closed block. ADR-0017 본문의
+ * "source policy unknown" 의 정확한 해석 = sourceId 가 source registry 에
+ * 없거나 externalLlmPolicy 가 unknown OR != 'allowed'.
+ *
  * Contract (ADR-0017 vs ADR-0012 INV-0012-7): ADR-0012 INV-0012-7 의
  * 초기 표현 `external_llm_policy ≠ prohibited` 는 manual_review_required
  * 를 통과시키는 약한 조건. ADR-0017 / AC-023 의 정합 표현은
- * `external_llm_policy === 'allowed'` 만 통과. 본 detector 는 후자
- * (strict — only `allowed` passes). ADR-0012 INV-0012-7 문구 정합 보정은
- * 별도 follow-up doc-PR scope (PR 1b 외).
+ * `external_llm_policy === 'allowed'` 만 통과 + sourceId 등록 필수. 본
+ * detector 는 후자 (strict). ADR-0012 INV-0012-7 문구 정합 보정은 별도
+ * follow-up doc-PR scope (PR 1b 외).
  */
 function detectExternalLlmRawTextUnauthorized(
   ctx: RiskTriggerContext
 ): DetectedRisk | null {
   if (ctx.intendedAction !== "external_llm_call_with_raw_text") return null;
+  if (ctx.sourceId === null) {
+    return {
+      trigger: "external_llm_raw_text_unauthorized",
+      rationale: `source unregistered (sourceId=null) — fail-closed block for raw-text LLM call regardless of externalLlmPolicy=${ctx.externalLlmPolicy}`,
+    };
+  }
   if (ctx.externalLlmPolicy === "allowed") return null;
   return {
     trigger: "external_llm_raw_text_unauthorized",
@@ -200,6 +213,12 @@ function detectPaywalledSourceFetch(
  * (metadata-only RSS poll) is a borderline case but ADR-0017 §Decision
  * 단계별 default mode 에서 Discovery 도 위험 행동 inline_block 적용
  * 이므로 본 detector 도 discovery_fetch 포함.
+ *
+ * Codex PR #68 round 2 P1 finding fix: `external_llm_call_with_raw_text`
+ * + `external_llm_call_with_excerpt` 가 allowlist 에서 누락되어 있던
+ * 문제 — `archive_policy='do_not_collect'` 인 source 의 external LLM
+ * 송신이 terms 의 "no AI / no redistribution" 조항을 우회. allowlist 에
+ * 두 action 추가하여 fail-closed block.
  */
 function detectTermsViolation(ctx: RiskTriggerContext): DetectedRisk | null {
   const collectionActions: PipelineAction[] = [
@@ -210,6 +229,8 @@ function detectTermsViolation(ctx: RiskTriggerContext): DetectedRisk | null {
     "embed",
     "r2_upload",
     "quote_storage",
+    "external_llm_call_with_raw_text",
+    "external_llm_call_with_excerpt",
   ];
   if (!collectionActions.includes(ctx.intendedAction)) return null;
   if (ctx.archivePolicy !== "do_not_collect") return null;
