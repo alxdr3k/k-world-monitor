@@ -60,6 +60,16 @@
  *       investigate the audit ledger writer (recordR2UploadDecision)
  *       for a format regression, then either repair the row or update
  *       the parser regex.
+ *
+ *   r2_audit_column_rationale_drift (Axis 6 — Cycle 9 / OPS-1B.h4)
+ *     - both v9 `snap_id` column AND rationale prefix are well-formed
+ *       but carry DIFFERENT snap_id values. Likely causes: manual SQL
+ *       UPDATE / repair script that touched only one field, writer
+ *       format regression (formatRationale ≠ column write), fixture /
+ *       backfill that populated one source only. Required: investigate
+ *       audit ledger writer + any operator SQL that touched
+ *       policy_decisions; if reconciliation is possible, prefer the
+ *       column value as canonical (scanner / column-preferred path).
  */
 
 import { scanR2Invariants, type R2InvariantViolation } from "./r2-invariant-scanner";
@@ -148,6 +158,15 @@ function formatViolation(v: R2InvariantViolation): string {
         `decision=${v.details.decision} upload_attempt_id=${v.details.uploadAttemptId}\n` +
         `    rationale_prefix="${v.details.rationalePrefix}"\n` +
         `    → Investigate recordR2UploadDecision format regression; repair audit row or update parser`
+      );
+    case "r2_audit_column_rationale_drift":
+      return (
+        `  [r2_audit_column_rationale_drift] audit_decision_id=${v.details.auditDecisionId} ` +
+        `decision=${v.details.decision} upload_attempt_id=${v.details.uploadAttemptId}\n` +
+        `    column_snap_id=${v.details.columnSnapId} rationale_snap_id=${v.details.rationaleSnapId}\n` +
+        `    → Dual-write contract violation: v9 snap_id column and rationale prefix carry different values. ` +
+        `Investigate audit writer (recordR2UploadDecision/formatRationale) or any operator SQL UPDATE that touched policy_decisions. ` +
+        `Column value is the canonical scanner-preferred handle.`
       );
     default: {
       // exhaustiveness check — TypeScript narrows v.type to never if all cases handled

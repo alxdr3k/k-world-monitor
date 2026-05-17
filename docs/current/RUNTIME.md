@@ -1,6 +1,6 @@
 # Runtime Flow
 
-> Last verified against code: 2e61825 (2026-05-17) — Cycle 8 / OPS-1B.h3-r2-orphan-axis-repairability code commit. Thin-doc edits since: 891ef81 → this commit (2026-05-17). Prior baseline = scanner runtime behavior section never landed (PR #50 / #54 / #57 introduced scanner + axes without RUNTIME.md update — historical gap, Codex PR #63 P1 review backfills here). Pre-Cycle-8 scanner doc anchor was distributed across `src/ops/r2-invariant-scanner.ts` top docstring + slice 표 entries; thin-doc consumers had no single landing page.
+> Last verified against code: (pending Cycle 9 code commit on branch `claude/r2-audit-column-rationale-drift-axis`) — Cycle 9 / OPS-1B.h4-r2-audit-column-rationale-drift-axis. Previous baseline = 116c9ed (Cycle 8 PR #63). Cycle 9 adds **Axis 6 `r2_audit_column_rationale_drift`** — column vs rationale dual-write contract violation surface. 7 axis total (post-Cycle-9).
 
 ## Current implemented flow
 
@@ -8,7 +8,7 @@
 는 landed 상태로 INFRA-1B.* slice 들의 합으로 실제 코드가 동작한다. 본 thin
 doc 의 핵심 runtime contract 정리:
 
-### R2 invariant scanner (post-Cycle 8, 6 violation axes)
+### R2 invariant scanner (post-Cycle 9, 7 violation axes)
 
 `bun run audit:r2-invariants` (또는 `--json`) 가 read-only 로 3 store (Neo4j
 `Snapshot.r2_key` ↔ SQLite `policy_decisions` ↔ SQLite `source_material_policy`)
@@ -25,12 +25,15 @@ TOCTOU 등의 edge case 에서도 유지됨을 read time 에 검증한다.
 | `r2_object_without_graph_key_set_failed` (Axis 4) | `decision='set_r2_key_failed_neo4j'` audit row — r2Put 성공 + Neo4j SET 실패 | violation `details.expectedR2Key` (= `permitted_artifact/derived/snapshot/${snapId}`) 사용. **Recovery**: rerun SET (dedup 보존). **Cleanup**: r2 object 제거. 모두 repair-CLI scope |
 | `r2_object_without_graph_key_policy_recheck_skipped` (Axis 4b) | `decision='skipped_toctou'` audit row — r2Put 성공 + post-recheck 가 restricted source 검출 후 SET skip | **Do NOT blindly rerun SET** (recheck 결정 재위반). r2 object cleanup 또는 source policy rollback (recheck rejection 이 의도치 않았다면). `expectedR2Key` 사용 |
 | `malformed_r2_upload_audit_row` | r2_upload outcome row 의 rationale 이 `snap_id=snap_...;` canonical prefix 미충족 + v9 `snap_id` column 도 NULL/garbage | `recordR2UploadDecision` format regression 점검 → row 수정 또는 parser 갱신. v9 column 도입 (AI-P1-15) 이후 신규 row 는 column 우선이므로 발화 시 audit ledger 의 manual write 가능성 점검 |
+| `r2_audit_column_rationale_drift` (Axis 6, Cycle 9) | v9 `snap_id` column 과 rationale prefix 가 **둘 다 well-formed 인데 서로 다른 snap_id 값** | Dual-write contract violation. `recordR2UploadDecision` 가 column + rationale prefix 를 atomic 으로 같은 값으로 write 하도록 설계됨 — divergence 의 likely 원인: manual SQL UPDATE / repair script 가 한 쪽만 수정, writer format regression (`formatRationale()` ≠ column write), fixture / backfill 이 한 쪽만 populate. Column 이 canonical handle (scanner column-preferred) — reconciliation 시 column 값을 truth 로 채택 권고 |
 
 scanner 는 `aligned=true / false` boolean + violation array + ScanCounts
 6 field (`r2BackedSnapshots`, `uploadedAuditRows`, `setR2KeyFailedNeo4jAuditRows`,
 `skippedToctouAuditRows`, `malformedR2UploadAuditRows`, `sourcePolicyRows`)
 를 반환한다. CLI 는 violation 0 이면 exit 0, 1 이상이면 exit 1 (operator
-alert hook).
+alert hook). Cycle 9 의 Axis 6 추가는 새 ScanCounts field 를 늘리지 않음 —
+column / rationale 의 raw 값을 row 안에 다 보유하므로 reconcile() 가
+read-time 에 detect.
 
 ### r2_upload audit lifecycle (post-AI-P1-7 v8 + AI-P1-15 v9)
 
