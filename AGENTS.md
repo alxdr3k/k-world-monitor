@@ -50,6 +50,42 @@ alone. Mode definitions and adoption-only sections live in
   update `docs/04_IMPLEMENTATION_PLAN.md`.
 - If the active milestone / track / phase / slice changes, update
   `docs/context/current-state.md`.
+
+### Sync timing for slice-level doc anchors (engineering slice PR contract)
+
+(Added post-PR #58 GPT review — operator decision package option (c).
+Earlier emergent pattern: engineering slice PR landed → IMPL_PLAN slice
+표 row + Milestones row + current-state hardening list 갱신은 후속
+"canonical register batch PR" 로 defer. 운영자 결정은 직전 sequence 의
+drift 가 source-of-truth 분열을 일으킨 사례 (#51 ↔ #59 ↔ #60) 를 명확화.)
+
+**Engineering slice PR (코드 변경이 포함된 PR) 안에서 의무 sync** —
+defer 금지:
+
+- `docs/04_IMPLEMENTATION_PLAN.md` slice 표 row 등록 (slice ID + phase +
+  description + dependency + AC + status + evidence + blocks 컬럼)
+- `docs/04_IMPLEMENTATION_PLAN.md` 해당 Milestones row 의 landed 목록
+  + 카운트 갱신
+- `docs/context/current-state.md` hardening / landed slice 목록 + 카운트
+  갱신
+- 본 PR 의 commit SHA 가 아직 결정 안 된 시점에는 placeholder
+  (`pending merge SHA` 또는 `(본 PR)`) 를 명시하고, merge 후 SHA 가
+  결정되면 후속 canonical register batch PR 에서 backfill 가능 (이건
+  허용된 drift — 본 PR scope 안에서 closeable 한 sync 와 구분).
+
+**canonical register batch PR (코드 변경 0건, doc-only ledger sync PR)** —
+다음 경우에만 사용 허용:
+- 과거에 누락된 backfill (예: pre-Cycle-6 이전 PR 들의 slice 표 row 일괄
+  등록), 또는
+- 다중 slice 의 정합 보정 (예: phase column / dependency chain / Milestones
+  row 의 cross-row 일관성 fix), 또는
+- merged PR 의 SHA backfill (slice row 가 본 PR 안에서 등록되었지만 commit
+  SHA placeholder 였던 경우).
+
+본 batch PR 패턴을 **engineering slice 의 sync defer 용 lever 로 사용
+금지**. defer 시점에 "언제 catch-up 하는가" 의 trigger 가 manual 결정
+하나에 의존 → drift window 가 main 에 살아있는 risk (직전 sequence 사례
+참조).
 - If acceptance gate definitions or results change, update
   `docs/06_ACCEPTANCE_TESTS.md`.
 - If module/file layout changes, update `docs/current/CODE_MAP.md`.
