@@ -1,6 +1,6 @@
 # Runtime Flow
 
-> Last verified against code: (pending Cycle 9 code commit on branch `claude/r2-audit-column-rationale-drift-axis`) — Cycle 9 / OPS-1B.h4-r2-audit-column-rationale-drift-axis. Previous baseline = 116c9ed (Cycle 8 PR #63). Cycle 9 adds **Axis 6 `r2_audit_column_rationale_drift`** — column vs rationale dual-write contract violation surface. 7 axis total (post-Cycle-9).
+> Last verified against code: 17a31ef (2026-05-17) — Cycle 9 / OPS-1B.h4-r2-audit-column-rationale-drift-axis (post-#58 GPT review Issue 6 finding 종결). Thin-doc edits since: 17a31ef → this commit (Cycle 10 / INFRA-1B.3.h7-gate-evidence-hardening, post-#65 review followup — `parseSnapIdFromRationale` delimiter strictness + skipped_toctou rationale branch). Cycle 9 added **Axis 6 `r2_audit_column_rationale_drift`** — column vs rationale dual-write contract violation surface. 7 axis total (post-Cycle-9).
 
 ## Current implemented flow
 
@@ -73,7 +73,7 @@ pair 1쌍만 형성. 운영자 audit query 는 `WHERE upload_attempt_id = '...'`
 
 [operator]
   └→ bun run audit:r2-invariants [--json]
-       └→ 6-axis read-only invariant scan (위 표 참조)
+       └→ 7-axis read-only invariant scan (위 표 참조)
        └→ exit 0 (aligned) or 1 (violations) — operator alert hook
 ```
 

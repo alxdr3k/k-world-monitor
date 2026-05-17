@@ -816,8 +816,18 @@ export async function createSnapshotFingerprint(
             : `new-path; ${setError instanceof Error ? setError.message : String(setError)}`,
         });
       } else {
-        // INV-0012-3 audit row 2/2 — TOCTOU recheck rejected on MERGE-matched branch.
+        // INV-0012-3 audit row 2/2 — TOCTOU recheck rejected.
         // AI-P1-7: reuses newPathUploadAttemptId.
+        // Cycle 10 (INFRA-1B.3.h7-gate-evidence-hardening): rationale now
+        // branches on mergeMatchedExisting so the audit ledger correctly
+        // attributes the cause. Pre-Cycle-10 the rationale was hardcoded
+        // to "MERGE-matched existing snapshot" which mis-described the
+        // first-create TOCTOU branch (`mergeMatchedExisting === false` —
+        // the dedup-link path skips its `dedup_prohibited_source` guard
+        // between Neo4j commit and r2_key SET; a concurrent policy-change
+        // attaches a restricted source to the freshly-created Snapshot).
+        // Operator triage / repair-CLI uses this rationale to decide
+        // whether the orphan is from a dedup race or a first-create race.
         auditR2UploadOrThrow({
           sourceId: input.sourceId,
           snapId: actualSnapId,
@@ -826,7 +836,9 @@ export async function createSnapshotFingerprint(
           rawCloudPolicy: input.rawCloudPolicy,
           decision: "skipped_toctou",
           uploadAttemptId: newPathUploadAttemptId,
-          rationale: "new-path; MERGE-matched existing snapshot; post-r2Put cross-source policy recheck rejected",
+          rationale: mergeMatchedExisting
+            ? "new-path; MERGE-matched existing snapshot; post-r2Put cross-source policy recheck rejected"
+            : "new-path; first-create post-r2Put window; cross-source policy recheck rejected",
         });
       }
     }

@@ -167,6 +167,52 @@ describe("parseSnapIdFromRationale", () => {
       parseSnapIdFromRationale("prefix snap_id=snap_X; ...")
     ).toBeNull();
   });
+
+  // Cycle 10 (INFRA-1B.3.h7-gate-evidence-hardening): delimiter-anchored
+  // regex. Pre-Cycle-10 the regex `^snap_id=(snap_[A-Za-z0-9_-]+)` allowed
+  // JS partial match — an invalid trailing character (`@`, `.`, `/`, `=`)
+  // would end the character-class match silently and yield the prefix.
+  // That misclassified malformed rationale rows as valid (Axis 5 silent)
+  // AND fed truncated values into Axis 6 drift detection (wrong reason
+  // for the drift). recordR2UploadDecision always emits `snap_id=<id>;`
+  // so the delimiter lookahead `(?=;|$)` makes invalid trailing chars
+  // fall through to null (→ Axis 5 fires).
+
+  it("returns null when snap_id is followed by invalid char @ (no delimiter)", () => {
+    expect(parseSnapIdFromRationale("snap_id=snap_A@bad; ...")).toBeNull();
+  });
+
+  it("returns null when snap_id is followed by invalid char . (no delimiter)", () => {
+    expect(parseSnapIdFromRationale("snap_id=snap_A.foo; ...")).toBeNull();
+  });
+
+  it("returns null when snap_id is followed by invalid char / (no delimiter)", () => {
+    expect(parseSnapIdFromRationale("snap_id=snap_A/evil; ...")).toBeNull();
+  });
+
+  it("returns null when snap_id is followed by invalid char = (no delimiter)", () => {
+    expect(parseSnapIdFromRationale("snap_id=snap_A=evil; ...")).toBeNull();
+  });
+
+  it("returns null when snap_id is followed by whitespace without semicolon", () => {
+    // Whitespace between snap_id and next field is also invalid per
+    // recordR2UploadDecision contract (which uses "; " as the canonical
+    // separator — the `;` is mandatory).
+    expect(parseSnapIdFromRationale("snap_id=snap_A archive_policy=x")).toBeNull();
+  });
+
+  it("accepts snap_id at end-of-string (no trailing semicolon, but no invalid char either)", () => {
+    // Edge case: rationale that is *only* the snap_id field. The lookahead
+    // permits `$` so this still extracts. Defensive: this is the rare
+    // case where rationale has no follow-on fields.
+    expect(parseSnapIdFromRationale("snap_id=snap_LONE")).toBe("snap_LONE");
+  });
+
+  it("accepts canonical snap_id followed by ; delimiter (writer happy path)", () => {
+    expect(parseSnapIdFromRationale("snap_id=snap_A; archive_policy=x")).toBe(
+      "snap_A"
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

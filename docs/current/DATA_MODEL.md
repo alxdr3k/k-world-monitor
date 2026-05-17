@@ -1,11 +1,14 @@
 # Data Model
 
-> Last verified against code: 79d1e5b (2026-05-15) — AI-P1-2 / `INFRA-1B.1.h1-source-bootstrap-neo4j` landed (Neo4j Source node bootstrap + 3-way preflight alignment + null/duplicate source_id detection + `BootstrapPreflightError` fail-fast; minimal Source node properties = `source_id` / `slug` / `name` / `bootstrap_at` / `updated_at`; full SQLite slug_map coverage incl. historical rows). Previous code baseline = 75706c4 (2026-05-14, INFRA-1B.3.x-audit landed — R2 upload audit ledger, v7 migration ADD COLUMN intended_action, AC-032 / NFR-008 evidence, Q-044 → DEC-020 / TRACE-040). Earlier baseline = 0a76d31 (2026-05-13). Pre-merge SHA references are refreshed as the branch evolves — canonical post-squash-merge SHA settles in the next slice's baseline header.
+> Last verified against code: d3ae654 (2026-05-17) — Cycle 7 / `INFRA-1B.3.h6-policy-decisions-snap-id-schema-hardening` (v9 audit schema + writer-boundary `assertValidSnapId` + v8→v9 migration integration test + DATA_MODEL.md v9 row sync). Thin-doc edits since: d3ae654 → 17a31ef (Cycle 9 OPS-1B.h4 — scanner-only, no schema change) → this commit (Cycle 10 INFRA-1B.3.h7-gate-evidence-hardening, post-#65 review followup — header SHA backfill + source-of-truth v{1..6} → v{1..9} + Pending v8 anchor cleanup per Finding 2 doc drift sweep). Earlier code baselines: 79d1e5b (2026-05-15, AI-P1-2 INFRA-1B.1.h1-source-bootstrap-neo4j), 75706c4 (2026-05-14, INFRA-1B.3.x-audit landed — v7 ADD COLUMN intended_action), 0a76d31 (2026-05-13).
 
 ## Source of truth
 
-`migrations/neo4j/v1_schema.cypher` (graph) + `migrations/sqlite/v{1..6}_*.sql`
+`migrations/neo4j/v1_schema.cypher` (graph) + `migrations/sqlite/v{1..9}_*.sql`
 (relational) 가 canonical 스키마다. 이 문서는 얇은 navigation layer다.
+SQLite versioned migrations 는 본 thin-doc 위 표의 row 와 1:1 — 추가 시
+표 row 도 동시 등록 의무 (AGENTS.md "Sync timing for slice-level doc
+anchors" rule, Cycle 8 lock).
 
 마이그레이션 순서 (모두 idempotent, `bun run migrate:sqlite` / `:neo4j`):
 
@@ -166,18 +169,37 @@ All prefixes enforced at Neo4j (UNIQUE constraint) and in TEST-005 (`tests/lint/
   의 후속. audit ledger 의 `set_r2_key_failed_neo4j` row 를 스캔해 r2
   object 가 존재하지만 Snapshot.r2_key=null 인 케이스에 대해 SET
   back-patch 를 재시도하는 CLI (`pipeline repair r2-orphan` 류).
-- INFRA-1B.3.x-audit-invariant-scan (planned) — Neo4j `Snapshot.r2_key
-  IS NOT NULL` 노드 × SQLite `source_material_policy.raw_cloud_policy`
-  cross-check CLI. prohibited source 의 r2-backed Snapshot 검출 시
-  alert. NFR-008 audit-by-absence 패턴의 보강 안전장치 (운영자 검토 항목
-  2 — GPT reviewer 권고).
+- ~~INFRA-1B.3.x-audit-invariant-scan (planned)~~ — **closed by
+  `OPS-1B.h1-runtime-invariant-scanner` / PR #50 (3-axis) + extensions
+  `OPS-1B.h2` / PR #54 (Axis 4 + 5) + `OPS-1B.h3` / PR #63 (Axis 4 split
+  + 4b skipped_toctou + expectedR2Key) + `OPS-1B.h4` / PR #64 (Axis 6
+  column ↔ rationale drift)** — 7-axis invariant scanner landed
+  (`bun run audit:r2-invariants`). RUNTIME.md scanner section + 운영자
+  CLI flow 참조.
 - INFRA-1A.3.x-r2-inventory (planned) — R2 bucket 안 모든 object 의
   sha256/위치를 Snapshot.content_hash + Snapshot.r2_key 와 cross-
   reference, orphan/부합 안 되는 object 검출. NFR-008 의 R2-side
   evidence (운영자 검토 항목 2).
-- INFRA-1B.3.x-audit-correlation-key (planned, v1+) — `policy_decisions`
-  에 `upload_attempt_id TEXT` (`rup_<ULID>`) 컬럼 추가 (v8 ALTER + idx).
-  multi-worker hardening 시 동일 snap_id 의 attempted N → outcome N
-  mapping 을 second-precision tie 없이 명시적으로 (운영자 검토 항목 3
-  — GPT reviewer 권고). v0 single-operator 환경에서는 rationale prefix
-  로 충분.
+- ~~INFRA-1B.3.x-audit-correlation-key (planned, v1+)~~ — **closed by
+  `INFRA-1B.3.h3-audit-hardening` / PR #49** (v8 audit hardening — v8
+  ALTER `policy_decisions.upload_attempt_id TEXT` + 3 BEFORE INSERT
+  triggers [intended_action enum + r2_upload_decision enum +
+  upload_attempt_id required-when-r2-upload with explicit whitespace
+  charset TRIM]). 이후 `INFRA-1B.3.h5` / PR #57 (v9 snap_id column) +
+  `INFRA-1B.3.h6` / PR #62 (writer-boundary `assertValidSnapId`) 가
+  audit ledger 구조적 hardening 완결.
+- ~~`set_r2_key_failed_neo4j` repair job (planned)~~ — partially closed
+  by `OPS-1B.h3-r2-orphan-axis-repairability` / PR #63 (scanner Axis 4
+  `r2_object_without_graph_key_set_failed` violation 의 details 에
+  `expectedR2Key` 출력 → repair-CLI 가 직접 사용할 canonical handle 노출).
+  실제 repair CLI 본체 (`pipeline repair r2-orphan` 등) 는 별도 future
+  slice — scanner 가 detect + handle 까지만 cover.
+- **`INFRA-1A.x-shared-snapshot-id-constants` (planned, Cycle 10 Finding 6
+  anchor)** — snapshot ID shape regex (`^snap_[A-Za-z0-9_-]+$`) +
+  canonical R2 prefix (`permitted_artifact/derived/snapshot/${snapId}`)
+  의 shared constants module. 현재 3 site 가 같은 invariant 를 magic-
+  string 으로 보유 (`policy-decisions.ts` `SNAP_ID_SHAPE` +
+  `scanner.ts` `SNAP_ID_RATIONALE_PREFIX` + `snapshot-fingerprint.ts`
+  R2 key template). shared module 로 reuse 시 regex drift / canonical
+  prefix drift 의 silent failure 차단. NOT gate-blocking, planned anchor
+  only (post-#65 GPT review Finding 6).
