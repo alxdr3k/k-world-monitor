@@ -48,3 +48,27 @@
 - 리뷰/반영: PR #62 squash merge → main commit d3ae654. Codex 1 round pass.
 - 리스크: 없음
 
+사이클 3 브리핑
+
+- 결과: 반영 완료 (landed)
+- 이번에 한 일:
+  - OPS-1B.h3-r2-orphan-axis-repairability 구현 — scanner SQL `decision IN ('uploaded', 'set_r2_key_failed_neo4j', 'skipped_toctou')` 확장 + Axis 4 cause-qualified rename → `r2_object_without_graph_key_set_failed` + 신규 Axis 4b `r2_object_without_graph_key_policy_recheck_skipped` (skipped_toctou orphan, remediation 분리 — rerun-SET 금지) + 양 orphan axis details 에 `expectedR2Key` 출력 (repair-CLI 직접 사용) + ScanCounts.skippedToctouAuditRows + CLI formatter 2 cases + scanner top-level 5 → 6 axes docstring rewrite
+  - Codex PR #63 round 1 2 findings 처리 + 사용자 옵션 (a)+(c) 합산: (P1) RUNTIME.md scanner section 신설 (6 axes runtime behavior + r2_upload audit lifecycle + operator CLI flow, historical gap backfill); (P2) TESTING.md SHA placeholder `(pending Cycle 8 ...)` → `2e61825 (2026-05-17)` + Thin-doc edits since marker; (옵션 a) IMPL_PLAN slice 표 row 2개 등록 (h6 Cycle 7 PR #62 + OPS-1B.h3 Cycle 8 본 PR) + Milestones row 12 → 14 slice + current-state hardening list 확장; (옵션 c) AGENTS.md 'When changing code' 에 'Sync timing for slice-level doc anchors' sub-section 추가 — engineering slice PR sync 의무 + canonical register batch PR use case 제한
+  - +4 tests in r2_invariant_scanner_test.ts (Axis 4 does NOT flag skipped_toctou + Axis 4b skipped_toctou orphan + expectedR2Key + does NOT mix with Axis 4 + malformed skipped_toctou → Axis 5 only)
+  - PR #63 Codex review 2 round: round 1 P1/P2 finding 정확 — RUNTIME.md historical gap + SHA placeholder. round 2 'Didn\'t find any major issues' pass → squash merge
+- 결론: Cycle 8 + 정책 강화 landed (PR #63 → main commit 116c9ed). post-#58 GPT review 의 Issue 3 (axis name vs scope + skipped_toctou) 종결 + 사용자가 raise 한 defer 정책 갭 (옵션 c) 도 AGENTS.md 갱신으로 정책 lock. main 의 P0-M2-hardening engineering sequence = 14 code hardening slice landed.
+- 변경 범위: src_with_tests_and_docs_and_policy (8 files), contract surface
+- 검증 계획: full_ci, full CI 필요
+- 다음 검토 후보:
+  - OPS-1B.h4-r2-audit-column-rationale-drift-axis (Cycle 4 - 묶음 D, 마지막 P2): column 정상 + rationale 깨진 row 의 mismatch warning axis 신설 — backward-compat contract hygiene. post-#58 GPT review 의 마지막 남은 finding 처리. (ready) 시작 조건: PR #63 land 후 즉시
+  - P0-M2 gate accept (operator-driven): AI-P1-10 SPIKE-001 + AI-P1-11 AC-023 결정 + AC-022/023/024 evidence 확정 + 8+ 추가 landed slice 의 obligatory evidence list promotion 결정 (blocked) 시작 조건: Cycle 4 land 후 + 운영자 manual task
+- 자동 승격 검토: 후보 없음
+- 자동 승격: 없음
+- 검증:
+  - bun test 700 → 704 pass (+4)
+  - tsc --noEmit clean
+  - invariant:check 0 errors, 5 warnings (pre-existing)
+  - GitHub Actions 4/4 success
+- 리뷰/반영: PR #63 squash merge → main commit 116c9ed. Codex 2 round review (round 1 P1+P2 fixed alongside option a+c, round 2 pass).
+- 리스크: 없음
+
