@@ -13,6 +13,7 @@ import { closeDb, getDb } from "../../src/storage/sqlite/connection";
 import {
   recordR2UploadDecision,
   newUploadAttemptId,
+  assertValidSnapId,
 } from "../../src/storage/audit/policy-decisions";
 import {
   INTENDED_ACTION,
@@ -652,5 +653,107 @@ describe("recordR2UploadDecision — v9 snap_id column dual-write (AI-P1-15)", (
     expect(rows).toHaveLength(2);
     expect(new Set(rows.map((r) => r.snap_id))).toEqual(new Set(["snap_v9_pair"]));
     expect(rows.map((r) => r.decision_id).sort()).toEqual([beforeId, afterId].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cycle 7 / INFRA-1B.3.h6-policy-decisions-snap-id-schema-hardening
+//
+// Writer-boundary shape validation (assertValidSnapId).
+// Pre-cycle-7 the audit ledger trusted TypeScript's `string` type for
+// `input.snapId` and only the scanner-side `validSnapIdOrNull()` caught
+// malformed values (defense-in-depth, not contract). Cycle 7 closes the
+// writer boundary so v9 snap_id column writes carry a verified shape.
+// ---------------------------------------------------------------------------
+
+describe("assertValidSnapId — writer-boundary shape validator (Cycle 7)", () => {
+  it("accepts canonical snap_<chars> values", () => {
+    expect(() => assertValidSnapId("snap_01KRRR")).not.toThrow();
+    expect(() => assertValidSnapId("snap_ABC123")).not.toThrow();
+    expect(() =>
+      assertValidSnapId("snap_with-dashes_and_underscores")
+    ).not.toThrow();
+  });
+
+  it("rejects empty string", () => {
+    expect(() => assertValidSnapId("")).toThrow(
+      /invalid snap_id shape/
+    );
+  });
+
+  it("rejects strings missing the snap_ prefix", () => {
+    expect(() => assertValidSnapId("ABC123")).toThrow(
+      /invalid snap_id shape/
+    );
+    expect(() => assertValidSnapId("snap")).toThrow(
+      /invalid snap_id shape/
+    );
+    expect(() => assertValidSnapId("snap_")).toThrow(
+      /invalid snap_id shape/
+    );
+  });
+
+  it("rejects strings with characters outside [A-Za-z0-9_-]", () => {
+    expect(() => assertValidSnapId("snap_with space")).toThrow();
+    expect(() => assertValidSnapId("snap_with/slash")).toThrow();
+    expect(() => assertValidSnapId("snap_with.dot")).toThrow();
+  });
+
+  it("error message includes the offending value (JSON-stringified for whitespace visibility)", () => {
+    let caught: unknown;
+    try {
+      assertValidSnapId("not_a_snap");
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain('"not_a_snap"');
+  });
+});
+
+describe("recordR2UploadDecision — writer-boundary shape validation (Cycle 7)", () => {
+  function validInput(snapId: string): Parameters<typeof recordR2UploadDecision>[0] {
+    return {
+      sourceId: "src_h6",
+      snapId,
+      url: "https://example.com/h6",
+      archivePolicy: "full_snapshot_allowed" as const,
+      rawCloudPolicy: "allowed_public_data_only" as const,
+      decision: "uploaded" as const,
+      uploadAttemptId: "uatt_h6_test",
+    };
+  }
+
+  it("rejects malformed snapId BEFORE the INSERT runs (no audit row written)", () => {
+    setupDb();
+    expect(() =>
+      recordR2UploadDecision(validInput("not_a_snap_prefix"))
+    ).toThrow(/invalid snap_id shape/);
+    // Verify no row was inserted (writer-boundary fail-fast contract).
+    const rows = getDb()
+      .query<{ decision_id: string }, []>(
+        "SELECT decision_id FROM policy_decisions"
+      )
+      .all();
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rejects empty-string snapId at writer boundary", () => {
+    setupDb();
+    expect(() => recordR2UploadDecision(validInput(""))).toThrow(
+      /invalid snap_id shape/
+    );
+  });
+
+  it("accepts canonical snapId and proceeds to INSERT", () => {
+    setupDb();
+    const id = recordR2UploadDecision(validInput("snap_h6_ok"));
+    expect(id).toMatch(/^pdec_/);
+    const row = getDb()
+      .query<{ snap_id: string }, [string]>(
+        "SELECT snap_id FROM policy_decisions WHERE decision_id = ?"
+      )
+      .get(id);
+    expect(row?.snap_id).toBe("snap_h6_ok");
   });
 });

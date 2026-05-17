@@ -47,6 +47,38 @@ export function newUploadAttemptId(): string {
   return `uatt_${ulid()}`;
 }
 
+/**
+ * AI-P1-15 follow-up (Cycle 7 / INFRA-1B.3.h6-schema-hardening): canonical
+ * `snap_<ULID>` shape. Must mirror the scanner's `SNAP_ID_SHAPE` regex so
+ * column writes and reader-side validation share one source of truth.
+ */
+const SNAP_ID_SHAPE = /^snap_[A-Za-z0-9_-]+$/;
+
+/**
+ * Throws if `value` is not a well-formed `snap_<ULID>` identifier.
+ *
+ * Pre-AI-P1-15 the audit ledger trusted TypeScript's static `string` type
+ * for `snapId`. Post-AI-P1-15 the scanner has a column-preferred read
+ * + `validSnapIdOrNull()` shape guard at the reader boundary, but the
+ * writer (`recordR2UploadDecision`) still wrote any input string into the
+ * v9 `snap_id` column without checking shape. That made the "first-class
+ * structured handle" claim a half-measure: a malformed string slipped
+ * past the writer and only got surfaced as `malformed_r2_upload_audit_row`
+ * at scan time, which is a sufficient defense but not a contract.
+ *
+ * Cycle 7 (this slice) closes the writer boundary so every column write
+ * carries a verified `snap_<...>` shape. Reader-side `validSnapIdOrNull()`
+ * stays in place as defense-in-depth for legacy / out-of-band SQL writes
+ * (manual DB ops, future repair scripts).
+ */
+export function assertValidSnapId(value: string): void {
+  if (!SNAP_ID_SHAPE.test(value)) {
+    throw new Error(
+      `recordR2UploadDecision: invalid snap_id shape (must match ^snap_<chars>$): ${JSON.stringify(value)}`
+    );
+  }
+}
+
 export interface R2UploadAuditInput {
   sourceId: string;
   snapId: string;
@@ -91,6 +123,11 @@ function formatRationale(input: R2UploadAuditInput): string {
  * returned for backwards-compat and rationale trace).
  */
 export function recordR2UploadDecision(input: R2UploadAuditInput): string {
+  // Cycle 7 (INFRA-1B.3.h6): writer-boundary shape validation for the v9
+  // snap_id column. See assertValidSnapId() docstring for the rationale —
+  // closes the "first-class structured handle" contract that AI-P1-15 left
+  // half-measured (scanner-side validSnapIdOrNull() only, no writer guard).
+  assertValidSnapId(input.snapId);
   const decisionId = `pdec_${ulid()}`;
   // AI-P1-15 (v9): also write snap_id as a first-class column. The rationale
   // prefix is kept for backward-compat with v8- consumers; the column is the
