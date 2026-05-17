@@ -1,11 +1,80 @@
 # Runtime Flow
 
-> Last verified against code: n/a (no implementation yet — 2026-05-11)
+> Last verified against code: 2e61825 (2026-05-17) — Cycle 8 / OPS-1B.h3-r2-orphan-axis-repairability code commit. Thin-doc edits since: 891ef81 → this commit (2026-05-17). Prior baseline = scanner runtime behavior section never landed (PR #50 / #54 / #57 introduced scanner + axes without RUNTIME.md update — historical gap, Codex PR #63 P1 review backfills here). Pre-Cycle-8 scanner doc anchor was distributed across `src/ops/r2-invariant-scanner.ts` top docstring + slice 표 entries; thin-doc consumers had no single landing page.
 
 ## Current implemented flow
 
-코드 구현이 아직 없다. 이 문서는 INFRA-1B 단계 첫 worker가 landed될 때부터
-실제 flow로 갱신된다.
+대부분의 P0-M2 pipeline (Discovery / Snapshot / Chunker / Access Intervention)
+는 landed 상태로 INFRA-1B.* slice 들의 합으로 실제 코드가 동작한다. 본 thin
+doc 의 핵심 runtime contract 정리:
+
+### R2 invariant scanner (post-Cycle 8, 6 violation axes)
+
+`bun run audit:r2-invariants` (또는 `--json`) 가 read-only 로 3 store (Neo4j
+`Snapshot.r2_key` ↔ SQLite `policy_decisions` ↔ SQLite `source_material_policy`)
+를 reconcile 한다. 본 scanner 는 AC-032 / NFR-008 의 audit-by-absence
+cross-check evidence — write path (snapshot-fingerprint r2Put 전후 audit
+INSERT) 가 강제하는 invariant 가 retroactive policy change / Neo4j SET 실패 /
+TOCTOU 등의 edge case 에서도 유지됨을 read time 에 검증한다.
+
+| Axis | 발화 조건 | 운영자 remediation |
+|---|---|---|
+| `r2_key_without_audit` | `Snapshot.r2_key IS NOT NULL` + 대응하는 `policy_decisions(intended_action='r2_upload', decision='uploaded')` row 부재 | pre-v7 historical snapshot (informational); post-v7 라면 audit hook regression — `recordR2UploadDecision()` 호출 site 점검 |
+| `audit_uploaded_without_r2_key` | `decision='uploaded'` audit row 존재 + Snapshot `r2_key=NULL` (또는 Snapshot 부재) | `decision='uploaded'` 는 r2Put + Neo4j SET 모두 성공 의미 (ternary lock). 대부분 Snapshot DETACH DELETE 가 r2 정리 없이 진행된 운영 ops — manual r2 cleanup |
+| `r2_key_with_restricted_source` | `Snapshot.r2_key IS NOT NULL` + linked Source 중 `archive_policy != 'full_snapshot_allowed'` 또는 `raw_cloud_policy != 'allowed_public_data_only'` | 운영자가 upload 후 `source_material_policy` tightening — repair-CLI 로 r2 object 제거 (별도 slice) 또는 source policy rollback |
+| `r2_object_without_graph_key_set_failed` (Axis 4) | `decision='set_r2_key_failed_neo4j'` audit row — r2Put 성공 + Neo4j SET 실패 | violation `details.expectedR2Key` (= `permitted_artifact/derived/snapshot/${snapId}`) 사용. **Recovery**: rerun SET (dedup 보존). **Cleanup**: r2 object 제거. 모두 repair-CLI scope |
+| `r2_object_without_graph_key_policy_recheck_skipped` (Axis 4b) | `decision='skipped_toctou'` audit row — r2Put 성공 + post-recheck 가 restricted source 검출 후 SET skip | **Do NOT blindly rerun SET** (recheck 결정 재위반). r2 object cleanup 또는 source policy rollback (recheck rejection 이 의도치 않았다면). `expectedR2Key` 사용 |
+| `malformed_r2_upload_audit_row` | r2_upload outcome row 의 rationale 이 `snap_id=snap_...;` canonical prefix 미충족 + v9 `snap_id` column 도 NULL/garbage | `recordR2UploadDecision` format regression 점검 → row 수정 또는 parser 갱신. v9 column 도입 (AI-P1-15) 이후 신규 row 는 column 우선이므로 발화 시 audit ledger 의 manual write 가능성 점검 |
+
+scanner 는 `aligned=true / false` boolean + violation array + ScanCounts
+6 field (`r2BackedSnapshots`, `uploadedAuditRows`, `setR2KeyFailedNeo4jAuditRows`,
+`skippedToctouAuditRows`, `malformedR2UploadAuditRows`, `sourcePolicyRows`)
+를 반환한다. CLI 는 violation 0 이면 exit 0, 1 이상이면 exit 1 (operator
+alert hook).
+
+### r2_upload audit lifecycle (post-AI-P1-7 v8 + AI-P1-15 v9)
+
+`src/discovery/worker/snapshot-fingerprint.ts` 의 r2Put 2 call site (dedup
+back-fill + new path) 가 audit row 를 BEFORE/AFTER pair 로 INSERT:
+
+- **BEFORE r2Put**: `decision='attempted'` + `upload_attempt_id='uatt_<ULID>'`
+  + `snap_id='snap_<ULID>'` (v9 column + rationale prefix dual-write).
+  network 실패 시에도 audit trail 보존.
+- **AFTER r2Put 성공**:
+  - Neo4j `SET s.r2_key` 성공 → `decision='uploaded'`
+  - Neo4j SET 실패 → `decision='set_r2_key_failed_neo4j'` (Axis 4 발화 대상)
+  - post-r2-put recheck 가 restricted linked source 검출 → `decision='skipped_toctou'`
+    (Axis 4b 발화 대상)
+
+각 outcome 은 mutually exclusive 로 같은 `upload_attempt_id` 의 BEFORE/AFTER
+pair 1쌍만 형성. 운영자 audit query 는 `WHERE upload_attempt_id = '...'`
+로 단일 attempt 의 lifecycle 전체 추출 가능.
+
+### 운영자 CLI flow (current)
+
+```text
+[operator]
+  └→ bun run seed-sources [--dry-run] [--neo4j] [--preflight]
+       └→ SQLite source_material_policy seed
+       └→ (--neo4j) Neo4j Source MERGE bootstrap
+       └→ (--preflight) 3-way alignment 검증 → BootstrapPreflightError fail-fast
+
+[operator / cron]
+  └→ bun run discovery:run [--dry-run]
+       └→ RSS / sitemap / API → discovery_queue enqueue
+
+[operator / cron]
+  └→ bun run discovery:process-queue [--dry-run]
+       └→ queue claim → safeFetch → snapshot-fingerprint → chunker (post-AI-P1-1 archive_policy gate)
+       └→ 6 error_code 분류 + per-row mark done/error
+
+[operator]
+  └→ bun run audit:r2-invariants [--json]
+       └→ 6-axis read-only invariant scan (위 표 참조)
+       └→ exit 0 (aligned) or 1 (violations) — operator alert hook
+```
+
+## Planned flow (ADR-0003 기반 의도)
 
 ## Planned flow (ADR-0003 기반 의도)
 
