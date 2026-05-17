@@ -114,3 +114,12 @@
 - 리뷰/반영: ALL CLEAR — review/land 대상 없음
 - 리스크: 없음
 
+
+---
+
+## 사이클 5 — 사후 correction (2026-05-16)
+
+- 사유: 본 cycle 5 ALL CLEAR 는 **post-PR #58 main 상태 기준** 으로 정확했음. 본 dev-cycle 종료 후 운영자가 PR #59 (`INFRA-1B.1.h4-category-enum-validation` AC-031 planned anchor 등록) 와 PR #60 (brief log finalize) 을 별도 merge — main 의 현재 시점 source-of-truth 가 `.dev-cycle/...md` 의 ALL CLEAR 와 `current-state.md` 의 "sub-phase 미완료" 표현으로 두 갈래로 분기.
+- 정정 의미: Cycle 5 의 ALL CLEAR = "post-PR #58 시점 unblocked engineering sequence 종료" 의미였고, PR #59 이후 등록된 `INFRA-1B.1.h4-category-enum-validation` planned anchor 는 **P0-M2-hardening 의 12-slice engineering sequence 를 reopen 하지 않음** + **P0-M2 gate accept evidence 와 무관** (단 운영자가 명시적으로 AC-031 을 gate evidence 에 promote 시 변경 가능).
+- 정합 처리: AC-031 / h4 = **planned follow-up anchor, blocked/sequence-dependent on INFRA-1B.1.h2-source-profile** (categories.yaml owner). P0-M2 gate accept 의무 evidence 에서 제외. operator 가 h2 / h4 sequencing 결정 시 ready-engineering-slice 로 promote 가능.
+- 참조: post-PR #58 GPT static review 가 source-of-truth drift 식별 → 본 PR (cycle 6 doc-only state correction) 으로 표현 정정.
