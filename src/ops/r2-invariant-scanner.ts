@@ -1,10 +1,13 @@
 // Runtime R2 invariant scanner — AI-P1-6 / OPS-1B.h1-runtime-invariant-scanner.
 // Extended by AI-P1-13 / OPS-1B.h2-r2-invariant-scanner-orphan-axis.
+// Cycle 8 / OPS-1B.h3-r2-orphan-axis-repairability: skipped_toctou axis split
+// + cause-qualified naming for Axis 4 + expectedR2Key in violation details
+// for direct operator-CLI / repair-CLI consumption.
 //
 // Reconciles 3 stores against ADR-0012 INV-0012-3 + INV-0012-4 (permitted-
 // artifact gate). Read-only scan — does NOT modify Neo4j / SQLite / R2.
 //
-// The 5 axes:
+// The 6 axes:
 //
 // Axis 1: r2_key_without_audit
 //   Snapshot.r2_key IS NOT NULL but no policy_decisions row claims the upload
@@ -24,8 +27,9 @@
 //   only when setSucceeded=true) but the graph state does not reflect it.
 //   Almost certainly indicates Snapshot was DETACH DELETE'd while r2 retained
 //   the object (operator manual ops without audit-aware repair). The
-//   'set_r2_key_failed_neo4j' case is a SEPARATE state classified by Axis 4
-//   below — AI-P1-6's original Axis 2 comment incorrectly conflated the two.
+//   'set_r2_key_failed_neo4j' and 'skipped_toctou' cases are SEPARATE states
+//   classified by Axis 4 / 4b below — AI-P1-6's original Axis 2 comment
+//   incorrectly conflated all three.
 //
 // Axis 3: r2_key_with_restricted_source
 //   Snapshot.r2_key IS NOT NULL but at least one linked Source has
@@ -38,22 +42,36 @@
 //   response: r2 object removal (separate slice — not in scope for this
 //   read-only scanner) or source policy rollback.
 //
-// Axis 4: r2_object_without_graph_key (AI-P1-13)
+// Axis 4: r2_object_without_graph_key_set_failed
+//   (AI-P1-13, renamed Cycle 8 from `r2_object_without_graph_key` for
+//   cause-qualified accuracy — see Axis 4b below for the sibling state.)
 //   policy_decisions row decision='set_r2_key_failed_neo4j' — emitted by
 //   snapshot-fingerprint.ts after r2Put succeeded but the subsequent
 //   `SET s.r2_key` Cypher mutation failed (network partition mid-tx,
 //   constraint violation, etc.). The R2 object EXISTS but the graph never
-//   recorded its key, so the back-fill / dedup re-attempt logic cannot find
-//   it. AI-P1-6 (PR #50) scanner missed this entirely because
-//   fetchUploadedAuditRows() filtered to decision='uploaded' only — the most
-//   operationally critical orphan state (R2 has bytes, graph has nothing)
-//   was invisible to all 3 original axes. The 'skipped_toctou' outcome —
-//   r2Put succeeded then post-recheck found a now-restricted linked source
-//   and skipped SET — also produces an R2 object without a graph key, but
-//   AI-P1-13 narrows this axis to set_r2_key_failed_neo4j per the operator
-//   decision text; skipped_toctou is classified separately as an
-//   intentional graceful skip rather than a failed write and is left to a
-//   future axis if operators want it surfaced.
+//   recorded its key. Operator remediation: either rerun the SET with the
+//   `expectedR2Key` from the violation details (recovery, preserves dedup)
+//   or delete the R2 object (cleanup). Both paths are repair-CLI scope.
+//   The audit row's existence IS the violation evidence — Axis 4 does NOT
+//   cross-check r2SnapIds because the audit lifecycle never set r2_key for
+//   these rows; even if a later repair populates r2_key, the historical
+//   orphan window violated NFR-008 and Axis 4 keeps reporting until the
+//   audit row is acknowledged/resolved by a future repair-tracking slice.
+//
+// Axis 4b: r2_object_without_graph_key_policy_recheck_skipped
+//   (Cycle 8 / OPS-1B.h3 new axis — closes the AI-P1-13 narrow-scope gap.)
+//   policy_decisions row decision='skipped_toctou' — emitted by snapshot-
+//   fingerprint.ts after r2Put succeeded but the post-r2-put recheck found
+//   a now-restricted linked source (operator policy change mid-transaction)
+//   and intentionally skipped the SET to avoid INV-0012-3 violation. The
+//   physical state is identical to Axis 4 (R2 object exists + Snapshot
+//   r2_key NULL), but the cause is graceful policy enforcement, not a
+//   failed write. Operator remediation differs: do NOT blindly rerun SET
+//   (it would violate the post-recheck decision); the correct action is
+//   either R2 object cleanup (TTL or explicit delete via repair-CLI) or
+//   source policy rollback (if the recheck rejection was unintended). Axis
+//   4 vs 4b separation lets operators triage by intent — failed writes
+//   are recoverable, policy-rejected uploads need a decision before cleanup.
 //
 // Axis 5: malformed_r2_upload_audit_row (AI-P1-13)
 //   r2_upload outcome audit row whose `rationale` does NOT start with the
@@ -80,7 +98,8 @@ export type R2InvariantViolationType =
   | "r2_key_without_audit"
   | "audit_uploaded_without_r2_key"
   | "r2_key_with_restricted_source"
-  | "r2_object_without_graph_key"
+  | "r2_object_without_graph_key_set_failed"
+  | "r2_object_without_graph_key_policy_recheck_skipped"
   | "malformed_r2_upload_audit_row";
 
 export interface R2InvariantViolation {
@@ -97,10 +116,30 @@ export interface ScanCounts {
   uploadedAuditRows: number;
   /** policy_decisions rows with decision='set_r2_key_failed_neo4j' (snap_id parsed) — AI-P1-13 */
   setR2KeyFailedNeo4jAuditRows: number;
+  /** policy_decisions rows with decision='skipped_toctou' (snap_id parsed) — Cycle 8 / OPS-1B.h3 */
+  skippedToctouAuditRows: number;
   /** policy_decisions r2_upload outcome rows whose rationale failed to parse — AI-P1-13 */
   malformedR2UploadAuditRows: number;
   /** source_material_policy rows */
   sourcePolicyRows: number;
+}
+
+/**
+ * Deterministic r2_key shape that snapshot-fingerprint.ts uses on r2Put
+ * (see snapshot-fingerprint.ts:541 dedup back-fill + :722 new path). Mirrored
+ * here so the scanner can emit a repair-actionable `expectedR2Key` in Axis
+ * 4 / 4b violation details without forcing the operator / repair-CLI to
+ * reconstruct the prefix manually.
+ *
+ * Single source of truth lives in src/storage/r2/policy.ts PERMITTED_PREFIXES
+ * but copying the literal here keeps the scanner read-only with no cross-
+ * module write/test dependency. Any change to the prefix on the writer side
+ * MUST be mirrored here (and ideally enforced by a lint or co-test).
+ */
+const SNAPSHOT_R2_KEY_PREFIX = "permitted_artifact/derived/snapshot/";
+
+function buildExpectedR2Key(snapId: string): string {
+  return `${SNAPSHOT_R2_KEY_PREFIX}${snapId}`;
 }
 
 export interface ScanResult {
@@ -140,8 +179,18 @@ export async function fetchR2BackedSnapshots(): Promise<R2BackedSnapshot[]> {
   });
 }
 
-/** r2_upload outcome row variants AI-P1-13 surfaces to reconcile(). */
-export type R2UploadOutcomeDecision = "uploaded" | "set_r2_key_failed_neo4j";
+/**
+ * r2_upload outcome row variants reconcile() routes to specific axes.
+ *
+ * - `uploaded`: full success (Axis 1/2 territory)
+ * - `set_r2_key_failed_neo4j`: r2Put succeeded, SET r2_key failed (Axis 4)
+ * - `skipped_toctou`: r2Put succeeded, post-recheck rejected SET (Axis 4b,
+ *   Cycle 8 — split from Axis 4 for cause-qualified semantics)
+ */
+export type R2UploadOutcomeDecision =
+  | "uploaded"
+  | "set_r2_key_failed_neo4j"
+  | "skipped_toctou";
 
 export interface R2UploadOutcomeAuditRow {
   /**
@@ -223,7 +272,7 @@ export function fetchR2UploadOutcomeAuditRows(): R2UploadOutcomeAuditRow[] {
       `SELECT rationale, upload_attempt_id, decision_id, decision, snap_id
        FROM policy_decisions
        WHERE intended_action = 'r2_upload'
-         AND decision IN ('uploaded', 'set_r2_key_failed_neo4j')`
+         AND decision IN ('uploaded', 'set_r2_key_failed_neo4j', 'skipped_toctou')`
     )
     .all();
   return rows.map((r) => ({
@@ -375,22 +424,40 @@ export function reconcile(input: ReconcileInput): R2InvariantViolation[] {
     }
   }
 
-  // Axis 4 (AI-P1-13): r2_object_without_graph_key — every well-formed
-  // 'set_r2_key_failed_neo4j' audit row indicates a confirmed orphan R2
-  // object (r2Put succeeded, SET r2_key failed). The audit row's existence
-  // IS the violation evidence — there is no extra cross-check against
-  // r2SnapIds because, by construction of the audit lifecycle, Snapshot
-  // r2_key was never set for these rows (and even if a later repair set
-  // it, the orphan period still violated NFR-008 and should be reported
-  // until the audit row is repaired or marked resolved by a future slice).
+  // Axis 4 (AI-P1-13, renamed Cycle 8): r2_object_without_graph_key_set_failed.
+  // Every well-formed 'set_r2_key_failed_neo4j' audit row indicates a
+  // confirmed orphan R2 object (r2Put succeeded, SET r2_key failed). Audit
+  // row's existence IS the evidence. Cycle 8 adds `expectedR2Key` to details
+  // so repair-CLI / operator can recover or cleanup without manually
+  // reconstructing the key from snap_id.
   for (const audit of input.r2UploadOutcomeAuditRows) {
     if (audit.decision !== "set_r2_key_failed_neo4j" || audit.snapId === null) continue;
     violations.push({
-      type: "r2_object_without_graph_key",
+      type: "r2_object_without_graph_key_set_failed",
       snapId: audit.snapId,
       details: {
         uploadAttemptId: audit.uploadAttemptId,
         auditDecisionId: audit.decisionId,
+        expectedR2Key: buildExpectedR2Key(audit.snapId),
+      },
+    });
+  }
+
+  // Axis 4b (Cycle 8 / OPS-1B.h3): r2_object_without_graph_key_policy_recheck_skipped.
+  // 'skipped_toctou' audit row — r2Put succeeded, post-recheck rejected SET
+  // due to a now-restricted linked source. Same physical state as Axis 4
+  // (R2 object exists + graph r2_key NULL) but different remediation: do
+  // NOT blindly rerun SET (it would re-violate the recheck decision). The
+  // correct action is R2 object cleanup or source policy rollback.
+  for (const audit of input.r2UploadOutcomeAuditRows) {
+    if (audit.decision !== "skipped_toctou" || audit.snapId === null) continue;
+    violations.push({
+      type: "r2_object_without_graph_key_policy_recheck_skipped",
+      snapId: audit.snapId,
+      details: {
+        uploadAttemptId: audit.uploadAttemptId,
+        auditDecisionId: audit.decisionId,
+        expectedR2Key: buildExpectedR2Key(audit.snapId),
       },
     });
   }
@@ -441,6 +508,9 @@ export async function scanR2Invariants(): Promise<ScanResult> {
   const failedNeo4jCount = r2UploadOutcomeAuditRows.filter(
     (r) => r.decision === "set_r2_key_failed_neo4j" && r.snapId !== null
   ).length;
+  const skippedToctouCount = r2UploadOutcomeAuditRows.filter(
+    (r) => r.decision === "skipped_toctou" && r.snapId !== null
+  ).length;
   const malformedCount = r2UploadOutcomeAuditRows.filter((r) => r.snapId === null).length;
 
   return {
@@ -448,6 +518,7 @@ export async function scanR2Invariants(): Promise<ScanResult> {
       r2BackedSnapshots: r2BackedSnapshots.length,
       uploadedAuditRows: uploadedCount,
       setR2KeyFailedNeo4jAuditRows: failedNeo4jCount,
+      skippedToctouAuditRows: skippedToctouCount,
       malformedR2UploadAuditRows: malformedCount,
       sourcePolicyRows: sourcePolicies.length,
     },

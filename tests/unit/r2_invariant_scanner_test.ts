@@ -448,6 +448,7 @@ describe("scanR2Invariants — orchestrator", () => {
       r2BackedSnapshots: 1,
       uploadedAuditRows: 1,
       setR2KeyFailedNeo4jAuditRows: 0,
+      skippedToctouAuditRows: 0,
       malformedR2UploadAuditRows: 0,
       sourcePolicyRows: 1,
     });
@@ -487,19 +488,20 @@ describe("scanR2Invariants — orchestrator", () => {
 //     filters to well-formed decision='uploaded' rows (pre-AI-P1-13 semantic).
 // ---------------------------------------------------------------------------
 
-describe("fetchR2UploadOutcomeAuditRows — SQLite query layer (AI-P1-13)", () => {
-  it("returns rows with decision='uploaded' AND decision='set_r2_key_failed_neo4j' (broadened from pre-AI-P1-13)", () => {
+describe("fetchR2UploadOutcomeAuditRows — SQLite query layer (AI-P1-13 + Cycle 8 skipped_toctou expansion)", () => {
+  it("returns rows with decision IN ('uploaded', 'set_r2_key_failed_neo4j', 'skipped_toctou') — Cycle 8 broadens AI-P1-13 fetch to cover Axis 4b", () => {
     insertAuditRow("pdec_up", "snap_U", "uploaded");
     insertAuditRow("pdec_fail", "snap_F", "set_r2_key_failed_neo4j");
-    insertAuditRow("pdec_att", "snap_A", "attempted"); // wrong decision — excluded
-    insertAuditRow("pdec_toc", "snap_T", "skipped_toctou"); // wrong decision — excluded (see scanner comment)
-    insertAuditRow("pdec_other", "snap_O", "uploaded", "uatt_x", null); // wrong intended_action — excluded
+    insertAuditRow("pdec_toc", "snap_T", "skipped_toctou"); // Cycle 8 — now included (Axis 4b)
+    insertAuditRow("pdec_att", "snap_A", "attempted"); // wrong decision — still excluded (BEFORE row, not outcome)
+    insertAuditRow("pdec_other", "snap_O", "uploaded", "uatt_x", null); // wrong intended_action — still excluded
 
     const rows = fetchR2UploadOutcomeAuditRows();
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     const decisionsByDecisionId = new Map(rows.map((r) => [r.decisionId, r.decision]));
     expect(decisionsByDecisionId.get("pdec_up")).toBe("uploaded");
     expect(decisionsByDecisionId.get("pdec_fail")).toBe("set_r2_key_failed_neo4j");
+    expect(decisionsByDecisionId.get("pdec_toc")).toBe("skipped_toctou");
   });
 
   it("returns malformed rows with snapId=null (AI-P1-13 — NOT silently dropped)", () => {
@@ -558,8 +560,8 @@ describe("fetchR2UploadOutcomeAuditRows — SQLite query layer (AI-P1-13)", () =
   });
 });
 
-describe("reconcile — Axis 4: r2_object_without_graph_key (AI-P1-13)", () => {
-  it("flags set_r2_key_failed_neo4j audit row as R2 object orphan", () => {
+describe("reconcile — Axis 4: r2_object_without_graph_key_set_failed (AI-P1-13, renamed Cycle 8)", () => {
+  it("flags set_r2_key_failed_neo4j audit row as R2 object orphan + emits expectedR2Key for repair", () => {
     const snapshots: R2BackedSnapshot[] = []; // R2 had bytes but graph never set r2_key
     const audits: R2UploadOutcomeAuditRow[] = [
       {
@@ -580,11 +582,15 @@ describe("reconcile — Axis 4: r2_object_without_graph_key (AI-P1-13)", () => {
 
     expect(violations).toHaveLength(1);
     expect(violations[0]).toMatchObject({
-      type: "r2_object_without_graph_key",
+      type: "r2_object_without_graph_key_set_failed",
       snapId: "snap_ORPHAN_R2_OBJECT",
     });
     expect(violations[0]!.details.uploadAttemptId).toBe("uatt_orphan");
     expect(violations[0]!.details.auditDecisionId).toBe("pdec_failed_set");
+    // Cycle 8: expectedR2Key for direct operator-CLI / repair-CLI consumption.
+    expect(violations[0]!.details.expectedR2Key).toBe(
+      "permitted_artifact/derived/snapshot/snap_ORPHAN_R2_OBJECT"
+    );
   });
 
   it("set_r2_key_failed_neo4j fires Axis 4 even when Snapshot.r2_key was later somehow set (defensive)", () => {
@@ -617,7 +623,10 @@ describe("reconcile — Axis 4: r2_object_without_graph_key (AI-P1-13)", () => {
     // Axis 4 fires. Axis 1 also fires (no uploaded row for snap_RECOVERED).
     // Axis 2/3 do not.
     const types = violations.map((v) => v.type).sort();
-    expect(types).toEqual(["r2_key_without_audit", "r2_object_without_graph_key"]);
+    expect(types).toEqual([
+      "r2_key_without_audit",
+      "r2_object_without_graph_key_set_failed",
+    ]);
   });
 
   it("does NOT flag uploaded rows (Axis 2 handles those)", () => {
@@ -640,6 +649,104 @@ describe("reconcile — Axis 4: r2_object_without_graph_key (AI-P1-13)", () => {
 
     // Axis 2 fires; Axis 4 silent (different decision type).
     expect(violations.map((v) => v.type)).toEqual(["audit_uploaded_without_r2_key"]);
+  });
+
+  it("does NOT flag skipped_toctou rows (Axis 4b handles those — Cycle 8 split)", () => {
+    const snapshots: R2BackedSnapshot[] = [];
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_SKIPPED",
+        uploadAttemptId: "uatt_s",
+        rationale: "snap_id=snap_SKIPPED; ...",
+        decisionId: "pdec_s",
+        decision: "skipped_toctou",
+      },
+    ];
+    const violations = reconcile({
+      r2BackedSnapshots: snapshots,
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+    const types = violations.map((v) => v.type);
+    expect(types).not.toContain("r2_object_without_graph_key_set_failed");
+    expect(types).toContain("r2_object_without_graph_key_policy_recheck_skipped");
+  });
+});
+
+describe("reconcile — Axis 4b: r2_object_without_graph_key_policy_recheck_skipped (Cycle 8 / OPS-1B.h3 new axis)", () => {
+  // skipped_toctou physical state = R2 object exists + graph r2_key NULL.
+  // Same orphan shape as Axis 4 but different cause (policy recheck rejection
+  // vs failed write). Cycle 8 surfaces it as a distinct axis so operator
+  // remediation can diverge — do NOT blindly rerun SET (would re-violate the
+  // post-recheck decision); cleanup or source policy rollback required.
+
+  it("flags skipped_toctou audit row + emits expectedR2Key for cleanup", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_TOCTOU_ORPHAN",
+        uploadAttemptId: "uatt_toctou",
+        rationale: "snap_id=snap_TOCTOU_ORPHAN; ...",
+        decisionId: "pdec_toctou",
+        decision: "skipped_toctou",
+      },
+    ];
+
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({
+      type: "r2_object_without_graph_key_policy_recheck_skipped",
+      snapId: "snap_TOCTOU_ORPHAN",
+    });
+    expect(violations[0]!.details.expectedR2Key).toBe(
+      "permitted_artifact/derived/snapshot/snap_TOCTOU_ORPHAN"
+    );
+    expect(violations[0]!.details.uploadAttemptId).toBe("uatt_toctou");
+    expect(violations[0]!.details.auditDecisionId).toBe("pdec_toctou");
+  });
+
+  it("does NOT flag set_r2_key_failed_neo4j rows (Axis 4 handles those)", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: "snap_FAILED",
+        uploadAttemptId: "uatt_f",
+        rationale: "snap_id=snap_FAILED; ...",
+        decisionId: "pdec_f",
+        decision: "set_r2_key_failed_neo4j",
+      },
+    ];
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+    const types = violations.map((v) => v.type);
+    expect(types).not.toContain("r2_object_without_graph_key_policy_recheck_skipped");
+    expect(types).toContain("r2_object_without_graph_key_set_failed");
+  });
+
+  it("malformed skipped_toctou rationale → Axis 5 only (not Axis 4b — snap_id null)", () => {
+    const audits: R2UploadOutcomeAuditRow[] = [
+      {
+        snapId: null,
+        uploadAttemptId: "uatt_bad_toc",
+        rationale: "garbage_rationale_no_snap",
+        decisionId: "pdec_bad_toc",
+        decision: "skipped_toctou",
+      },
+    ];
+    const violations = reconcile({
+      r2BackedSnapshots: [],
+      r2UploadOutcomeAuditRows: audits,
+      sourcePolicies: [],
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.type).toBe("malformed_r2_upload_audit_row");
+    expect(violations[0]!.details.decision).toBe("skipped_toctou");
   });
 });
 
@@ -717,11 +824,12 @@ describe("reconcile — Axis 5: malformed_r2_upload_audit_row (AI-P1-13)", () =>
   });
 });
 
-describe("scanR2Invariants — orchestrator with Axis 4 + 5 (AI-P1-13)", () => {
-  it("counts.setR2KeyFailedNeo4jAuditRows + counts.malformedR2UploadAuditRows populate correctly", async () => {
+describe("scanR2Invariants — orchestrator with Axis 4 / 4b / 5 (AI-P1-13 + Cycle 8)", () => {
+  it("counts include skippedToctouAuditRows + violations include both orphan axes", async () => {
     neo4jR2BackedRows = [];
     insertAuditRow("pdec_up", "snap_U", "uploaded", "uatt_up");
     insertAuditRow("pdec_fail", "snap_F", "set_r2_key_failed_neo4j", "uatt_fail");
+    insertAuditRow("pdec_toc", "snap_T", "skipped_toctou", "uatt_toc");
     // malformed: bypass helper
     getDb()
       .prepare(
@@ -737,14 +845,17 @@ describe("scanR2Invariants — orchestrator with Axis 4 + 5 (AI-P1-13)", () => {
 
     expect(result.counts.uploadedAuditRows).toBe(1); // well-formed uploaded only
     expect(result.counts.setR2KeyFailedNeo4jAuditRows).toBe(1);
+    expect(result.counts.skippedToctouAuditRows).toBe(1);
     expect(result.counts.malformedR2UploadAuditRows).toBe(1);
 
-    // 3 violations: Axis 2 (uploaded ghost), Axis 4 (failed orphan), Axis 5 (malformed)
+    // 4 violations: Axis 2 (uploaded ghost), Axis 4 (failed orphan),
+    // Axis 4b (skipped_toctou orphan), Axis 5 (malformed)
     const types = result.violations.map((v) => v.type).sort();
     expect(types).toEqual([
       "audit_uploaded_without_r2_key",
       "malformed_r2_upload_audit_row",
-      "r2_object_without_graph_key",
+      "r2_object_without_graph_key_policy_recheck_skipped",
+      "r2_object_without_graph_key_set_failed",
     ]);
     expect(result.aligned).toBe(false);
   });
