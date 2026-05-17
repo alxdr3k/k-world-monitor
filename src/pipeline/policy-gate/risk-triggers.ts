@@ -138,7 +138,17 @@ function isWireService(sourceName: string | undefined): boolean {
 
 /**
  * Trigger 1: source policy unknown OR external_llm_policy != 'allowed' AND
- * intended action sends raw text to external LLM.
+ * intended action sends payload (raw text OR excerpt) to external LLM.
+ *
+ * Covers both `external_llm_call_with_raw_text` and
+ * `external_llm_call_with_excerpt` (Codex PR #68 round 3 P1 finding):
+ * ADR-0017 INV-0017-1 의 `external_llm_policy` 는 raw / excerpt 구분 없이
+ * "외부 LLM 송신 허용 여부" 전체를 covering 하는 단일 enum. detector 가
+ * raw text 만 검사하면 excerpt 송신이 manual_review_required / prohibited
+ * / unknown 정책 source 에서 stage-default mode (batch_report → allow)
+ * 로 통과 → 정책 우회. detector 이름의 "RawText" 표현은 historical
+ * (PR #67 D1a 결정 lock 시점에 raw text 만 명시) 이지만 contract 는 두
+ * action 모두 enforce.
  *
  * "source policy unknown" 의 fail-closed 해석 (Codex PR #68 round 2 P2
  * finding): `sourceId === null` (unregistered source — no
@@ -157,17 +167,21 @@ function isWireService(sourceName: string | undefined): boolean {
 function detectExternalLlmRawTextUnauthorized(
   ctx: RiskTriggerContext
 ): DetectedRisk | null {
-  if (ctx.intendedAction !== "external_llm_call_with_raw_text") return null;
+  const llmActions: PipelineAction[] = [
+    "external_llm_call_with_raw_text",
+    "external_llm_call_with_excerpt",
+  ];
+  if (!llmActions.includes(ctx.intendedAction)) return null;
   if (ctx.sourceId === null) {
     return {
       trigger: "external_llm_raw_text_unauthorized",
-      rationale: `source unregistered (sourceId=null) — fail-closed block for raw-text LLM call regardless of externalLlmPolicy=${ctx.externalLlmPolicy}`,
+      rationale: `source unregistered (sourceId=null) — fail-closed block for ${ctx.intendedAction} regardless of externalLlmPolicy=${ctx.externalLlmPolicy}`,
     };
   }
   if (ctx.externalLlmPolicy === "allowed") return null;
   return {
     trigger: "external_llm_raw_text_unauthorized",
-    rationale: `external_llm_policy=${ctx.externalLlmPolicy} (must be 'allowed' for raw-text LLM call)`,
+    rationale: `external_llm_policy=${ctx.externalLlmPolicy} (must be 'allowed' for ${ctx.intendedAction})`,
   };
 }
 
@@ -250,16 +264,38 @@ function detectTermsViolation(ctx: RiskTriggerContext): DetectedRisk | null {
  * (INFRA-1B.1.h2-source-profile, AI-P1-4).
  *
  * Trigger fires for full-text-class actions only.
+ *
+ * Codex PR #68 round 3 P2 finding (sourceName missing fail-closed):
+ * caller 가 등록된 source 의 sourceName 을 populate 안 한 경우
+ * (`sourceName` 이 undefined / empty), 본 detector 는 wire-service 분류
+ * 가능 여부를 판단할 수 없음. fail-closed 채택 — sourceId 가 있는데
+ * sourceName 누락이면 trigger 4 fire (over-block). 운영자는 source
+ * registry 의 sourceName field 가 항상 populated 되도록 강제 (registry
+ * seed + caller path 모두). sourceId=null + sourceName 누락은 detector
+ * 1 의 unregistered fail-closed 가 cover하므로 본 detector 는 sourceId
+ * 가 있는 경우만 conservative block 으로 처리.
  */
 function detectWireServiceFullText(
   ctx: RiskTriggerContext
 ): DetectedRisk | null {
   const fullTextActions: PipelineAction[] = ["extract_full_text", "chunk_create"];
   if (!fullTextActions.includes(ctx.intendedAction)) return null;
+  // sourceName 누락 fail-closed (PR #68 round 3 P2). sourceId=null 경로는
+  // detector 1 의 unregistered fail-closed 가 covering 하므로 본 detector
+  // 의 sourceName-missing branch 는 sourceId 가 있을 때만 fire.
+  const sourceNameMissing =
+    ctx.sourceName === undefined || ctx.sourceName.trim().length === 0;
+  if (sourceNameMissing) {
+    if (ctx.sourceId === null) return null;
+    return {
+      trigger: "wire_service_full_text",
+      rationale: `source_name missing for registered source (sourceId=${ctx.sourceId}) + intended_action=${ctx.intendedAction} — fail-closed wire-service suspect (caller must populate sourceName for full-text-class actions)`,
+    };
+  }
   if (!isWireService(ctx.sourceName)) return null;
   return {
     trigger: "wire_service_full_text",
-    rationale: `source_name=${ctx.sourceName ?? "<empty>"} matches wire-service allowlist (v0 hardcoded) + intended_action=${ctx.intendedAction}`,
+    rationale: `source_name=${ctx.sourceName} matches wire-service allowlist (v0 hardcoded) + intended_action=${ctx.intendedAction}`,
   };
 }
 

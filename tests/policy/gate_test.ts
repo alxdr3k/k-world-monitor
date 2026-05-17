@@ -197,6 +197,43 @@ describe("detectRisks (ADR-0017 INV-0017-4 List A — 8 risk triggers)", () => {
     expect(risks[0]?.rationale).toContain("source unregistered");
   });
 
+  it("trigger 1: fires on external_llm_call_with_excerpt + non-allowed policy (Codex PR #68 round 3 P1)", () => {
+    for (const policy of ["manual_review_required", "prohibited", "unknown"] as const) {
+      const ctx: RiskTriggerContext = {
+        ...permissiveCtx(),
+        intendedAction: "external_llm_call_with_excerpt",
+        externalLlmPolicy: policy,
+      };
+      const risks = detectRisks(ctx);
+      expect(risks.map((r) => r.trigger)).toContain(
+        "external_llm_raw_text_unauthorized"
+      );
+    }
+  });
+
+  it("trigger 1: does NOT fire on external_llm_call_with_excerpt when externalLlmPolicy='allowed' + sourceId registered", () => {
+    const ctx: RiskTriggerContext = {
+      ...permissiveCtx(),
+      intendedAction: "external_llm_call_with_excerpt",
+      externalLlmPolicy: "allowed",
+    };
+    expect(detectRisks(ctx)).toEqual([]);
+  });
+
+  it("trigger 1: fires on external_llm_call_with_excerpt + sourceId=null (fail-closed unregistered)", () => {
+    const ctx: RiskTriggerContext = {
+      ...permissiveCtx(),
+      sourceId: null,
+      intendedAction: "external_llm_call_with_excerpt",
+      externalLlmPolicy: "allowed",
+    };
+    const risks = detectRisks(ctx);
+    expect(risks.map((r) => r.trigger)).toContain(
+      "external_llm_raw_text_unauthorized"
+    );
+    expect(risks[0]?.rationale).toContain("source unregistered");
+  });
+
   it("trigger 2 (paywalled_source_fetch): fires on extract_full_text with archive_policy=metadata_only", () => {
     const ctx: RiskTriggerContext = {
       ...permissiveCtx(),
@@ -360,6 +397,49 @@ describe("detectRisks (ADR-0017 INV-0017-4 List A — 8 risk triggers)", () => {
       intendedAction: "discovery_fetch",
       sourceName: "Reuters",
     };
+    expect(detectRisks(ctx).map((r) => r.trigger)).not.toContain(
+      "wire_service_full_text"
+    );
+  });
+
+  it("trigger 4: fires on registered source (sourceId !== null) with sourceName missing — fail-closed (Codex PR #68 round 3 P2)", () => {
+    const ctx: RiskTriggerContext = {
+      ...permissiveCtx(),
+      sourceId: "src_registered_but_no_name",
+      intendedAction: "extract_full_text",
+      sourceName: undefined,
+    };
+    const risks = detectRisks(ctx);
+    expect(risks.map((r) => r.trigger)).toContain("wire_service_full_text");
+    expect(risks.find((r) => r.trigger === "wire_service_full_text")?.rationale)
+      .toContain("source_name missing");
+  });
+
+  it("trigger 4: fires on registered source with empty sourceName string (trim-aware fail-closed)", () => {
+    const ctx: RiskTriggerContext = {
+      ...permissiveCtx(),
+      sourceId: "src_registered_empty_name",
+      intendedAction: "chunk_create",
+      sourceName: "   ",
+    };
+    expect(detectRisks(ctx).map((r) => r.trigger)).toContain(
+      "wire_service_full_text"
+    );
+  });
+
+  it("trigger 4: does NOT fire when sourceId=null + sourceName missing (detector 1 unregistered fail-closed covers this path)", () => {
+    const ctx: RiskTriggerContext = {
+      ...permissiveCtx(),
+      sourceId: null,
+      intendedAction: "extract_full_text",
+      sourceName: undefined,
+    };
+    // Trigger 4 specifically should NOT fire here — the unregistered-source
+    // fail-closed responsibility lives on detector 1 (external LLM) and not
+    // on detector 4 (wire-service). extract_full_text is not an LLM action,
+    // so this path returns no triggers (acceptable v0 — fetch-stage fail-
+    // closed for unregistered sources is policy_gate caller's concern, not
+    // this detector's).
     expect(detectRisks(ctx).map((r) => r.trigger)).not.toContain(
       "wire_service_full_text"
     );
