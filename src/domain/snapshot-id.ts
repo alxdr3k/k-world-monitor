@@ -105,3 +105,20 @@ export function parseSnapIdFromRationale(
   const match = RATIONALE_SNAP_ID_PREFIX_REGEX.exec(rationale);
   return match ? match[1]! : null;
 }
+
+/**
+ * Format the canonical `snap_id=<snap_id>` rationale prefix part that
+ * recordR2UploadDecision joins into policy_decisions.rationale. The
+ * caller is responsible for joining this part with the rest of the
+ * rationale segments (canonical separator is `"; "`); this helper
+ * intentionally returns the bare field without a trailing delimiter
+ * so existing `parts.join("; ")` writer flows stay readable.
+ *
+ * Defines the writer half of the prefix that RATIONALE_SNAP_ID_PREFIX_REGEX
+ * parses on the reader side — keeping both in the same module closes the
+ * symmetric drift surface (writer changes `snap_id` field name without
+ * updating the regex, or vice versa).
+ */
+export function formatSnapIdRationalePrefix(snapId: string): string {
+  return `snap_id=${snapId}`;
+}
