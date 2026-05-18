@@ -517,6 +517,37 @@ describe("hasNamedDeclaration uses Unicode-aware boundary (round 5 P3 #3)", () =
   });
 });
 
+describe("stripCommentsAndStrings string literals are single-line (Cycle 17 hidden-bug fix)", () => {
+  it("does not eat real exports following a comment with an unpaired apostrophe", () => {
+    // Pre-fix: an unpaired `'` in a comment (e.g. possessive `Reuters'`)
+    // made the single-quote regex match span until the NEXT `'`, which
+    // could be many lines later — devouring real exports in between.
+    const code = `
+      // Reuters' wire-service alias requires special handling
+      export function realExport(): void {}
+      // 'closing apostrophe somewhere later
+    `;
+    expect(hasNamedDeclaration(code, "realExport")).toBe(true);
+  });
+
+  it("does not eat real exports following a comment with an unpaired double-quote", () => {
+    const code = `
+      // a "broken open quote
+      export const survivor = 1;
+      // " closing
+    `;
+    expect(hasNamedDeclaration(code, "survivor")).toBe(true);
+  });
+
+  it("template literals (backticks) still match multi-line content", () => {
+    // Backtick strings are template literals — multi-line is a real
+    // ECMAScript feature, so backtick body keeps `[\\s\\S]`. The test
+    // pins that behavior.
+    const code = "const t = `multi\nline\ntemplate`;\nexport const after = 1;\n";
+    expect(hasNamedDeclaration(code, "after")).toBe(true);
+  });
+});
+
 describe("stripCommentsAndStrings handles strings-before-block-comments (round 5 P2 #4)", () => {
   it("does not eat real exports between two string literals containing `/*` / `*/`", () => {
     const code = `
