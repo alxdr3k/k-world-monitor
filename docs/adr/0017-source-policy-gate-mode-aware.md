@@ -34,6 +34,8 @@ invariants:
   - id: INV-0017-2
     statement: policy_gate는 mode-aware다 — {inline_block, inline_warn, batch_report}. 단계별 default mode를 따른다 (R18)
     status: active
+    cross_ref_code:
+      - src/utils/enums.ts:POLICY_GATE_MODE
   - id: INV-0017-3
     statement: 단계별 default policy_gate_mode — Discovery/Initial fetch=inline_warn / Extract/Cache/Embed/Cloud upload=inline_block / 탐색(scenario·thesis interactive)=batch_report / 콘텐츠 제작 추가 fetch=batch_report (단 위험 행동은 inline_block) / Publication preflight=inline_block
     status: active
