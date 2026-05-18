@@ -37,6 +37,8 @@ invariants:
       멀티캐스트, 메타데이터 주소(169.254.169.254)인 경우 요청을 즉시 거부하고
       `SsrfBlockedError` 를 throw 한다. `file:`, `data:`, `ftp:` 스킴도 거부한다.
     status: active
+    cross_ref_code:
+      - src/discovery/fetch/safe-fetch.ts:safeFetch
   - id: INV-0028-3
     statement: |
       리다이렉트 체인 방어: safe-fetch 는 `redirect: "manual"` 로 직접 핸들링한다.
