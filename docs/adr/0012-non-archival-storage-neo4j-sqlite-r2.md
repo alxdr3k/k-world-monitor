@@ -29,9 +29,13 @@ invariants:
   - id: INV-0012-1
     statement: graph objects (Source, Document, Snapshot, Claim, Dossier, Scenario, Thesis, ContentDraft, Publication, Edge, ScenarioRevision, ManualClaimEntry, AccessIntervention)는 Neo4j Community Edition을 canonical store로 사용한다
     status: active
+    cross_ref_code:
+      - src/storage/neo4j/connection.ts:withSession
   - id: INV-0012-2
     statement: relational metadata (source_policy, policy_decisions, policy_learning_events, source_policy_rules, dataset_vintage, metrics_run/daily/alerts, evaluation_runs/cases, retrieval_pack_metrics, run_ledger, research_session, raw_cache_items)는 SQLite + FTS5를 canonical store로 사용한다
     status: active
+    cross_ref_code:
+      - src/storage/sqlite/connection.ts:getDb
   - id: INV-0012-3
     statement: Snapshot은 fingerprint record(URL, accessed_at, content_hash, locator)다. R2 binary 보관은 예외로만 허용한다 — open-license dataset, 공식 허용 API 응답, 자체 산출물(차트/export)만. 일반 article/report raw text의 R2 업로드는 영구 금지 (R8/Q3, R14/Q9-4)
     status: active
@@ -56,6 +60,9 @@ invariants:
   - id: INV-0012-4
     statement: R2는 "permitted artifact store"다 (raw archive가 아님). raw_cloud_policy는 always_prohibited (default)이며 allowed_public_data_only는 source_material_policy 명시 후에만 적용 가능
     status: active
+    cross_ref_code:
+      - src/storage/r2/policy.ts:checkPermittedPrefix
+      - src/storage/source-registry/seed.ts:seedSources
   - id: INV-0012-5
     statement: Markdown vault에는 Document hub, Dossier, Scenario, Thesis, ContentDraft, Publication, scenario에 인용된 promoted claim만 둔다. candidate claim 자동 markdown 생성은 금지 (ADR-0004 INV-0004-3 보존)
     status: active
