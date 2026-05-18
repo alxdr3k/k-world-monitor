@@ -111,6 +111,11 @@
 
 import { withSession } from "../storage/neo4j/connection";
 import { getDb } from "../storage/sqlite/connection";
+import {
+  parseSnapIdFromRationale,
+  snapshotR2Key,
+  validSnapIdOrNull,
+} from "../domain/snapshot-id";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -147,22 +152,14 @@ export interface ScanCounts {
   sourcePolicyRows: number;
 }
 
-/**
- * Deterministic r2_key shape that snapshot-fingerprint.ts uses on r2Put
- * (see snapshot-fingerprint.ts:541 dedup back-fill + :722 new path). Mirrored
- * here so the scanner can emit a repair-actionable `expectedR2Key` in Axis
- * 4 / 4b violation details without forcing the operator / repair-CLI to
- * reconstruct the prefix manually.
- *
- * Single source of truth lives in src/storage/r2/policy.ts PERMITTED_PREFIXES
- * but copying the literal here keeps the scanner read-only with no cross-
- * module write/test dependency. Any change to the prefix on the writer side
- * MUST be mirrored here (and ideally enforced by a lint or co-test).
- */
-const SNAPSHOT_R2_KEY_PREFIX = "permitted_artifact/derived/snapshot/";
-
+// Snapshot R2 key construction shares src/domain/snapshot-id with
+// snapshot-fingerprint (writer) and src/storage/r2/policy
+// (permitted-prefix gate) — INFRA-1A.x-shared-snapshot-id-constants
+// removed the local literal copy that the Cycle 8 comment warned
+// "MUST be mirrored". buildExpectedR2Key kept as a thin local alias
+// so the violation-detail call sites stay readable.
 function buildExpectedR2Key(snapId: string): string {
-  return `${SNAPSHOT_R2_KEY_PREFIX}${snapId}`;
+  return snapshotR2Key(snapId);
 }
 
 export interface ScanResult {
@@ -251,50 +248,15 @@ export interface R2UploadOutcomeAuditRow {
  */
 export type UploadedAuditRow = R2UploadOutcomeAuditRow;
 
-// Cycle 10 (INFRA-1B.3.h7-gate-evidence-hardening) — delimiter-anchored
-// rationale parser. Pre-Cycle-10 regex `^snap_id=(snap_[A-Za-z0-9_-]+)`
-// allowed JS partial match — `snap_id=snap_A@bad; ...` would yield "snap_A"
-// (the `@` ends character-class match silently, but JS regex returns the
-// matched prefix anyway). That misclassified malformed rationale rows as
-// valid for Axis 5 surfacing AND fed truncated values into Axis 6 drift
-// detection (column "snap_X" vs rationale "snap_A@bad" → both compared as
-// "snap_X" vs "snap_A", which is still drift but for the wrong reason).
-//
-// recordR2UploadDecision always writes `snap_id=<id>;` + space-delimited
-// trailing fields, so the delimiter lookahead `(?=;|$)` is a strict
-// contract assertion: a well-formed snap_id ends at `;` or end-of-string,
-// nothing else. Invalid trailing chars (`@`, `.`, `/`, `=`, etc.) no
-// longer extract a truncated value — they fall through to Axis 5
-// (malformed_r2_upload_audit_row).
-const SNAP_ID_RATIONALE_PREFIX = /^snap_id=(snap_[A-Za-z0-9_-]+)(?=;|$)/;
-const SNAP_ID_SHAPE = /^snap_[A-Za-z0-9_-]+$/;
-
-/**
- * Parse the canonical `snap_id=<snap_id>; ...` prefix that
- * `recordR2UploadDecision()` formats. Returns null on malformed rationale.
- */
-export function parseSnapIdFromRationale(rationale: string | null): string | null {
-  if (!rationale) return null;
-  const match = SNAP_ID_RATIONALE_PREFIX.exec(rationale);
-  return match ? match[1]! : null;
-}
-
-/**
- * AI-P1-15 P2 (Codex PR #57): validate the v9 snap_id column value matches
- * the canonical `snap_<...>` shape before treating it as authoritative.
- *
- * Without this guard, a non-NULL but malformed value (empty string, manual
- * SQL corruption, format regression) would be silently used as the snap_id
- * and route the row into Axis 2/4 reconciliation with a garbage handle —
- * the row would no longer surface as `malformed_r2_upload_audit_row` and
- * could mis-classify under other axes. Empty/garbage values fall back to
- * rationale parsing (recoverable case); if rationale is also malformed
- * the row surfaces as Axis 5 (the defensive contract from AI-P1-13).
- */
-export function validSnapIdOrNull(value: string | null): string | null {
-  if (!value) return null;
-  return SNAP_ID_SHAPE.test(value) ? value : null;
-}
+// Cycle 10 (INFRA-1B.3.h7) introduced the `(?=;|$)` delimiter strictness
+// fix for parseSnapIdFromRationale. INFRA-1A.x-shared-snapshot-id-constants
+// moved both the regex and the parser/validator to src/domain/snapshot-id
+// so the scanner's reader-boundary shape guard, the writer-boundary guard
+// in policy-decisions.ts, and the snapshot R2 key prefix all draw from a
+// single source. Re-exported here so external importers
+// (tests/unit/r2_invariant_scanner_test.ts, src/ops/run-r2-invariants.ts)
+// continue to resolve the scanner-relative paths.
+export { parseSnapIdFromRationale, validSnapIdOrNull };
 
 /**
  * AI-P1-13: fetches BOTH 'uploaded' and 'set_r2_key_failed_neo4j' outcome

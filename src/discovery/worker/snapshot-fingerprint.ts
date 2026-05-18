@@ -11,6 +11,7 @@ import { withSession } from "../../storage/neo4j/connection";
 import { r2Put } from "../../storage/r2/client";
 import { getDb } from "../../storage/sqlite/connection";
 import { recordR2UploadDecision, newUploadAttemptId } from "../../storage/audit/policy-decisions";
+import { snapshotR2Key } from "../../domain/snapshot-id";
 import type { ContentKind } from "../fetch/safe-fetch";
 
 export type ArchivePolicy =
@@ -538,7 +539,7 @@ export async function createSnapshotFingerprint(
       input.rawCloudPolicy === "allowed_public_data_only" &&
       (await allLinkedSourcesAllowR2SnapshotUpload(existing.snapId))
     ) {
-      const key = `permitted_artifact/derived/snapshot/${existing.snapId}`;
+      const key = snapshotR2Key(existing.snapId);
       const bodyBuf = input.body.buffer.slice(
         input.body.byteOffset,
         input.body.byteOffset + input.body.byteLength
@@ -719,7 +720,7 @@ export async function createSnapshotFingerprint(
       policyOk = false;
     }
     if (policyOk) {
-      const key = `permitted_artifact/derived/snapshot/${actualSnapId}`;
+      const key = snapshotR2Key(actualSnapId);
       const bodyBuf = input.body.buffer.slice(
         input.body.byteOffset,
         input.body.byteOffset + input.body.byteLength
