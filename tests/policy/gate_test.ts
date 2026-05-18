@@ -462,19 +462,17 @@ describe("detectRisks (ADR-0017 INV-0017-4 List A — 8 risk triggers)", () => {
     );
   });
 
-  it("trigger 4: does NOT fire when sourceId=null + sourceName missing (detector 1 unregistered fail-closed covers this path)", () => {
+  it("trigger 4: does NOT fire when sourceId=null + sourceName missing (detector 4 specifically — Opus PR #66~#78 review F2 generalized the unregistered-source fail-closed to detector 3 terms_violation; detector 4 stays scoped to wire-service classification)", () => {
     const ctx: RiskTriggerContext = {
       ...permissiveCtx(),
       sourceId: null,
       intendedAction: "extract_full_text",
       sourceName: undefined,
     };
-    // Trigger 4 specifically should NOT fire here — the unregistered-source
-    // fail-closed responsibility lives on detector 1 (external LLM) and not
-    // on detector 4 (wire-service). extract_full_text is not an LLM action,
-    // so this path returns no triggers (acceptable v0 — fetch-stage fail-
-    // closed for unregistered sources is policy_gate caller's concern, not
-    // this detector's).
+    // Trigger 4 specifically should NOT fire here. Post-F2, detector 3
+    // (terms_violation) fires on sourceId=null for any collection action,
+    // so detectRisks DOES return a triggers[] — but the assertion below
+    // is scoped to trigger 4 (wire-service) absence, which remains true.
     expect(detectRisks(ctx).map((r) => r.trigger)).not.toContain(
       "wire_service_full_text"
     );
@@ -753,7 +751,7 @@ describe("evaluatePolicyGate (ADR-0017 INV-0017-3 + INV-0017-4 합산)", () => {
     ).toThrow(/invalid externalLlmPolicy/);
   });
 
-  it("evaluatePolicyGate: accepts 'unknown' sentinel for all 3 policy fields", () => {
+  it("evaluatePolicyGate: accepts 'unknown' sentinel for all 3 policy fields without throwing — but Opus PR #66~#78 review F2 makes terms_violation fire on sourceId=null collection action (was inline_warn pre-fix, now mode-invariant inline_block)", () => {
     const result = evaluatePolicyGate({
       stage: "discovery",
       ctx: {
@@ -765,7 +763,13 @@ describe("evaluatePolicyGate (ADR-0017 INV-0017-3 + INV-0017-4 합산)", () => {
         sourceName: "Unknown Source",
       },
     });
-    expect(result.gateMode).toBe("inline_warn");
+    // Pre-F2: no detector fired → stage-default discovery → inline_warn.
+    // Post-F2: detectTermsViolation fires on sourceId=null for any collection
+    // action (semantic = "unregistered source has unproven terms"), so this
+    // becomes mode-invariant inline_block per INV-0017-4.
+    expect(result.gateMode).toBe("inline_block");
+    expect(result.decision).toBe("block");
+    expect(result.triggers.map((t) => t.trigger)).toContain("terms_violation");
   });
 
   it("evaluatePolicyGate: throws when registered source has archivePolicy='unknown' (Codex PR #68 round 6 P1 — registered source unknown sentinel fail-closed)", () => {
@@ -888,6 +892,137 @@ describe("evaluatePolicyGate (ADR-0017 INV-0017-3 + INV-0017-4 합산)", () => {
     expect(result.triggers.length).toBeGreaterThanOrEqual(2);
     expect(result.rationale).toContain("terms_violation");
     expect(result.rationale).toContain("article_raw_quote_or_cache");
+  });
+
+  // -------------------------------------------------------------------------
+  // Opus PR #66~#78 review F2: unregistered source (sourceId=null)
+  // fail-closed generalization
+  // -------------------------------------------------------------------------
+
+  it("F2: throws when sourceId=null + archivePolicy is not 'unknown' sentinel (symmetric boundary throw)", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "discovery",
+        ctx: {
+          ...permissiveCtx(),
+          sourceId: null,
+          intendedAction: "discovery_fetch",
+          archivePolicy: "full_snapshot_allowed",
+          rawCloudPolicy: "unknown",
+          externalLlmPolicy: "unknown",
+        },
+      })
+    ).toThrow(
+      /unregistered source.*must have archivePolicy='unknown' sentinel/
+    );
+  });
+
+  it("F2: throws when sourceId=null + rawCloudPolicy is not 'unknown'", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "discovery",
+        ctx: {
+          ...permissiveCtx(),
+          sourceId: null,
+          intendedAction: "discovery_fetch",
+          archivePolicy: "unknown",
+          rawCloudPolicy: "allowed_public_data_only",
+          externalLlmPolicy: "unknown",
+        },
+      })
+    ).toThrow(
+      /unregistered source.*must have rawCloudPolicy='unknown' sentinel/
+    );
+  });
+
+  it("F2: throws when sourceId=null + externalLlmPolicy is not 'unknown'", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "discovery",
+        ctx: {
+          ...permissiveCtx(),
+          sourceId: null,
+          intendedAction: "discovery_fetch",
+          archivePolicy: "unknown",
+          rawCloudPolicy: "unknown",
+          externalLlmPolicy: "allowed",
+        },
+      })
+    ).toThrow(
+      /unregistered source.*must have externalLlmPolicy='unknown' sentinel/
+    );
+  });
+
+  it("F2: detectTermsViolation fires on sourceId=null + extract_full_text (pre-fix bypass surface — content_production stage default batch_report would have allowed)", () => {
+    const ctx: RiskTriggerContext = {
+      sourceId: null,
+      archivePolicy: "unknown",
+      rawCloudPolicy: "unknown",
+      externalLlmPolicy: "unknown",
+      intendedAction: "extract_full_text",
+      sourceName: "Unregistered Source",
+    };
+    const risks = detectRisks(ctx);
+    const triggers = risks.map((r) => r.trigger);
+    expect(triggers).toContain("terms_violation");
+    expect(risks.find((r) => r.trigger === "terms_violation")?.rationale).toContain(
+      "sourceId=null"
+    );
+  });
+
+  it("F2: evaluatePolicyGate blocks extract_full_text on unregistered source in content_production stage (regression for stage-default batch_report bypass)", () => {
+    const result = evaluatePolicyGate({
+      stage: "content_production",
+      ctx: {
+        sourceId: null,
+        archivePolicy: "unknown",
+        rawCloudPolicy: "unknown",
+        externalLlmPolicy: "unknown",
+        intendedAction: "extract_full_text",
+        sourceName: "Unregistered Source",
+      },
+    });
+    // Pre-fix: terms_violation detector required archive='do_not_collect', so
+    // unknown-sentinel unregistered source fell through to stage-default
+    // batch_report → decision='allow'. Post-fix: terms_violation fires on
+    // sourceId=null, so result is mode-invariant inline_block.
+    expect(result.gateMode).toBe("inline_block");
+    expect(result.decision).toBe("block");
+    expect(result.triggers.map((t) => t.trigger)).toContain("terms_violation");
+  });
+
+  it("F2: evaluatePolicyGate blocks chunk_create on unregistered source in content_production stage", () => {
+    const result = evaluatePolicyGate({
+      stage: "extract_cache_embed_cloud_upload",
+      ctx: {
+        sourceId: null,
+        archivePolicy: "unknown",
+        rawCloudPolicy: "unknown",
+        externalLlmPolicy: "unknown",
+        intendedAction: "chunk_create",
+        sourceName: "Unregistered Source",
+      },
+    });
+    expect(result.gateMode).toBe("inline_block");
+    expect(result.decision).toBe("block");
+    expect(result.triggers.map((t) => t.trigger)).toContain("terms_violation");
+  });
+
+  it("F2: evaluatePolicyGate blocks discovery_fetch on unregistered source in discovery stage (pre-fix would have warn'd via inline_warn stage default)", () => {
+    const result = evaluatePolicyGate({
+      stage: "discovery",
+      ctx: {
+        sourceId: null,
+        archivePolicy: "unknown",
+        rawCloudPolicy: "unknown",
+        externalLlmPolicy: "unknown",
+        intendedAction: "discovery_fetch",
+        sourceName: "Unregistered Source",
+      },
+    });
+    expect(result.gateMode).toBe("inline_block");
+    expect(result.decision).toBe("block");
+    expect(result.triggers.map((t) => t.trigger)).toContain("terms_violation");
   });
 });
 

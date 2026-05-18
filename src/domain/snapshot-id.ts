@@ -59,8 +59,20 @@ export const SNAPSHOT_R2_KEY_PREFIX = "permitted_artifact/derived/snapshot/";
  * Build the deterministic R2 object key for a snapshot. Used by
  * snapshot-fingerprint on r2Put and by r2-invariant-scanner when
  * emitting repair-actionable `expectedR2Key` payloads.
+ *
+ * Opus PR #66~#78 review F9: validates snap_id shape before concatenation.
+ * Pre-fix the helper was "caller obligation, no validation" — fine for the
+ * primary snapshot-fingerprint path (always freshly generated `snap_${ulid()}`)
+ * but unsafe when invoked with Neo4j-stored or scanner-resolved snap_ids
+ * that could be malformed. Validation cost is one regex test per call,
+ * negligible relative to the surrounding I/O. The throw mirrors the
+ * recordR2UploadDecision writer-boundary fail-fast that PR #62 added to
+ * the audit ledger path — same defense, applied symmetrically to the
+ * R2-key construction path so a malformed snap_id can never become an
+ * R2 object key.
  */
 export function snapshotR2Key(snapId: string): string {
+  assertValidSnapId(snapId, "snapshotR2Key");
   return `${SNAPSHOT_R2_KEY_PREFIX}${snapId}`;
 }
 
@@ -118,7 +130,17 @@ export function parseSnapIdFromRationale(
  * parses on the reader side — keeping both in the same module closes the
  * symmetric drift surface (writer changes `snap_id` field name without
  * updating the regex, or vice versa).
+ *
+ * Opus PR #66~#78 review F9: validates snap_id shape before formatting.
+ * Same rationale as snapshotR2Key — a public helper that emits canonical
+ * text into the audit ledger rationale must not silently produce a string
+ * that the reader-side `parseSnapIdFromRationale` will then reject as
+ * malformed (drift surface). recordR2UploadDecision already calls
+ * assertValidSnapId at its writer boundary (PR #62), so this internal
+ * assertion is a redundancy-by-design layer that closes the API contract
+ * gap for any future caller (e.g., bulk-import tooling, REPL).
  */
 export function formatSnapIdRationalePrefix(snapId: string): string {
+  assertValidSnapId(snapId, "formatSnapIdRationalePrefix");
   return `snap_id=${snapId}`;
 }

@@ -58,12 +58,20 @@ describe("snapshotR2Key — deterministic key builder", () => {
     );
   });
 
-  it("does not validate the snapId (caller obligation)", () => {
-    // Documents the contract — snapshot-fingerprint always passes a freshly
-    // generated `snap_${ulid()}`, so the helper avoids re-validating to keep
-    // r2Put paths zero-cost.
-    expect(snapshotR2Key("anything-goes")).toBe(
-      "permitted_artifact/derived/snapshot/anything-goes"
+  it("throws on malformed snap_id (Opus PR #66~#78 review F9)", () => {
+    // Updated contract: snapshotR2Key now self-validates via assertValidSnapId.
+    // Pre-fix the helper concatenated any input verbatim ("anything-goes"
+    // would silently become an R2 object key prefix). Now the writer-boundary
+    // assertion mirrors recordR2UploadDecision's fail-fast (PR #62) so a
+    // malformed snap_id can never escape into R2 key construction.
+    expect(() => snapshotR2Key("anything-goes")).toThrow(
+      /snapshotR2Key: invalid snap_id shape/
+    );
+    expect(() => snapshotR2Key("snap_with space")).toThrow(
+      /snapshotR2Key: invalid snap_id shape/
+    );
+    expect(() => snapshotR2Key("")).toThrow(
+      /snapshotR2Key: invalid snap_id shape/
     );
   });
 });
@@ -155,8 +163,18 @@ describe("formatSnapIdRationalePrefix — writer-side prefix builder", () => {
     expect(parseSnapIdFromRationale(formatSnapIdRationalePrefix("snap_END"))).toBe("snap_END");
   });
 
-  it("does not validate the snapId (caller obligation — assertValidSnapId is the writer-boundary guard)", () => {
-    expect(formatSnapIdRationalePrefix("anything-goes")).toBe("snap_id=anything-goes");
+  it("throws on malformed snap_id (Opus PR #66~#78 review F9)", () => {
+    // Updated contract: formatSnapIdRationalePrefix now self-validates so a
+    // future caller (bulk-import tooling, REPL, etc.) cannot emit a
+    // canonical-looking rationale prefix that parseSnapIdFromRationale would
+    // then reject as malformed (reader/writer drift surface). Mirrors the
+    // snapshotR2Key F9 hardening.
+    expect(() => formatSnapIdRationalePrefix("anything-goes")).toThrow(
+      /formatSnapIdRationalePrefix: invalid snap_id shape/
+    );
+    expect(() => formatSnapIdRationalePrefix("")).toThrow(
+      /formatSnapIdRationalePrefix: invalid snap_id shape/
+    );
   });
 });
 
