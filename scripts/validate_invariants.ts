@@ -451,22 +451,60 @@ export function extractReExportedNames(code: string): Set<string> {
  */
 export function stripCommentsAndStrings(code: string): string {
   return code
+    // Cycle 17: template literals (backtick) may span multiple lines —
+    // those keep `[\s\S]` in the escape body. Single/double-quoted strings
+    // must close on the same physical line per ECMAScript syntax, so the
+    // body excludes newlines. Pre-Cycle-17 regex matched multi-line spans
+    // when comments contained unpaired apostrophes (`Reuters'`,
+    // `let's not...`), eating massive swaths of real code.
+    //
+    // Codex PR #75 round 1 P2 (#2): the escape body MUST stay as
+    // `\\[\s\S]` (any char including newline) because JS allows
+    // backslash-escaped line continuations inside single/double-quoted
+    // strings (LineContinuation production). Restricting it to
+    // `\\[^\n]` made `\<newline>` fail to consume the newline, and the
+    // string regex would then bail mid-string — leaving real string
+    // content (like `"export const ghost"`) un-stripped and giving
+    // `hasNamedDeclaration` a false positive. Only the NON-escape body
+    // excludes `\n` (unescaped newline always closes the string).
     .replace(/`(?:\\[\s\S]|\$\{[^}]*\}|[^`\\])*`/g, "``")
-    .replace(/"(?:\\[\s\S]|[^"\\])*"/g, '""')
-    .replace(/'(?:\\[\s\S]|[^'\\])*'/g, "''")
-    // Codex PR #72 round 6 P2 (#2): line-comment strip used to run BEFORE
-    // regex-literal strip, so a valid regex like `/https?:\/\//` had its
-    // inner `//` interpreted as a line-comment opener and the rest of the
-    // line (including any real export) was deleted. Regex literals are now
-    // stripped before the line-comment pass. Block comments stay before
-    // line comments because block-comment content can be multi-line; their
-    // strip order is independent of regex literals (regex bodies can't
-    // contain unescaped block-comment terminators).
+    .replace(/"(?:\\[\s\S]|[^"\\\n])*"/g, '""')
+    .replace(/'(?:\\[\s\S]|[^'\\\n])*'/g, "''")
+    // Codex PR #72 round 6 P2 (#2): regex literal strip must run before
+    // line-comment strip so a valid regex `/https?:\/\//` isn't truncated.
+    //
+    // Cycle 17 follow-up: regex literal strip must ALSO run AFTER block
+    // comment strip — pre-Cycle-17 order was strings → regex → block →
+    // line, which let the regex heuristic eat `/` characters inside
+    // block-comment bodies (a single `/* a / b / c */` comment looked
+    // like a regex literal to the heuristic and consumed the rest of
+    // the surrounding code). Correct order: strings → BLOCK → regex →
+    // line. Block-comment content disappears first so its `/` chars
+    // can't trigger the regex literal heuristic; regex literals run
+    // before line comments so `//` inside a regex body isn't misread
+    // as a comment opener.
+    //
+    // Codex PR #75 round 1 P1 (#1) tradeoff: the inverse order (regex
+    // before block) would mis-strip block comments whose bodies contain
+    // a `/`, but the current order can in theory mis-strip a regex
+    // literal whose character class contains `/*` (e.g. `/[/*]/`).
+    // Both cases are mutually exclusive without a single-pass
+    // tokenizer. Codebase grep at Cycle 17 confirmed no
+    // `/[\.\.\.\\/\\*\.\.\.\\]/` literal exists in `src/`; the closest
+    // is `src/discovery/fetch/safe-fetch.ts:379` whose char class
+    // contains `*` but NOT the `/*` sequence. The block-before-regex
+    // order is therefore safer for THIS repo. Re-evaluate if a future
+    // module needs `/[/*]/` style escape patterns.
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(
-      /(^|[\s=(,;:!&|?+\-*%<>{}[\]^~]|\breturn\b|\btypeof\b|\bin\b|\bof\b|\bvoid\b)(\/(?:\\[\s\S]|\[[^\]]*\]|[^/\n\\])+\/[gimsuyd]*)/g,
+      // Cycle 17: confine the regex-literal body to a single physical line —
+      // the prior pattern's `[\s\S]` (escape body) and `[^\]]` (char-class
+      // body) both matched newlines, so a single innocuous regex could
+      // swallow large multi-line spans of real code if it failed to close
+      // on the same line. Single-line body avoids that catastrophic strip.
+      /(^|[\s=(,;:!&|?+\-*%<>{}[\]^~]|\breturn\b|\btypeof\b|\bin\b|\bof\b|\bvoid\b)(\/(?:\\[^\n]|\[[^\]\n]*\]|[^/\n\\])+\/[gimsuyd]*)/g,
       "$1 "
     )
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/\/\/[^\n]*/g, " ");
 }
 
