@@ -171,6 +171,30 @@ injection containment / discovery worker concurrency / research app stack)
 - Manual Feedback & Policy Learning (cross-cutting): `pipeline feedback` CLI,
   access_interventions batch report, policy_learning Pattern 1
 
+### Planned follow-up anchors (NOT gate-blocking, registered for sequencing only)
+
+- `INFRA-1A.9.h1-safe-fetch-raw-fetch-static-check` (Opus PR #66~#78
+  adversarial review F4 + GPT 합의 2026-05-18, **NOT gate-blocking,
+  P2 priority**): ADR-0028 INV-0028-1 ("Discovery worker 의 모든
+  outbound HTTP 요청은 safe-fetch 를 통해야 한다") 의 enforcement 를
+  static check 로 검증하는 validator 확장. 현재 INV-0028-1 cross_ref_code
+  는 `safeFetch` export entry point 만 가리키고 있어 raw `fetch(` 부재를
+  증명하지 못함 (reachability heuristic 수준 — DEC-020 Q-045 semantic
+  scope 참고). 새 validator check 의 scope: `src/discovery/**` +
+  `src/extraction/**` 에서 raw `fetch(` token 검출 (allowlist =
+  `src/discovery/fetch/safe-fetch.ts` 내부 + test fixture). false-positive
+  처리 — `obj.fetch(` / `db.fetch(` 같은 method call 은 제외 (regex
+  word-boundary). 별도 PR + 별도 review surface — 본 PR 의 evaluator
+  변경과 독립적인 invariant validator 확장.
+- `INFRA-1A.9.h2-cross-ref-semantic-level` (Opus PR #66~#78 adversarial
+  review F3 + GPT 합의 2026-05-18, **NOT gate-blocking, P3 priority,
+  defer 가능**): DEC-020 Q-045 semantic scope 명시 (cross_ref_code = reachability
+  heuristic) 위에서 stronger semantic level 도입 — `callsite_exists` /
+  `forbidden_call_absence` / `test_fixture_proved` 등 (cross_ref_code entry
+  의 semantic_level 필드 추가). 현재 단계에서는 DEC-020 wording correction
+  으로 reachability heuristic semantic 만 명시 (별도 semantic level 도입
+  은 안 함). 본 anchor 는 sequencing 만 register.
+
 ## Explicit non-goals
 
 - 실시간 뉴스 피드 / 대시보드
@@ -300,6 +324,7 @@ injection containment / discovery worker concurrency / research app stack)
   - **F5 — PR #76 metadata defect 기록 (doc, ADR-0017 drift history)**: PR #76 title/body 가 "INV-0017-5 cross_ref_code backfill" 이라고 명시했으나 actual merged patch 는 `docs/current/TESTING.md` 단일 변경 + backfill 시도 revert 였음. revert 자체는 valid (writer-only function 에 cross_ref_code 를 두면 false enforcement proof). metadata defect 만 known issue 로 명시 — future audit 이 PR-list 만 보고 INV-0017-5 enforcement closure 로 오해하는 risk 차단.
   - **F9 — snapshot-id helper validation hardening (code, src/domain/snapshot-id.ts)**: `snapshotR2Key()` + `formatSnapIdRationalePrefix()` 에 내부 `assertValidSnapId()` 호출 추가. pre-fix "caller obligation" 계약은 snapshot-fingerprint primary path (freshly generated `snap_${ulid()}`) 에는 안전했으나 Neo4j-stored / scanner-resolved snap_id 를 인자로 받는 r2-invariant-scanner / dedup-link path 에는 unsafe surface. recordR2UploadDecision PR #62 writer-boundary fail-fast 와 symmetric. tests/unit/snapshot_id_test.ts 의 "caller obligation" anything-goes 테스트 2건을 throw expectation 으로 update.
   - **Deferred (review finding 이나 본 세션 scope 밖)**: F1 full (production caller wiring — EXTR-1A.* roadmap scope), F3 (cross_ref_code semantic level — validator 확장), F4 (raw fetch ban static check — 별도 PR), F7 (multi-trigger junction table — schema migration v10+), F10 (wire-service source_role first-class field — INFRA-1B.1.h2-source-profile anchor 존재), F11 (TESTING.md header 축소 — subjective scope).
+  - **GPT 의견 후속 반영 (2026-05-18 same-session followup)**: GPT 가 "기각이 아니라 severity/wording 조정" 으로 재평가한 finding 중 두 항목 추가 반영. (a) **F3 wording correction (doc, DEC-020 Q-045)**: `cross_ref_code` 가 **enforcement proof 가 아니라 reachability heuristic** 임을 DEC-020 Q-045 본문에 명시 + `file:exportName` = `export_exists` weak evidence / `file:line` = `line_exists` 더 weak evidence semantic 정의 + ADR / PR body 에서 "enforcement proven" / "invariant closed" 표현 금지. (b) **F4 follow-up anchor 등록 (doc, current-state.md Planned follow-up anchors)**: `INFRA-1A.9.h1-safe-fetch-raw-fetch-static-check` (raw `fetch(` 부재 static check, ADR-0028 INV-0028-1 enforcement) + `INFRA-1A.9.h2-cross-ref-semantic-level` (validator semantic level 확장, NOT gate-blocking) 2 anchor sequencing register.
 
 ## Current validation
 
