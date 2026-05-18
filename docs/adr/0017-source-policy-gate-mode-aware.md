@@ -36,7 +36,7 @@ invariants:
     statement: 단계별 default policy_gate_mode — Discovery/Initial fetch=inline_warn / Extract/Cache/Embed/Cloud upload=inline_block / 탐색(scenario·thesis interactive)=batch_report / 콘텐츠 제작 추가 fetch=batch_report (단 위험 행동은 inline_block) / Publication preflight=inline_block
     status: active
   - id: INV-0017-4
-    statement: 위험 행동(raw cache / embedding / cloud upload / quote storage / wire-service full text / paywalled fetch / scraping ban 위반 / robots disallow 위반)은 어느 mode에서도 inline_block 유지 (R14/Q9-5 알림 트리거 8개)
+    statement: 위험 행동(source policy unknown 또는 unauthorized 상태의 raw external LLM 전송 / paywalled·proprietary full-text fetch / terms violation(no scraping·no AI·no archive·no redistribution) / wire-service full text / article·report 원문 quote·cache / 기사·리포트 도표·스크린샷 콘텐츠 추가 / raw source embedding·indexing / raw source cloud upload)은 어느 mode에서도 inline_block 유지 (R14/Q9-5 알림 트리거 8개 — body §Decision 8 항목이 canonical, 본 frontmatter statement 와 일치. pre-PR-#68 의 'scraping ban / robots disallow' 표현은 stale compressed summary 였음 — 옵션 D 운영자 결정 2026-05-17, robots.txt disallow 는 ADR-0028 safe-fetch boundary 별도 enforcement, ledger coupling 은 `INFRA-1B.5.h3-robots-disallow-ledger-coupling` follow-up anchor)
     status: active
   - id: INV-0017-5
     statement: 모든 policy_gate 결정은 policy_decisions ledger에 기록한다 — (decision_id, session_id, source_id, url, intended_action, decision, gate_mode, risk_level, reason, created_at)
@@ -271,4 +271,23 @@ policy_decisions (
 - ideation 출처: Round 7/Q2 (archive_policy 단일), Round 14/Q9-5 (3 필드 확장 +
   policy_decisions + manual_claim_entries + 8 트리거), Round 18 (mode-aware +
   access_interventions GPT 정교화 흡수)
-- 관련 ADR: ADR-0011, ADR-0012, ADR-0015, ADR-0016, ADR-0018, ADR-0021
+- 관련 ADR: ADR-0011, ADR-0012, ADR-0015, ADR-0016, ADR-0018, ADR-0021,
+  ADR-0028 (safe-fetch boundary — robots.txt disallow enforcement)
+
+## Drift history (non-normative)
+
+- 2026-05-17: INV-0017-4 frontmatter statement aligned with the accepted
+  ADR body §Decision 8-trigger list. The frontmatter statement is a
+  compressed summary, not an independent trigger universe. Pre-PR-#68
+  frontmatter wording ("raw cache / embedding / cloud upload / quote
+  storage / wire-service full text / paywalled fetch / scraping ban /
+  robots disallow") was a stale compressed summary that conflicted with
+  the body §Decision 8 items (1. source policy unknown/unauthorized raw
+  external LLM / 2. paywalled·proprietary full-text fetch / 3. terms
+  violation / 4. wire-service full text / 5. raw quote·cache / 6. image
+  inclusion without license / 7. raw embedding / 8. raw cloud upload).
+  Root cause of Codex PR #68 robots-disallow finding escalation —
+  operator decision 옵션 D (canonical = body §Decision, robots.txt
+  disallow stays at ADR-0028 safe-fetch boundary, not a ninth
+  RiskTrigger). PR #68 implementation `RISK_TRIGGER` enum matches body
+  §Decision exactly.

@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: 75706c4970ca094c1c56e15a92beaf165c03fc38 (2026-05-14) — INFRA-1B.3.x-audit landed (R2 upload audit ledger, AC-032 / NFR-008 evidence, Q-044 → DEC-020 / TRACE-040). Previous code baseline = 13d61af (2026-05-13) — comprehensive review backfill.
+> Last verified against code: pending merge SHA (2026-05-17) — INFRA-1B.5.h2-policy-gate-risk-triggers landed (AC-023 / TEST-023 evidence, AI-P1-11 D1a/D2a 결정 lock, ADR-0017 INV-0017-3/4/5). Previous code baseline = fdb847a (2026-05-17, Cycle 10 INFRA-1B.3.h7-gate-evidence-hardening). Earlier baselines: 75706c4 (2026-05-14, INFRA-1B.3.x-audit) → 13d61af (2026-05-13, comprehensive review backfill).
 
 ## Runtime stack
 
@@ -84,6 +84,8 @@
 
 | Path | Purpose |
 |---|---|
+| `src/pipeline/policy-gate/risk-triggers.ts` | ADR-0017 INV-0017-3/4 generic policy_gate evaluator — `RiskTriggerContext` + 8 detector + `detectRisks()` + `stageDefaultMode()` + `evaluatePolicyGate()` (pure function — INV-0017-4 mode-invariant override + INV-0017-3 stage-default mapping). v0 detection proxies: archive_policy = paywall/terms indicator (INFRA-1B.1.h2-source-profile = future hardening anchor), sourceName = wire-service hardcoded allowlist (Reuters / AP / AFP / Bloomberg / Yonhap / Kyodo / Xinhua / TASS / Interfax). image_inclusion = v0 conservative block (license tracking not yet implemented). (INFRA-1B.5.h2-policy-gate-risk-triggers, AC-023 / TEST-023) |
+| `src/pipeline/policy-gate/decision-ledger.ts` | `recordPolicyGateDecision()` — generic policy_gate ledger writer (operator-gate namespace, intended_action=NULL, v8 r2_upload enum trigger 우회). `NON_RISK_TRIGGER_TYPE` sentinel for stage-default non-risk decisions. Writer-boundary defense-in-depth — triggerType / decision / gateMode enum 검증 (symmetric to assertValidSnapId in storage/audit/policy-decisions.ts Cycle 7 lesson). ADR-0017 INV-0017-5 policy_decisions ledger persistence. (INFRA-1B.5.h2-policy-gate-risk-triggers, AC-023 / TEST-023) |
 | `src/pipeline/access-intervention/severity.ts` | `computeSeverity()` — deterministic: GateMode × importance_score × relatedAssumptionIds (INFRA-1B.5, AC-024) |
 | `src/pipeline/access-intervention/recorder.ts` | `recordIntervention()` — AccessIntervention Neo4j node `aci_<ULID>` (INFRA-1B.5) |
 | `src/pipeline/access-intervention/batch-report.ts` | `generateBatchReport()` — severity-bucketed Markdown + hasBlockers cite-check flag (INFRA-1B.5, AC-024) |
@@ -125,6 +127,7 @@
 | `tests/unit/feedback_test.ts` | manual_claim_entry 3-way + intervention review 3-option | TEST-025 (AC-025) |
 | `tests/unit/run_ledger_test.ts` | startRun / completeRun / failRun + daily cost aggregation (29 tests) | TEST-019 (AC-019) |
 | `tests/unit/audit_policy_decisions_test.ts` | recordR2UploadDecision audit ledger — IntendedAction + R2UploadDecision enum + canonical column INSERT + 4 lifecycle decisions + snap_id rationale anchor correlation (16 tests) | — (INFRA-1B.3.x-audit, AC-032 / NFR-008) |
+| `tests/policy/gate_test.ts` | ADR-0017 INV-0017-3/4/5 policy_gate evaluator — stageDefaultMode (6) + detectRisks 8 trigger × fire/not-fire/mode-invariance/multi-trigger (24) + evaluatePolicyGate combined (8) + recordPolicyGateDecision intended_action=NULL namespace + writer-boundary guard (6) + TEST-023 E2E 8 trigger × ledger record × INV-0017-4 mode-invariance (9). 53 tests total. | TEST-023 (AC-023, INFRA-1B.5.h2-policy-gate-risk-triggers) |
 | `tests/test-helpers/neo4j-mock.ts` | Shared Neo4j mock helper | (test infra) |
 | `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
 
