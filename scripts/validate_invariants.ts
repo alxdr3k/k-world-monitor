@@ -122,11 +122,11 @@ function glob(dir: string, ext: string): string[] {
   return results;
 }
 
-const adrFiles = glob(join(DOCS, "adr"), ".md").filter(
+export const adrFiles = glob(join(DOCS, "adr"), ".md").filter(
   (f) => !basename(f).startsWith("README") && !basename(f).startsWith("0001-example")
 );
 const questionFiles = glob(join(DOCS, "questions"), ".md");
-const decisionFiles = glob(join(DOCS, "decisions"), ".md");
+export const decisionFiles = glob(join(DOCS, "decisions"), ".md");
 const glossaryFiles = glob(join(DOCS, "glossary"), ".md");
 
 // ---------------------------------------------------------------------------
@@ -298,24 +298,11 @@ function checkRequiredFields(): void {
 // ---------------------------------------------------------------------------
 // Check 5: cross_ref_code reachability (DEC-020 Q-045 / INFRA-1A.9)
 // ---------------------------------------------------------------------------
-function escapeRegex(s: string): string {
+export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/**
- * Reject paths that escape the repo root.
- * Codex PR #72 round 1 P2 (#2): pre-fix accepted absolute paths + `..`
- * traversal.
- * Codex PR #72 round 2 P2 (#2): path-string check alone did not follow
- * symlinks — a repo-relative symlink pointing outside REPO_ROOT would
- * still pass. Both syntactic and canonicalized checks are applied; the
- * canonicalized form is computed via `realpathSync` on the deepest
- * existing ancestor so missing files still fail-open to the existsSync
- * check downstream (no spurious "escapes repo root" for to-be-created
- * paths). The canonical repo root itself is also realpath-resolved so
- * the comparison is symmetric.
- */
-function isInsideRepo(filePart: string): boolean {
+export function isInsideRepo(filePart: string): boolean {
   if (isAbsolute(filePart)) return false;
   const joined = join(REPO_ROOT, filePart);
   const rel = relative(REPO_ROOT, joined);
@@ -362,7 +349,7 @@ function isInsideRepo(filePart: string): boolean {
  * Codex PR #72 round 2 P2 (#1): pre-fix accepted `last_line + 1` as
  * in-range for newline-terminated files (which is most source code).
  */
-function physicalLineCount(code: string): number {
+export function physicalLineCount(code: string): number {
   if (code === "") return 0;
   const parts = code.split("\n");
   // If the file ends with `\n`, split produces one trailing empty entry;
@@ -380,7 +367,7 @@ function physicalLineCount(code: string): number {
  * Codex PR #72 round 1 P2: pre-fix regex treated both sides of `foo as bar`
  * as valid, silently passing broken cross_ref_code entries.
  */
-function extractReExportedNames(code: string): Set<string> {
+export function extractReExportedNames(code: string): Set<string> {
   const names = new Set<string>();
   const blockPattern = /\bexport\s*(?:type\s+)?\{([^}]*)\}/g;
   for (const match of code.matchAll(blockPattern)) {
@@ -420,26 +407,89 @@ function extractReExportedNames(code: string): Set<string> {
  * Codex PR #72 round 1 P2: pre-fix regex permitted only ONE modifier (async OR
  * default), missing `default async` and generator forms.
  */
-function hasNamedDeclaration(code: string, name: string): boolean {
+/**
+ * Strip line comments, block comments, and string literals from TS/JS
+ * source so `hasNamedDeclaration` does not match `export` patterns
+ * inside `// ...`, `/* ... *\/`, single/double-quoted strings, or template
+ * literals. Codex PR #72 round 3 P2: pre-fix accepted `// export function
+ * foo` as a real declaration. This is a lightweight tokenization (not a
+ * full TS AST) — sufficient to defang the common "doc string" / "snippet
+ * in code comment" false positive without pulling in a parser dependency.
+ */
+export function stripCommentsAndStrings(code: string): string {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ")
+    .replace(/`(?:\\[\s\S]|\$\{[^}]*\}|[^`\\])*`/g, "``")
+    .replace(/"(?:\\[\s\S]|[^"\\])*"/g, '""')
+    .replace(/'(?:\\[\s\S]|[^'\\])*'/g, "''");
+}
+
+export function hasNamedDeclaration(code: string, name: string): boolean {
+  const stripped = stripCommentsAndStrings(code);
   const escName = escapeRegex(name);
   // function declarations (with optional default/async modifiers in either order, generator `*`)
   const fnPattern = new RegExp(
     `\\bexport\\s+(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s+${escName}\\b`
   );
-  if (fnPattern.test(code)) return true;
+  if (fnPattern.test(stripped)) return true;
   // class declarations (with optional default/abstract modifiers)
   const classPattern = new RegExp(
     `\\bexport\\s+(?:default\\s+)?(?:abstract\\s+)?class\\s+${escName}\\b`
   );
-  if (classPattern.test(code)) return true;
+  if (classPattern.test(stripped)) return true;
   // simple keyword declarations
   const keywordPattern = new RegExp(
     `\\bexport\\s+(?:const|let|var|interface|type|enum)\\s+${escName}\\b`
   );
-  return keywordPattern.test(code);
+  return keywordPattern.test(stripped);
 }
 
-function checkCrossRefCode(): void {
+/**
+ * Single-ref validation extracted from `checkCrossRefCode` so external
+ * callers (the test suite) can exercise the exact production logic
+ * instead of reimplementing it. Codex PR #72 round 3 P2: pre-extract
+ * the test file mirrored helpers — a shared mistake on both sides could
+ * pass green tests while regressing production. Returns ok/false with a
+ * human-readable reason for the warning path.
+ */
+export function checkOneCrossRef(
+  ref: string
+): { ok: true } | { ok: false; reason: string } {
+  const sepIdx = ref.lastIndexOf(":");
+  if (sepIdx <= 0 || sepIdx === ref.length - 1) {
+    return { ok: false, reason: "malformed" };
+  }
+  const filePart = ref.slice(0, sepIdx);
+  const tail = ref.slice(sepIdx + 1);
+  if (!isInsideRepo(filePart)) {
+    return { ok: false, reason: `path escapes repo root: ${filePart}` };
+  }
+  const fullPath = join(REPO_ROOT, filePart);
+  if (!existsSync(fullPath)) {
+    return { ok: false, reason: `missing file: ${filePart}` };
+  }
+  let code: string;
+  try {
+    code = readFileSync(fullPath, "utf-8");
+  } catch {
+    return { ok: false, reason: `file unreadable: ${filePart}` };
+  }
+  if (/^\d+$/.test(tail)) {
+    const lineNum = Number.parseInt(tail, 10);
+    const lineCount = physicalLineCount(code);
+    if (lineNum < 1 || lineNum > lineCount) {
+      return { ok: false, reason: `line ${lineNum} out of range (1..${lineCount})` };
+    }
+    return { ok: true };
+  }
+  if (hasNamedDeclaration(code, tail) || extractReExportedNames(code).has(tail)) {
+    return { ok: true };
+  }
+  return { ok: false, reason: `export not found: ${tail}` };
+}
+
+export function checkCrossRefCode(): void {
   for (const file of [...adrFiles, ...decisionFiles]) {
     const fm = parseFrontmatter(file);
     if (!fm?.invariants) continue;
@@ -447,58 +497,9 @@ function checkCrossRefCode(): void {
       const refs = inv.cross_ref_code;
       if (!refs || refs.length === 0) continue;
       for (const ref of refs) {
-        const sepIdx = ref.lastIndexOf(":");
-        if (sepIdx <= 0 || sepIdx === ref.length - 1) {
-          warn(
-            file,
-            `${inv.id} cross_ref_code malformed (expected '<file>:<exportName>' or '<file>:<line>'): ${ref}`
-          );
-          continue;
-        }
-        const filePart = ref.slice(0, sepIdx);
-        const tail = ref.slice(sepIdx + 1);
-        if (!isInsideRepo(filePart)) {
-          warn(
-            file,
-            `${inv.id} cross_ref_code path escapes repo root (absolute or '..' traversal not allowed): ${ref}`
-          );
-          continue;
-        }
-        const fullPath = join(REPO_ROOT, filePart);
-        if (!existsSync(fullPath)) {
-          warn(file, `${inv.id} cross_ref_code points to missing file: ${ref}`);
-          continue;
-        }
-        let code: string;
-        try {
-          code = readFileSync(fullPath, "utf-8");
-        } catch {
-          warn(file, `${inv.id} cross_ref_code file unreadable: ${ref}`);
-          continue;
-        }
-        if (/^\d+$/.test(tail)) {
-          const lineNum = Number.parseInt(tail, 10);
-          const lineCount = physicalLineCount(code);
-          if (lineNum < 1 || lineNum > lineCount) {
-            warn(
-              file,
-              `${inv.id} cross_ref_code line out of range (file has ${lineCount} lines): ${ref}`
-            );
-          }
-        } else {
-          // file:exportName — match a declaration form (covers default/async/
-          // generator/abstract permutations) or appear as the importable name
-          // in a `export { ... }` re-export block (aliases keep only the
-          // right-hand side as importable).
-          if (
-            !hasNamedDeclaration(code, tail) &&
-            !extractReExportedNames(code).has(tail)
-          ) {
-            warn(
-              file,
-              `${inv.id} cross_ref_code export not found in ${filePart}: ${tail}`
-            );
-          }
+        const result = checkOneCrossRef(ref);
+        if (!result.ok) {
+          warn(file, `${inv.id} cross_ref_code ${result.reason}: ${ref}`);
         }
       }
     }
@@ -601,4 +602,6 @@ function main(): void {
   process.exit(0);
 }
 
-main();
+if (import.meta.main) {
+  main();
+}
