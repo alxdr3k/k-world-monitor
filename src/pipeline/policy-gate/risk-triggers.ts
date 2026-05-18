@@ -498,6 +498,71 @@ function modeToNonRiskDecision(mode: PolicyGateMode): GateDecision {
 // Combined evaluation — top-level entrypoint.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Stage-action compatibility matrix (Codex PR #68 round 5 P1 finding 3 fix
+// — 운영자 결정 옵션 (a) 2026-05-18 GPT review).
+//
+// v0 matrix is storage-class containment, NOT a full 5 stage × 11 action
+// philosophical closure. The point is: storage-class actions (r2_upload /
+// embed / chunk_create / raw_cache) must NOT fall into non-risk allow via
+// stage default `batch_report` in content_production / interactive_
+// exploration. r2_upload with permissive policies (archive=full +
+// raw_cloud=allowed_public) in content_production stage is a caller
+// stage-labeling bug, not a policy decision — throw rather than allow.
+//
+// Compatibility check is applied AFTER detectRisks() because INV-0017-4
+// says risk triggers are mode-invariant inline_block. If a risk fires,
+// the action is blocked regardless of stage — compatibility mismatch
+// must NOT mask that risk block. Only non-risk evaluations consult this
+// matrix.
+//
+// Future hardening: derive from a richer stage × action policy table as
+// new actions / stages land (e.g., publication_preflight sub-stages).
+// ---------------------------------------------------------------------------
+const COMPATIBLE_ACTIONS_BY_STAGE: Record<PipelineStage, readonly PipelineAction[]> = {
+  discovery: ["discovery_fetch"],
+  extract_cache_embed_cloud_upload: [
+    "extract_full_text",
+    "raw_cache",
+    "chunk_create",
+    "embed",
+    "r2_upload",
+    "external_llm_call_with_raw_text",
+    "external_llm_call_with_excerpt",
+  ],
+  interactive_exploration: [
+    "discovery_fetch",
+    "extract_full_text",
+    "external_llm_call_with_raw_text",
+    "external_llm_call_with_excerpt",
+  ],
+  content_production: [
+    "discovery_fetch",
+    "extract_full_text",
+    "external_llm_call_with_raw_text",
+    "external_llm_call_with_excerpt",
+    "quote_storage",
+    "image_inclusion",
+  ],
+  publication_preflight: [
+    "publication_preflight",
+    "quote_storage",
+    "image_inclusion",
+  ],
+};
+
+function assertStageActionCompatible(
+  stage: PipelineStage,
+  action: PipelineAction
+): void {
+  const allowed = COMPATIBLE_ACTIONS_BY_STAGE[stage];
+  if (!allowed.includes(action)) {
+    throw new Error(
+      `evaluatePolicyGate: stage-action incompatibility — intendedAction=${action} is not compatible with stage=${stage} (compatible actions: ${allowed.join(", ")}). This is a call-site stage-labeling bug, not a policy decision. v0 matrix per Codex PR #68 round 5 P1 finding 3.`
+    );
+  }
+}
+
 export interface EvaluatePolicyGateInput {
   stage: PipelineStage;
   ctx: RiskTriggerContext;
@@ -575,6 +640,29 @@ export function evaluatePolicyGate(
       `evaluatePolicyGate: invalid externalLlmPolicy (must be EXTERNAL_LLM_POLICY enum or 'unknown' sentinel): ${JSON.stringify(input.ctx.externalLlmPolicy)}`
     );
   }
+  // Codex PR #68 round 6 P1 fix — registered source 의 `unknown` sentinel
+  // fail-closed. `unknown` sentinel 은 documented use case 가 unregistered
+  // source (sourceId === null) 만임. registered source (sourceId !== null)
+  // 에 `unknown` 이 도달하면 source policy lookup / mapping bug —
+  // restrictive default fallback 으로 silently allow 되어선 안 됨. throw
+  // 로 fail-closed.
+  if (input.ctx.sourceId !== null) {
+    if (input.ctx.archivePolicy === "unknown") {
+      throw new Error(
+        `evaluatePolicyGate: registered source (sourceId=${JSON.stringify(input.ctx.sourceId)}) cannot have archivePolicy='unknown' — 'unknown' sentinel is for unregistered sources only. Likely source policy lookup bug.`
+      );
+    }
+    if (input.ctx.rawCloudPolicy === "unknown") {
+      throw new Error(
+        `evaluatePolicyGate: registered source (sourceId=${JSON.stringify(input.ctx.sourceId)}) cannot have rawCloudPolicy='unknown' — 'unknown' sentinel is for unregistered sources only. Likely source policy lookup bug.`
+      );
+    }
+    if (input.ctx.externalLlmPolicy === "unknown") {
+      throw new Error(
+        `evaluatePolicyGate: registered source (sourceId=${JSON.stringify(input.ctx.sourceId)}) cannot have externalLlmPolicy='unknown' — 'unknown' sentinel is for unregistered sources only. Likely source policy lookup bug.`
+      );
+    }
+  }
   const triggers = detectRisks(input.ctx);
   if (triggers.length > 0) {
     return {
@@ -586,6 +674,13 @@ export function evaluatePolicyGate(
         .join(" | "),
     };
   }
+  // Codex PR #68 round 5 P1 finding 3 fix (운영자 결정 옵션 (a),
+  // GPT review 2026-05-18): stage-action compatibility check is applied
+  // ONLY on the non-risk path. INV-0017-4 requires risk triggers to
+  // remain mode-invariant inline_block — compatibility throw must not
+  // mask a risk block. See COMPATIBLE_ACTIONS_BY_STAGE comment for the
+  // v0 storage-class containment rationale.
+  assertStageActionCompatible(input.stage, input.ctx.intendedAction);
   const gateMode = stageDefaultMode(input.stage);
   const decision = modeToNonRiskDecision(gateMode);
   return {

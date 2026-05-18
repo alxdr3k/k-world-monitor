@@ -607,10 +607,15 @@ describe("evaluatePolicyGate (ADR-0017 INV-0017-3 + INV-0017-4 합산)", () => {
     expect(result.decision).toBe("warn");
   });
 
-  it("non-risk action: stage=extract_cache_embed_cloud_upload → mode=inline_block, decision=block", () => {
+  it("non-risk action: stage=extract_cache_embed_cloud_upload → mode=inline_block, decision=block (r2_upload with permissive policies — compatible)", () => {
     const result = evaluatePolicyGate({
       stage: "extract_cache_embed_cloud_upload",
-      ctx: permissiveCtx(),
+      ctx: {
+        ...permissiveCtx(),
+        intendedAction: "r2_upload",
+        archivePolicy: "full_snapshot_allowed",
+        rawCloudPolicy: "allowed_public_data_only",
+      },
     });
     expect(result.triggers).toEqual([]);
     expect(result.gateMode).toBe("inline_block");
@@ -637,10 +642,10 @@ describe("evaluatePolicyGate (ADR-0017 INV-0017-3 + INV-0017-4 합산)", () => {
     expect(result.decision).toBe("allow");
   });
 
-  it("non-risk action: stage=publication_preflight → mode=inline_block, decision=block", () => {
+  it("non-risk action: stage=publication_preflight → mode=inline_block, decision=block (publication_preflight action — compatible)", () => {
     const result = evaluatePolicyGate({
       stage: "publication_preflight",
-      ctx: permissiveCtx(),
+      ctx: { ...permissiveCtx(), intendedAction: "publication_preflight" },
     });
     expect(result.triggers).toEqual([]);
     expect(result.gateMode).toBe("inline_block");
@@ -761,6 +766,111 @@ describe("evaluatePolicyGate (ADR-0017 INV-0017-3 + INV-0017-4 합산)", () => {
       },
     });
     expect(result.gateMode).toBe("inline_warn");
+  });
+
+  it("evaluatePolicyGate: throws when registered source has archivePolicy='unknown' (Codex PR #68 round 6 P1 — registered source unknown sentinel fail-closed)", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "discovery",
+        ctx: {
+          ...permissiveCtx(),
+          sourceId: "src_registered_001",
+          archivePolicy: "unknown",
+        },
+      })
+    ).toThrow(/registered source.*cannot have archivePolicy='unknown'/);
+  });
+
+  it("evaluatePolicyGate: throws when registered source has rawCloudPolicy='unknown'", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "discovery",
+        ctx: {
+          ...permissiveCtx(),
+          sourceId: "src_registered_002",
+          rawCloudPolicy: "unknown",
+        },
+      })
+    ).toThrow(/registered source.*cannot have rawCloudPolicy='unknown'/);
+  });
+
+  it("evaluatePolicyGate: throws when registered source has externalLlmPolicy='unknown'", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "discovery",
+        ctx: {
+          ...permissiveCtx(),
+          sourceId: "src_registered_003",
+          externalLlmPolicy: "unknown",
+        },
+      })
+    ).toThrow(/registered source.*cannot have externalLlmPolicy='unknown'/);
+  });
+
+  it("evaluatePolicyGate: throws on non-risk r2_upload in content_production stage (Codex PR #68 round 5 P1 finding 3 — stage-action compatibility, fail-closed when no risk fires)", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "content_production",
+        ctx: {
+          ...permissiveCtx(),
+          intendedAction: "r2_upload",
+          archivePolicy: "full_snapshot_allowed",
+          rawCloudPolicy: "allowed_public_data_only",
+        },
+      })
+    ).toThrow(/stage-action incompatibility/);
+  });
+
+  it("evaluatePolicyGate: does NOT throw compatibility mismatch before risk detection — risk remains inline_block across stages even when stage-action would be incompatible", () => {
+    // r2_upload in content_production = incompatible by matrix, BUT
+    // metadata_only archive_policy fires trigger 8 (raw_cloud_upload).
+    // INV-0017-4 mandates risk is mode-invariant inline_block — the
+    // compatibility throw must NOT mask the risk block. evaluator runs
+    // detectRisks() BEFORE assertStageActionCompatible().
+    const result = evaluatePolicyGate({
+      stage: "content_production",
+      ctx: {
+        ...permissiveCtx(),
+        intendedAction: "r2_upload",
+        archivePolicy: "metadata_only",
+      },
+    });
+    expect(result.gateMode).toBe("inline_block");
+    expect(result.decision).toBe("block");
+    expect(result.triggers.map((t) => t.trigger)).toContain("raw_cloud_upload");
+  });
+
+  it("evaluatePolicyGate: allows compatible non-risk r2_upload in extract_cache_embed_cloud_upload stage → inline_block (stage default), no throw", () => {
+    // permissive (full + allowed_public) → no risk fires; r2_upload is
+    // compatible with extract_cache_embed_cloud_upload stage; stage
+    // default mode is inline_block per INV-0017-3 → block (NOT allow —
+    // operator inline decision required for this stage even when
+    // policies are permissive).
+    const result = evaluatePolicyGate({
+      stage: "extract_cache_embed_cloud_upload",
+      ctx: {
+        ...permissiveCtx(),
+        intendedAction: "r2_upload",
+        archivePolicy: "full_snapshot_allowed",
+        rawCloudPolicy: "allowed_public_data_only",
+      },
+    });
+    expect(result.triggers).toEqual([]);
+    expect(result.gateMode).toBe("inline_block");
+    expect(result.decision).toBe("block");
+  });
+
+  it("evaluatePolicyGate: throws on non-risk embed in interactive_exploration stage (storage-class containment)", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "interactive_exploration",
+        ctx: {
+          ...permissiveCtx(),
+          intendedAction: "embed",
+          archivePolicy: "full_snapshot_allowed",
+        },
+      })
+    ).toThrow(/stage-action incompatibility/);
   });
 
   it("rationale includes all triggered risk IDs when multiple fire", () => {
