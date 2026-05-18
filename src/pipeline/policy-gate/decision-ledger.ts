@@ -43,8 +43,13 @@
 //     `[trigger_id] rationale | [trigger_id] rationale | ...`).
 // Operator multi-trigger audit aggregation queries the `rationale` text
 // via `LIKE '%[trigger_id]%'`. This Option A keeps the policy_decisions
-// row count proportional to evaluator calls (not detected risks), which
-// matches ADR-0012 INV-0012-3 audit-by-absence proportionality.
+// row count proportional to evaluator calls (not detected risks: N
+// detected risks in one evaluation = 1 ledger row, not N rows). This
+// row-count proportionality is a writer-side ledger contract for the
+// operator-gate namespace — NOT to be confused with ADR-0012 INV-0012-3
+// audit-by-absence (which is a reader-side enforcement-trace property
+// specific to R2 upload, where the absence of any audit row for a
+// Snapshot is the canonical proof of no upload attempt).
 //
 // Option B (one row per detected trigger) is deferred until an operator-
 // driven multi-trigger aggregation use case emerges (e.g., per-trigger

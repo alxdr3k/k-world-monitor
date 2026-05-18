@@ -271,4 +271,23 @@ policy_decisions (
 - ideation 출처: Round 7/Q2 (archive_policy 단일), Round 14/Q9-5 (3 필드 확장 +
   policy_decisions + manual_claim_entries + 8 트리거), Round 18 (mode-aware +
   access_interventions GPT 정교화 흡수)
-- 관련 ADR: ADR-0011, ADR-0012, ADR-0015, ADR-0016, ADR-0018, ADR-0021
+- 관련 ADR: ADR-0011, ADR-0012, ADR-0015, ADR-0016, ADR-0018, ADR-0021,
+  ADR-0028 (safe-fetch boundary — robots.txt disallow enforcement)
+
+## Drift history (non-normative)
+
+- 2026-05-17: INV-0017-4 frontmatter statement aligned with the accepted
+  ADR body §Decision 8-trigger list. The frontmatter statement is a
+  compressed summary, not an independent trigger universe. Pre-PR-#68
+  frontmatter wording ("raw cache / embedding / cloud upload / quote
+  storage / wire-service full text / paywalled fetch / scraping ban /
+  robots disallow") was a stale compressed summary that conflicted with
+  the body §Decision 8 items (1. source policy unknown/unauthorized raw
+  external LLM / 2. paywalled·proprietary full-text fetch / 3. terms
+  violation / 4. wire-service full text / 5. raw quote·cache / 6. image
+  inclusion without license / 7. raw embedding / 8. raw cloud upload).
+  Root cause of Codex PR #68 robots-disallow finding escalation —
+  operator decision 옵션 D (canonical = body §Decision, robots.txt
+  disallow stays at ADR-0028 safe-fetch boundary, not a ninth
+  RiskTrigger). PR #68 implementation `RISK_TRIGGER` enum matches body
+  §Decision exactly.
