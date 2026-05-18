@@ -196,7 +196,38 @@ injection containment / discovery worker concurrency / research app stack)
   `forbidden_call_absence` / `test_fixture_proved` 등 (cross_ref_code entry
   의 semantic_level 필드 추가). 현재 단계에서는 DEC-020 wording correction
   으로 reachability heuristic semantic 만 명시 (별도 semantic level 도입
-  은 안 함). 본 anchor 는 sequencing 만 register.
+  은 안 함). IMPL_PLAN slice 표에 정식 row 등록 완료 (status=planned).
+- `INFRA-1A.9.h3-validator-self-strip-stability` (Cycle 32 PR #90
+  에서 발견된 fragility 의 follow-up anchor, **NOT gate-blocking,
+  P3 priority, defer 가능**): `scripts/validate_invariants.ts:checkRawFetchBan`
+  을 ADR-0028 INV-0028-1 `cross_ref_code` 에 self-reference 로 추가 시도 시,
+  validator 의 자체 stripCommentsAndStrings pass 가 자신의 regex-literal
+  pattern body 들과 상호작용하여 running backtick parity shift 가 발생,
+  새 `export function` declaration 이 stripped source 에서 사라지고
+  `hasNamedDeclaration` 이 false `export not found` 를 emit 하는 fragility 가
+  확인됨. 본 slice 의 옵션: (a) regex-literal stripping heuristic 을
+  token-aware tokenizer 로 교체 (TS AST 사용), (b) self-validation path
+  에 한해 multi-line eat 을 sentinel 로 차단, (c) cross_ref_code resolution
+  이 self-references 인 entry 를 자체 module 의 export map 으로 별도 lookup,
+  (d) hasNamedDeclaration 이 stripped + raw 양쪽에서 match 되면 OK 처리.
+  옵션 선택은 운영자 결정. 본 slice 가 land 하기 전에는 validator 의
+  self-cross_ref 는 ADR statement body prose 로만 표현. IMPL_PLAN slice
+  표에 정식 row 등록 완료 (status=planned).
+- `DOC-1A.1-testing-md-baseline-observability-hygiene` (Opus PR #66~#78
+  adversarial review F11 followup, **NOT gate-blocking, P3 hygiene**):
+  `docs/current/TESTING.md` top paragraph 가 매우 길어 (현재 한 paragraph
+  안에 current baseline / thin-doc edits chain / Cycle history / local
+  test claim / CI evidence 모두 섞임) operator 가 실제 현재 baseline 을
+  구분하기 어려움. baseline observability risk. 본 slice 의 scope: (1)
+  TESTING.md top 은 current baseline only — last verified SHA + date +
+  test count + 1~2 sentence summary 만 짧게, (2) Cycle history 는 별도
+  file `docs/context/TESTING_HISTORY.md` (또는 structured table) 로 분리,
+  (3) AGENTS.md thin-doc sync rule 갱신 — short baseline + history 별도
+  file append 로 분리, (4) test count 의 source / run environment /
+  commit SHA structured 명시. GPT 의견 합의 — 길이 자체보다는 baseline /
+  history / claim source 가 한 paragraph 에 섞이는 observability risk 가
+  핵심. P3 hygiene 으로 downgrade. IMPL_PLAN slice 표에 정식 row 등록
+  완료 (status=planned).
 
 ## Explicit non-goals
 
