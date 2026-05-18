@@ -12,7 +12,7 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, isAbsolute, relative, sep } from "path";
 
 // js-yaml — types cast because @types/js-yaml may not expose all overloads
 import jsYaml from "js-yaml";
@@ -302,6 +302,87 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Reject paths that escape the repo root — absolute paths, `..` traversal,
+ * symlink escapes via `path.resolve` not staying inside REPO_ROOT.
+ * Codex PR #72 round 1 P2: cross_ref_code is documented as repo-root-
+ * relative; absolute/`../` paths produced non-reproducible "reachable"
+ * results across host environments.
+ */
+function isInsideRepo(filePart: string): boolean {
+  if (isAbsolute(filePart)) return false;
+  const resolved = join(REPO_ROOT, filePart);
+  const rel = relative(REPO_ROOT, resolved);
+  if (rel.startsWith("..") || isAbsolute(rel)) return false;
+  // Disallow `.` segments resolving to REPO_ROOT itself (would mean filePart was empty / pure '.')
+  if (rel === "") return false;
+  // Defense-in-depth: ensure the resolved path starts with REPO_ROOT + sep
+  return resolved === REPO_ROOT || resolved.startsWith(REPO_ROOT + sep);
+}
+
+/**
+ * Parse `export { ... }` re-export blocks and return the set of externally
+ * importable names. Aliases follow `import-name as exported-name` — only the
+ * right-hand side is importable from outside the module.
+ * Codex PR #72 round 1 P2: pre-fix regex treated both sides of `foo as bar`
+ * as valid, silently passing broken cross_ref_code entries.
+ */
+function extractReExportedNames(code: string): Set<string> {
+  const names = new Set<string>();
+  const blockPattern = /\bexport\s*(?:type\s+)?\{([^}]*)\}/g;
+  for (const match of code.matchAll(blockPattern)) {
+    const body = match[1] ?? "";
+    for (const rawEntry of body.split(",")) {
+      const entry = rawEntry.trim();
+      if (!entry) continue;
+      // `foo as bar` → importable name is `bar`. `foo` alone → importable
+      // name is `foo`. `default as bar` → importable name is `bar`.
+      const aliasMatch = entry.match(/^[\w$]+\s+as\s+([\w$]+)$/);
+      if (aliasMatch && aliasMatch[1]) {
+        names.add(aliasMatch[1]);
+        continue;
+      }
+      const bareMatch = entry.match(/^([\w$]+)$/);
+      if (bareMatch && bareMatch[1]) {
+        names.add(bareMatch[1]);
+      }
+      // Anything else (malformed entry) is silently skipped — the validator
+      // does not own TypeScript syntax validation.
+    }
+  }
+  return names;
+}
+
+/**
+ * Match `export ... name` declarations including:
+ *   - `export function name`, `export async function name`, `export function* name`,
+ *     `export async function* name`
+ *   - `export default function name`, `export default async function name`,
+ *     `export default function* name`, `export default async function* name`
+ *   - `export class name`, `export default class name`, `export abstract class name`
+ *   - `export const|let|var name`, `export interface|type|enum name`
+ * Codex PR #72 round 1 P2: pre-fix regex permitted only ONE modifier (async OR
+ * default), missing `default async` and generator forms.
+ */
+function hasNamedDeclaration(code: string, name: string): boolean {
+  const escName = escapeRegex(name);
+  // function declarations (with optional default/async modifiers in either order, generator `*`)
+  const fnPattern = new RegExp(
+    `\\bexport\\s+(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s+${escName}\\b`
+  );
+  if (fnPattern.test(code)) return true;
+  // class declarations (with optional default/abstract modifiers)
+  const classPattern = new RegExp(
+    `\\bexport\\s+(?:default\\s+)?(?:abstract\\s+)?class\\s+${escName}\\b`
+  );
+  if (classPattern.test(code)) return true;
+  // simple keyword declarations
+  const keywordPattern = new RegExp(
+    `\\bexport\\s+(?:const|let|var|interface|type|enum)\\s+${escName}\\b`
+  );
+  return keywordPattern.test(code);
+}
+
 function checkCrossRefCode(): void {
   for (const file of [...adrFiles, ...decisionFiles]) {
     const fm = parseFrontmatter(file);
@@ -320,6 +401,13 @@ function checkCrossRefCode(): void {
         }
         const filePart = ref.slice(0, sepIdx);
         const tail = ref.slice(sepIdx + 1);
+        if (!isInsideRepo(filePart)) {
+          warn(
+            file,
+            `${inv.id} cross_ref_code path escapes repo root (absolute or '..' traversal not allowed): ${ref}`
+          );
+          continue;
+        }
         const fullPath = join(REPO_ROOT, filePart);
         if (!existsSync(fullPath)) {
           warn(file, `${inv.id} cross_ref_code points to missing file: ${ref}`);
@@ -342,15 +430,14 @@ function checkCrossRefCode(): void {
             );
           }
         } else {
-          // file:exportName — accept either `export <kw> <name>` declaration
-          // or a re-export entry `export { <name> ... }`.
-          const declPattern = new RegExp(
-            `\\bexport\\s+(?:async\\s+|default\\s+)?(?:function|class|const|let|var|interface|type|enum)\\s+${escapeRegex(tail)}\\b`
-          );
-          const reExportPattern = new RegExp(
-            `\\bexport\\s*\\{[^}]*\\b${escapeRegex(tail)}\\b[^}]*\\}`
-          );
-          if (!declPattern.test(code) && !reExportPattern.test(code)) {
+          // file:exportName — match a declaration form (covers default/async/
+          // generator/abstract permutations) or appear as the importable name
+          // in a `export { ... }` re-export block (aliases keep only the
+          // right-hand side as importable).
+          if (
+            !hasNamedDeclaration(code, tail) &&
+            !extractReExportedNames(code).has(tail)
+          ) {
             warn(
               file,
               `${inv.id} cross_ref_code export not found in ${filePart}: ${tail}`

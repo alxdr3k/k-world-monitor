@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { readFileSync, existsSync, readdirSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, isAbsolute, relative, sep } from "path";
 
 import jsYaml from "js-yaml";
 const yaml = jsYaml as {
@@ -31,6 +31,53 @@ const REPO_ROOT = join(import.meta.dir, "..", "..");
 // ---------------------------------------------------------------------------
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isInsideRepo(filePart: string): boolean {
+  if (isAbsolute(filePart)) return false;
+  const resolved = join(REPO_ROOT, filePart);
+  const rel = relative(REPO_ROOT, resolved);
+  if (rel.startsWith("..") || isAbsolute(rel)) return false;
+  if (rel === "") return false;
+  return resolved === REPO_ROOT || resolved.startsWith(REPO_ROOT + sep);
+}
+
+function extractReExportedNames(code: string): Set<string> {
+  const names = new Set<string>();
+  const blockPattern = /\bexport\s*(?:type\s+)?\{([^}]*)\}/g;
+  for (const match of code.matchAll(blockPattern)) {
+    const body = match[1] ?? "";
+    for (const rawEntry of body.split(",")) {
+      const entry = rawEntry.trim();
+      if (!entry) continue;
+      const aliasMatch = entry.match(/^[\w$]+\s+as\s+([\w$]+)$/);
+      if (aliasMatch && aliasMatch[1]) {
+        names.add(aliasMatch[1]);
+        continue;
+      }
+      const bareMatch = entry.match(/^([\w$]+)$/);
+      if (bareMatch && bareMatch[1]) {
+        names.add(bareMatch[1]);
+      }
+    }
+  }
+  return names;
+}
+
+function hasNamedDeclaration(code: string, name: string): boolean {
+  const escName = escapeRegex(name);
+  const fnPattern = new RegExp(
+    `\\bexport\\s+(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s+${escName}\\b`
+  );
+  if (fnPattern.test(code)) return true;
+  const classPattern = new RegExp(
+    `\\bexport\\s+(?:default\\s+)?(?:abstract\\s+)?class\\s+${escName}\\b`
+  );
+  if (classPattern.test(code)) return true;
+  const keywordPattern = new RegExp(
+    `\\bexport\\s+(?:const|let|var|interface|type|enum)\\s+${escName}\\b`
+  );
+  return keywordPattern.test(code);
 }
 
 interface CrossRefIssue {
@@ -61,6 +108,9 @@ function checkOneRef(ref: string): { ok: true } | { ok: false; reason: string } 
   }
   const filePart = ref.slice(0, sepIdx);
   const tail = ref.slice(sepIdx + 1);
+  if (!isInsideRepo(filePart)) {
+    return { ok: false, reason: `path escapes repo root: ${filePart}` };
+  }
   const fullPath = join(REPO_ROOT, filePart);
   if (!existsSync(fullPath)) {
     return { ok: false, reason: `missing file: ${filePart}` };
@@ -74,13 +124,7 @@ function checkOneRef(ref: string): { ok: true } | { ok: false; reason: string } 
     }
     return { ok: true };
   }
-  const declPattern = new RegExp(
-    `\\bexport\\s+(?:async\\s+|default\\s+)?(?:function|class|const|let|var|interface|type|enum)\\s+${escapeRegex(tail)}\\b`
-  );
-  const reExportPattern = new RegExp(
-    `\\bexport\\s*\\{[^}]*\\b${escapeRegex(tail)}\\b[^}]*\\}`
-  );
-  if (declPattern.test(code) || reExportPattern.test(code)) {
+  if (hasNamedDeclaration(code, tail) || extractReExportedNames(code).has(tail)) {
     return { ok: true };
   }
   return { ok: false, reason: `export not found: ${tail}` };
@@ -170,6 +214,90 @@ describe("cross_ref_code file:line resolution", () => {
     const result = checkOneRef("src/domain/snapshot-id.ts:0");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain("out of range");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex PR #72 round 1 P2 regression coverage
+// ---------------------------------------------------------------------------
+
+describe("Codex P2 #1 — re-export alias name validation", () => {
+  const fixture = "tests/lint/fixtures/cross_ref_code_fixtures.ts";
+
+  it("accepts the alias (right-hand side) of `export { foo as bar }`", () => {
+    expect(checkOneRef(`${fixture}:renamedExternal`)).toEqual({ ok: true });
+  });
+
+  it("rejects the internal source name on the left-hand side of `as`", () => {
+    const result = checkOneRef(`${fixture}:internalSecret`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("export not found");
+  });
+
+  it("extractReExportedNames does not include the import-name side", () => {
+    const code = readFileSync(join(REPO_ROOT, fixture), "utf-8");
+    const names = extractReExportedNames(code);
+    expect(names.has("renamedExternal")).toBe(true);
+    expect(names.has("internalSecret")).toBe(false);
+  });
+});
+
+describe("Codex P2 #2 — reject paths escaping repo root", () => {
+  it("rejects absolute path", () => {
+    const result = checkOneRef("/etc/passwd:root");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("escapes repo root");
+  });
+
+  it("rejects `../` traversal", () => {
+    const result = checkOneRef("../sibling-repo/src/foo.ts:x");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("escapes repo root");
+  });
+
+  it("rejects nested `../../` traversal", () => {
+    const result = checkOneRef("src/../../../../etc/passwd:x");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("escapes repo root");
+  });
+
+  it("accepts plain relative path", () => {
+    expect(isInsideRepo("src/domain/snapshot-id.ts")).toBe(true);
+  });
+});
+
+describe("Codex P2 #3 — default-async / generator / abstract export forms", () => {
+  const fixture = "tests/lint/fixtures/cross_ref_code_fixtures.ts";
+
+  it("matches `export default async function name()`", () => {
+    expect(checkOneRef(`${fixture}:defaultAsyncDecl`)).toEqual({ ok: true });
+  });
+
+  it("matches `export async function* name()` (generator + async)", () => {
+    expect(checkOneRef(`${fixture}:plainAsyncGenerator`)).toEqual({ ok: true });
+  });
+
+  it("matches `export function* name()` (generator only)", () => {
+    expect(checkOneRef(`${fixture}:plainGenerator`)).toEqual({ ok: true });
+  });
+
+  it("matches `export async function name()`", () => {
+    expect(checkOneRef(`${fixture}:plainAsync`)).toEqual({ ok: true });
+  });
+
+  it("matches plain `export function name()`", () => {
+    expect(checkOneRef(`${fixture}:plainFunction`)).toEqual({ ok: true });
+  });
+
+  it("matches `export class`, `export interface`, `export type`, `export enum`", () => {
+    expect(checkOneRef(`${fixture}:PlainClass`)).toEqual({ ok: true });
+    expect(checkOneRef(`${fixture}:PlainInterface`)).toEqual({ ok: true });
+    expect(checkOneRef(`${fixture}:PlainType`)).toEqual({ ok: true });
+    expect(checkOneRef(`${fixture}:PlainEnum`)).toEqual({ ok: true });
+  });
+
+  it("matches `export const name`", () => {
+    expect(checkOneRef(`${fixture}:plainConst`)).toEqual({ ok: true });
   });
 });
 
