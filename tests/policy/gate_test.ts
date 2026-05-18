@@ -706,6 +706,63 @@ describe("evaluatePolicyGate (ADR-0017 INV-0017-3 + INV-0017-4 합산)", () => {
     ).toThrow(/invalid stage/);
   });
 
+  it("evaluatePolicyGate: throws on invalid archivePolicy typo (Codex PR #68 round 5 P1 finding 1 — fail-closed for malformed policy)", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "content_production",
+        ctx: {
+          ...permissiveCtx(),
+          intendedAction: "extract_full_text",
+          // @ts-expect-error — runtime validation test (typo of full_snapshot_allowed)
+          archivePolicy: "full_snapshot_allowd",
+        },
+      })
+    ).toThrow(/invalid archivePolicy/);
+  });
+
+  it("evaluatePolicyGate: throws on invalid rawCloudPolicy typo", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "extract_cache_embed_cloud_upload",
+        ctx: {
+          ...permissiveCtx(),
+          intendedAction: "r2_upload",
+          // @ts-expect-error — runtime validation test
+          rawCloudPolicy: "allowed_publik",
+        },
+      })
+    ).toThrow(/invalid rawCloudPolicy/);
+  });
+
+  it("evaluatePolicyGate: throws on invalid externalLlmPolicy typo", () => {
+    expect(() =>
+      evaluatePolicyGate({
+        stage: "interactive_exploration",
+        ctx: {
+          ...permissiveCtx(),
+          intendedAction: "external_llm_call_with_raw_text",
+          // @ts-expect-error — runtime validation test
+          externalLlmPolicy: "alowed",
+        },
+      })
+    ).toThrow(/invalid externalLlmPolicy/);
+  });
+
+  it("evaluatePolicyGate: accepts 'unknown' sentinel for all 3 policy fields", () => {
+    const result = evaluatePolicyGate({
+      stage: "discovery",
+      ctx: {
+        sourceId: null,
+        archivePolicy: "unknown",
+        rawCloudPolicy: "unknown",
+        externalLlmPolicy: "unknown",
+        intendedAction: "discovery_fetch",
+        sourceName: "Unknown Source",
+      },
+    });
+    expect(result.gateMode).toBe("inline_warn");
+  });
+
   it("rationale includes all triggered risk IDs when multiple fire", () => {
     const ctx: RiskTriggerContext = {
       ...permissiveCtx(),

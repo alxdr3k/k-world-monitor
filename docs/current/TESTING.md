@@ -55,7 +55,7 @@ bun run invariant:write
 |---|---|---|---|---|
 | install | `bun install` | ci.yml install job | yes | bun is mandatory runtime |
 | typecheck | `bun run typecheck` | ci.yml typecheck job | yes (after Q-048 resolution) | tsc --noEmit --pretty false |
-| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 26 file / **787 cases** — Bun native runner (post-Cycle-10 INFRA-1B.3.h7-gate-evidence-hardening pending: +7 tests in r2_invariant_scanner_test.ts parseSnapIdFromRationale describe — invalid trailing char (`@` / `.` / `/` / `=`) + whitespace-no-semicolon + end-of-string lone snap_id + canonical happy path; previous baseline 710 = Cycle 9 OPS-1B.h4-r2-audit-column-rationale-drift-axis). |
+| unit tests | `bun test` | ci.yml test job | yes (after Q-048 resolution) | 26 file / **791 cases** — Bun native runner (post-Cycle-10 INFRA-1B.3.h7-gate-evidence-hardening pending: +7 tests in r2_invariant_scanner_test.ts parseSnapIdFromRationale describe — invalid trailing char (`@` / `.` / `/` / `=`) + whitespace-no-semicolon + end-of-string lone snap_id + canonical happy path; previous baseline 710 = Cycle 9 OPS-1B.h4-r2-audit-column-rationale-drift-axis). |
 | migration dry-run | `bun run migrate --dry-run` | (manual) | recommended | verifies all v1~v8 schema files parse (v7 = policy_decisions ADD COLUMN intended_action / INFRA-1B.3.x-audit; v8 = policy_decisions ADD COLUMN upload_attempt_id + 3 enum/required triggers / INFRA-1B.3.h3-audit-hardening AI-P1-7) |
 | invariant validation | `bun run invariant:check` | invariant-check.yml | no (warning only) | INV-0002-1: never hard-fails |
 | fixture regression | `bun run invariant:fixture:scope-creep` | (manual / pre-PR) | recommended | Case 1 detection |
@@ -73,7 +73,7 @@ Workflow files (활성):
 | File | Trigger | Required? | Notes |
 |---|---|---|---|
 | `.github/workflows/doc-governance.yml` | PR + workflow_dispatch | yes (required, 기존) | Ruby doc lint — duplicate / dangling / must-REQ-AC-link checks |
-| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (787 cases) + migrate dry-run (pending migration listing only — actual parse/apply validation is `DEPLOY-1A.0-migration-validation` slice 영역, Cycle 10 Finding 4 claim correction) |
+| `.github/workflows/ci.yml` | PR + push | **policy: required (DEC-020 Q-048 accepted) — branch protection admin task 미실시** (3-state 분리, 본 표 아래 "CI required check 등록 3-state" 참조) | bun install + typecheck + bun test (791 cases) + migrate dry-run (pending migration listing only — actual parse/apply validation is `DEPLOY-1A.0-migration-validation` slice 영역, Cycle 10 Finding 4 claim correction) |
 | `.github/workflows/invariant-check.yml` | PR + push (paths-scoped) | advisory (warning-level by ADR-0002 INV-0002-1, never required) | bun run invariant:regen + invariant:check + fixture regression (boilerplate fixture 부재 시 informational skip) |
 | `.github/workflows/doc-freshness.yml` | PR | advisory (soft warning) | DEC-020 Q-048 활성. src/scripts/tests/migrations 변경 시 thin docs / IMPLEMENTATION_PLAN / current-state / 06_ACCEPTANCE_TESTS / ADR 동반 갱신 누락 PR 코멘트 |
 
@@ -109,7 +109,7 @@ advisory).
 - PR `claude/comprehensive-code-review-FE0w3` 가 `ci.yml.example` →
   `ci.yml` + `invariant-check.yml.example` → `invariant-check.yml` rename
   으로 (1) workflow exists stage 진입.
-- 코드 테스트 (`bun test`) 는 26 file / **787 케이스** — Bun native runner
+- 코드 테스트 (`bun test`) 는 26 file / **791 케이스** — Bun native runner
   1 분 이내 expected. History: 490 → 515 (INFRA-1B.3.x-audit PR #39) →
   521 (INFRA-1B.3.h1-policy-fix PR #41, AI-P0-1) → 544 (INFRA-1B.1.h1-
   source-bootstrap-neo4j PR #44, AI-P1-2) → 561 (INFRA-1B.3.h2-queue-cli

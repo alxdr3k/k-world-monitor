@@ -33,8 +33,11 @@
 // v8 enum trigger WHEN clause).
 
 import {
+  isArchivePolicy,
+  isExternalLlmPolicy,
   isPipelineAction,
   isPipelineStage,
+  isRawCloudPolicy,
   type ArchivePolicy,
   type ExternalLlmPolicy,
   type PipelineAction,
@@ -537,6 +540,39 @@ export function evaluatePolicyGate(
   if (!isPipelineAction(input.ctx.intendedAction)) {
     throw new Error(
       `evaluatePolicyGate: invalid intendedAction (must be PIPELINE_ACTION enum): ${JSON.stringify(input.ctx.intendedAction)}`
+    );
+  }
+  // Codex PR #68 round 5 P1 fix — policy field runtime fail-closed
+  // (Findings 1 + 2 — detectPaywalledSourceFetch / detectTermsViolation
+  // silently returned non-risk for typo'd archivePolicy like
+  // `full_snapshot_allowd` / `do_not_collet` → stage default fallback
+  // bypass). The 3 source-policy fields accept the ArchivePolicy /
+  // RawCloudPolicy / ExternalLlmPolicy enums + the literal "unknown"
+  // sentinel (used for unregistered sources). Any other string is a
+  // call-site bug — throw before any detector runs so the malformed
+  // value cannot bypass trigger evaluation.
+  if (
+    input.ctx.archivePolicy !== "unknown" &&
+    !isArchivePolicy(input.ctx.archivePolicy)
+  ) {
+    throw new Error(
+      `evaluatePolicyGate: invalid archivePolicy (must be ARCHIVE_POLICY enum or 'unknown' sentinel): ${JSON.stringify(input.ctx.archivePolicy)}`
+    );
+  }
+  if (
+    input.ctx.rawCloudPolicy !== "unknown" &&
+    !isRawCloudPolicy(input.ctx.rawCloudPolicy)
+  ) {
+    throw new Error(
+      `evaluatePolicyGate: invalid rawCloudPolicy (must be RAW_CLOUD_POLICY enum or 'unknown' sentinel): ${JSON.stringify(input.ctx.rawCloudPolicy)}`
+    );
+  }
+  if (
+    input.ctx.externalLlmPolicy !== "unknown" &&
+    !isExternalLlmPolicy(input.ctx.externalLlmPolicy)
+  ) {
+    throw new Error(
+      `evaluatePolicyGate: invalid externalLlmPolicy (must be EXTERNAL_LLM_POLICY enum or 'unknown' sentinel): ${JSON.stringify(input.ctx.externalLlmPolicy)}`
     );
   }
   const triggers = detectRisks(input.ctx);
