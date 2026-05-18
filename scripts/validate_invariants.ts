@@ -11,7 +11,7 @@
  *   --ci                annotation-only mode (never writes files)
  */
 
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, realpathSync } from "fs";
 import { join, basename, isAbsolute, relative, sep } from "path";
 
 // js-yaml — types cast because @types/js-yaml may not expose all overloads
@@ -303,21 +303,74 @@ function escapeRegex(s: string): string {
 }
 
 /**
- * Reject paths that escape the repo root — absolute paths, `..` traversal,
- * symlink escapes via `path.resolve` not staying inside REPO_ROOT.
- * Codex PR #72 round 1 P2: cross_ref_code is documented as repo-root-
- * relative; absolute/`../` paths produced non-reproducible "reachable"
- * results across host environments.
+ * Reject paths that escape the repo root.
+ * Codex PR #72 round 1 P2 (#2): pre-fix accepted absolute paths + `..`
+ * traversal.
+ * Codex PR #72 round 2 P2 (#2): path-string check alone did not follow
+ * symlinks — a repo-relative symlink pointing outside REPO_ROOT would
+ * still pass. Both syntactic and canonicalized checks are applied; the
+ * canonicalized form is computed via `realpathSync` on the deepest
+ * existing ancestor so missing files still fail-open to the existsSync
+ * check downstream (no spurious "escapes repo root" for to-be-created
+ * paths). The canonical repo root itself is also realpath-resolved so
+ * the comparison is symmetric.
  */
 function isInsideRepo(filePart: string): boolean {
   if (isAbsolute(filePart)) return false;
-  const resolved = join(REPO_ROOT, filePart);
-  const rel = relative(REPO_ROOT, resolved);
+  const joined = join(REPO_ROOT, filePart);
+  const rel = relative(REPO_ROOT, joined);
   if (rel.startsWith("..") || isAbsolute(rel)) return false;
-  // Disallow `.` segments resolving to REPO_ROOT itself (would mean filePart was empty / pure '.')
   if (rel === "") return false;
-  // Defense-in-depth: ensure the resolved path starts with REPO_ROOT + sep
-  return resolved === REPO_ROOT || resolved.startsWith(REPO_ROOT + sep);
+  if (joined !== REPO_ROOT && !joined.startsWith(REPO_ROOT + sep)) return false;
+
+  // Canonicalize via realpathSync to defeat symlink escapes. Walk up to the
+  // nearest existing ancestor so non-existing files don't crash this check
+  // (they fail later at existsSync with a clearer warning).
+  const canonicalRoot = (() => {
+    try { return realpathSync(REPO_ROOT); } catch { return REPO_ROOT; }
+  })();
+  let probe = joined;
+  let canonicalResolved: string | null = null;
+  // Safety bound: REPO_ROOT length / 2 is a generous depth ceiling.
+  for (let depth = 0; depth < 64; depth++) {
+    try {
+      canonicalResolved = realpathSync(probe);
+      break;
+    } catch {
+      const parent = relative(REPO_ROOT, probe);
+      if (parent === "" || parent === "." || probe === sep) break;
+      const nextProbe = join(probe, "..");
+      if (nextProbe === probe) break;
+      probe = nextProbe;
+    }
+  }
+  if (canonicalResolved === null) {
+    // No ancestor exists (extreme edge): rely on the syntactic check alone.
+    return true;
+  }
+  return (
+    canonicalResolved === canonicalRoot ||
+    canonicalResolved.startsWith(canonicalRoot + sep)
+  );
+}
+
+/**
+ * Physical line count that matches `wc -l + 1 if file does not end with
+ * newline` semantics — i.e., the number of addressable lines a human or
+ * editor sees. `String#split("\n").length` overcounts by one when the
+ * file is newline-terminated (the final split yields an empty element).
+ * Codex PR #72 round 2 P2 (#1): pre-fix accepted `last_line + 1` as
+ * in-range for newline-terminated files (which is most source code).
+ */
+function physicalLineCount(code: string): number {
+  if (code === "") return 0;
+  const parts = code.split("\n");
+  // If the file ends with `\n`, split produces one trailing empty entry;
+  // drop it so the count matches the highest addressable line.
+  if (parts.length > 0 && parts[parts.length - 1] === "") {
+    return parts.length - 1;
+  }
+  return parts.length;
 }
 
 /**
@@ -333,10 +386,13 @@ function extractReExportedNames(code: string): Set<string> {
   for (const match of code.matchAll(blockPattern)) {
     const body = match[1] ?? "";
     for (const rawEntry of body.split(",")) {
-      const entry = rawEntry.trim();
+      // Strip an optional `type ` prefix on individual specifiers — TypeScript
+      // 4.5+ allows `export { type Foo }` and `export { type Foo as Bar }` to
+      // mark a single specifier as type-only inside a value re-export block.
+      // Codex PR #72 round 2 P2 (#3): pre-fix dropped these specifiers and
+      // emitted false `export not found` warnings for type-only re-exports.
+      const entry = rawEntry.trim().replace(/^type\s+/, "");
       if (!entry) continue;
-      // `foo as bar` → importable name is `bar`. `foo` alone → importable
-      // name is `foo`. `default as bar` → importable name is `bar`.
       const aliasMatch = entry.match(/^[\w$]+\s+as\s+([\w$]+)$/);
       if (aliasMatch && aliasMatch[1]) {
         names.add(aliasMatch[1]);
@@ -422,7 +478,7 @@ function checkCrossRefCode(): void {
         }
         if (/^\d+$/.test(tail)) {
           const lineNum = Number.parseInt(tail, 10);
-          const lineCount = code.split("\n").length;
+          const lineCount = physicalLineCount(code);
           if (lineNum < 1 || lineNum > lineCount) {
             warn(
               file,
