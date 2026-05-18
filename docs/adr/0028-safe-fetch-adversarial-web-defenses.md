@@ -75,6 +75,8 @@ invariants:
       JSON API → `{` 또는 `[` 접두사 필수.
       실행 파일(ELF magic, PE header, Mach-O magic) 수신 시 즉시 거부.
     status: active
+    cross_ref_code:
+      - src/discovery/fetch/safe-fetch.ts:safeFetch
 
 preconditions:
   - id: PRE-0028-1
