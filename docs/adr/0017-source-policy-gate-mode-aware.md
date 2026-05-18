@@ -29,6 +29,8 @@ invariants:
   - id: INV-0017-1
     statement: source_policy는 3 필드를 보유한다 — archive_policy ∈ {metadata_only, excerpt_only, full_snapshot_allowed, do_not_collect}, raw_cloud_policy ∈ {always_prohibited, allowed_public_data_only}, external_llm_policy ∈ {allowed, manual_review_required, prohibited}. default는 archive_policy=metadata_only / raw_cloud_policy=always_prohibited / external_llm_policy=manual_review_required (R7/Q2, R14/Q9-5)
     status: active
+    cross_ref_code:
+      - src/storage/source-registry/seed.ts:seedSources
   - id: INV-0017-2
     statement: policy_gate는 mode-aware다 — {inline_block, inline_warn, batch_report}. 단계별 default mode를 따른다 (R18)
     status: active
