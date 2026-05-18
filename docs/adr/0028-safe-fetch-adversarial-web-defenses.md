@@ -65,6 +65,8 @@ invariants:
       fetch 를 거부하고 `RobotsDisallowedError` 를 throw 한다.
       User-Agent 는 운영자 설정 값(기본 `k-world-monitor/1.0`)을 사용한다.
     status: active
+    cross_ref_code:
+      - src/discovery/fetch/safe-fetch.ts:safeFetch
   - id: INV-0028-6
     statement: |
       컨텐츠 타입 검증: safe-fetch 는 응답 body 첫 512 바이트를 sniff 하여
