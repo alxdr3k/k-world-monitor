@@ -386,17 +386,26 @@ export function extractReExportedNames(code: string): Set<string> {
       // emitted false `export not found` warnings for type-only re-exports.
       const entry = rawEntry.trim().replace(/^type\s+/, "");
       if (!entry) continue;
-      const aliasMatch = entry.match(/^[\w$]+\s+as\s+([\w$]+)$/);
+      // Codex PR #72 round 6 P3 (#3): alias + bare regexes used to be
+      // ASCII-only (`[\w$]+`), so `export { 한글 as 공개 }` and other
+      // non-ASCII identifiers were silently dropped from the importable
+      // set. Now use Unicode-aware identifier classes via `\p{ID_Start}`
+      // + `\p{ID_Continue}` with the `/u` flag — consistent with the
+      // hasNamedDeclaration boundary check upgraded in round 5.
+      const aliasMatch = entry.match(
+        /^[\p{ID_Start}$_][\p{ID_Continue}$]*\s+as\s+([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u
+      );
       if (aliasMatch && aliasMatch[1]) {
         names.add(aliasMatch[1]);
         continue;
       }
-      const bareMatch = entry.match(/^([\w$]+)$/);
+      const bareMatch = entry.match(/^([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u);
       if (bareMatch && bareMatch[1]) {
         names.add(bareMatch[1]);
       }
-      // Anything else (malformed entry) is silently skipped — the validator
-      // does not own TypeScript syntax validation.
+      // Anything else (malformed entry, or ES2020+ string-literal alias
+      // `foo as "name"` — Cycle 14 follow-up anchor) is silently skipped.
+      // The validator does not own TypeScript syntax validation.
     }
   }
   return names;
@@ -445,14 +454,20 @@ export function stripCommentsAndStrings(code: string): string {
     .replace(/`(?:\\[\s\S]|\$\{[^}]*\}|[^`\\])*`/g, "``")
     .replace(/"(?:\\[\s\S]|[^"\\])*"/g, '""')
     .replace(/'(?:\\[\s\S]|[^'\\])*'/g, "''")
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/\/\/[^\n]*/g, " ")
-    // Regex literal heuristic: opener must be at start-of-line or follow
-    // an operator/punctuator/keyword token. Avoids `a / b` matches.
+    // Codex PR #72 round 6 P2 (#2): line-comment strip used to run BEFORE
+    // regex-literal strip, so a valid regex like `/https?:\/\//` had its
+    // inner `//` interpreted as a line-comment opener and the rest of the
+    // line (including any real export) was deleted. Regex literals are now
+    // stripped before the line-comment pass. Block comments stay before
+    // line comments because block-comment content can be multi-line; their
+    // strip order is independent of regex literals (regex bodies can't
+    // contain unescaped block-comment terminators).
     .replace(
       /(^|[\s=(,;:!&|?+\-*%<>{}[\]^~]|\breturn\b|\btypeof\b|\bin\b|\bof\b|\bvoid\b)(\/(?:\\[\s\S]|\[[^\]]*\]|[^/\n\\])+\/[gimsuyd]*)/g,
       "$1 "
-    );
+    )
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ");
 }
 
 export function hasNamedDeclaration(code: string, name: string): boolean {
@@ -551,13 +566,25 @@ export function checkCrossRefCode(): void {
     const fm = parseFrontmatter(file);
     if (!fm?.invariants) continue;
     for (const inv of fm.invariants) {
-      // Codex PR #72 round 5 P1 (#2): defensive cast — YAML may yield
-      // any type. `checkOneCrossRef` itself type-guards so we forward
-      // each entry as `unknown` and let the helper produce a structured
-      // warning instead of throwing on `.lastIndexOf` of a non-string.
-      const refs = (inv.cross_ref_code ?? []) as unknown[];
-      if (refs.length === 0) continue;
-      for (const ref of refs) {
+      const refsRaw = (inv as { cross_ref_code?: unknown }).cross_ref_code;
+      if (refsRaw === undefined || refsRaw === null) continue;
+      // Codex PR #72 round 6 P2 (#1): YAML allows an unwrapped scalar
+      // when only one value is intended (`cross_ref_code: src/foo.ts:bar`).
+      // The pre-fix path cast that scalar to `unknown[]` and then iterated
+      // it — for a string that means per-character iteration, producing a
+      // burst of meaningless warnings. Validate the array shape up front
+      // so an operator gets ONE actionable schema warning instead.
+      if (!Array.isArray(refsRaw)) {
+        warn(
+          file,
+          `${inv.id} cross_ref_code must be a YAML list (got ${typeof refsRaw}): ${JSON.stringify(refsRaw)}`
+        );
+        continue;
+      }
+      // Codex PR #72 round 5 P1 (#2): `checkOneCrossRef` itself type-guards
+      // each entry so non-string list members surface as structured warnings
+      // rather than throws on `.lastIndexOf`.
+      for (const ref of refsRaw as unknown[]) {
         const result = checkOneCrossRef(ref);
         if (!result.ok) {
           const refRepr = typeof ref === "string" ? ref : JSON.stringify(ref);

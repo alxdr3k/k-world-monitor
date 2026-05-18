@@ -533,6 +533,46 @@ describe("stripCommentsAndStrings handles strings-before-block-comments (round 5
   });
 });
 
+describe("stripCommentsAndStrings strips regex literals before line comments (round 6 P2 #2)", () => {
+  it("preserves real exports following a regex containing `//`", () => {
+    const code = `const re = /https?:\\/\\//; export const keep = 1;\n`;
+    expect(hasNamedDeclaration(code, "keep")).toBe(true);
+  });
+
+  it("preserves real exports following a regex containing `/*`", () => {
+    const code = `const re = /\\/\\*/; export const survive = 1;\n`;
+    expect(hasNamedDeclaration(code, "survive")).toBe(true);
+  });
+
+  it("still strips a genuine line comment that follows a regex literal", () => {
+    const code = `const re = /pattern/; // export function ghostFn(): void {}\nexport function realFn(): void {}\n`;
+    expect(hasNamedDeclaration(code, "ghostFn")).toBe(false);
+    expect(hasNamedDeclaration(code, "realFn")).toBe(true);
+  });
+});
+
+describe("extractReExportedNames accepts Unicode identifiers (round 6 P3 #3)", () => {
+  it("captures the alias side `한글 as 공개`", () => {
+    const code = "export { 한글 as 공개 };\n";
+    const names = extractReExportedNames(code);
+    expect(names.has("공개")).toBe(true);
+    expect(names.has("한글")).toBe(false);
+  });
+
+  it("captures a bare non-ASCII specifier `export { 한글 }`", () => {
+    expect(extractReExportedNames("export { 한글 };\n").has("한글")).toBe(true);
+  });
+
+  it("ignores ES2020+ string-literal aliases (defer — Cycle 14 follow-up)", () => {
+    // Documents the explicit defer decision: `export { foo as "string-name" }`
+    // is not yet supported and is logged as a follow-up anchor in the PR
+    // description / IMPL_PLAN. This test pins the current behavior so a
+    // future cycle that adds the feature also updates this assertion.
+    const code = `export { foo as "string-name" };\n`;
+    expect(extractReExportedNames(code).has("string-name")).toBe(false);
+  });
+});
+
 describe("test imports validator helpers directly (round 3 P2 — parallel impl)", () => {
   it("checkOneCrossRef is the same function the validator's checkCrossRefCode calls", () => {
     // Sanity probe: if test were re-implementing logic, a bug fix in the
