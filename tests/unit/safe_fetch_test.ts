@@ -9,6 +9,8 @@ import {
   parseRobotsTxt,
   isRobotsPathDisallowed,
   sniffMagic,
+  classifyDeclaredContentType,
+  isContentTypeMismatch,
   safeFetch,
   clearRobotsCache,
   MAX_BYTES,
@@ -16,6 +18,7 @@ import {
   BodyTooLargeError,
   RobotsDisallowedError,
   RedirectError,
+  ContentTypeMismatchError,
   type RobotsRules,
   type DnsLookupFn,
   type FetchFn,
@@ -311,6 +314,122 @@ describe("sniffMagic", () => {
   it("returns unknown for binary blob", () => {
     const blob = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
     expect(sniffMagic(blob)).toBe("unknown");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyDeclaredContentType — declared Content-Type semantic group
+// (INV-0028-6 — operator D1 2026-05-18)
+// ---------------------------------------------------------------------------
+
+describe("classifyDeclaredContentType", () => {
+  it("classifies application/rss+xml as xml", () => {
+    expect(classifyDeclaredContentType("application/rss+xml")).toBe("xml");
+  });
+  it("classifies application/atom+xml as xml", () => {
+    expect(classifyDeclaredContentType("application/atom+xml")).toBe("xml");
+  });
+  it("classifies application/xml as xml", () => {
+    expect(classifyDeclaredContentType("application/xml")).toBe("xml");
+  });
+  it("classifies text/xml as xml", () => {
+    expect(classifyDeclaredContentType("text/xml")).toBe("xml");
+  });
+  it("classifies application/feed+json as json", () => {
+    expect(classifyDeclaredContentType("application/feed+json")).toBe("json");
+  });
+  it("classifies application/json as json", () => {
+    expect(classifyDeclaredContentType("application/json")).toBe("json");
+  });
+  it("classifies text/html as html", () => {
+    expect(classifyDeclaredContentType("text/html")).toBe("html");
+  });
+  it("strips charset parameter before classification", () => {
+    expect(classifyDeclaredContentType("application/json; charset=utf-8")).toBe("json");
+    expect(classifyDeclaredContentType("text/html; charset=UTF-8")).toBe("html");
+    expect(classifyDeclaredContentType("application/rss+xml; charset=utf-8")).toBe("xml");
+  });
+  it("strips boundary and other parameters", () => {
+    expect(classifyDeclaredContentType("application/json;charset=utf-8;boundary=x")).toBe("json");
+  });
+  it("normalizes case (Application/JSON → json)", () => {
+    expect(classifyDeclaredContentType("Application/JSON")).toBe("json");
+    expect(classifyDeclaredContentType("TEXT/HTML")).toBe("html");
+    expect(classifyDeclaredContentType("Application/RSS+XML")).toBe("xml");
+  });
+  it("trims whitespace around MIME atom", () => {
+    expect(classifyDeclaredContentType("  application/json  ; charset=utf-8")).toBe("json");
+  });
+  it("returns unknown for null", () => {
+    expect(classifyDeclaredContentType(null)).toBe("unknown");
+  });
+  it("returns unknown for undefined", () => {
+    expect(classifyDeclaredContentType(undefined)).toBe("unknown");
+  });
+  it("returns unknown for empty string", () => {
+    expect(classifyDeclaredContentType("")).toBe("unknown");
+  });
+  it("returns unknown for text/plain", () => {
+    expect(classifyDeclaredContentType("text/plain")).toBe("unknown");
+  });
+  it("returns unknown for application/octet-stream", () => {
+    expect(classifyDeclaredContentType("application/octet-stream")).toBe("unknown");
+  });
+  it("returns unknown for completely unknown MIME", () => {
+    expect(classifyDeclaredContentType("application/x-custom-blob")).toBe("unknown");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isContentTypeMismatch — declared vs sniffed compatibility
+// (INV-0028-6 — operator D1 2026-05-18)
+// ---------------------------------------------------------------------------
+
+describe("isContentTypeMismatch", () => {
+  it("matches xml × xml (no mismatch)", () => {
+    expect(isContentTypeMismatch("xml", "xml")).toBe(false);
+  });
+  it("matches json × json (no mismatch)", () => {
+    expect(isContentTypeMismatch("json", "json")).toBe(false);
+  });
+  it("matches html × html (no mismatch)", () => {
+    expect(isContentTypeMismatch("html", "html")).toBe(false);
+  });
+  it("flags xml × json as mismatch", () => {
+    expect(isContentTypeMismatch("xml", "json")).toBe(true);
+  });
+  it("flags json × xml as mismatch", () => {
+    expect(isContentTypeMismatch("json", "xml")).toBe(true);
+  });
+  it("flags json × html as mismatch (HTML error page disguised as JSON API)", () => {
+    expect(isContentTypeMismatch("json", "html")).toBe(true);
+  });
+  it("flags html × json as mismatch", () => {
+    expect(isContentTypeMismatch("html", "json")).toBe(true);
+  });
+  it("flags xml × html as mismatch", () => {
+    expect(isContentTypeMismatch("xml", "html")).toBe(true);
+  });
+  it("flags html × xml as mismatch", () => {
+    expect(isContentTypeMismatch("html", "xml")).toBe(true);
+  });
+  it("never flags unknown declared (operator D1: missing Content-Type pass)", () => {
+    expect(isContentTypeMismatch("unknown", "xml")).toBe(false);
+    expect(isContentTypeMismatch("unknown", "json")).toBe(false);
+    expect(isContentTypeMismatch("unknown", "html")).toBe(false);
+    expect(isContentTypeMismatch("unknown", "unknown")).toBe(false);
+  });
+  it("never flags unknown sniffed (small body, no recognizable prefix)", () => {
+    expect(isContentTypeMismatch("xml", "unknown")).toBe(false);
+    expect(isContentTypeMismatch("json", "unknown")).toBe(false);
+    expect(isContentTypeMismatch("html", "unknown")).toBe(false);
+  });
+  it("flags executable sniffed as mismatch (defense in depth)", () => {
+    // Note: in safeFetch, executable is handled by SsrfBlockedError BEFORE
+    // this check fires; this assertion documents the defensive fallback.
+    expect(isContentTypeMismatch("xml", "executable")).toBe(true);
+    expect(isContentTypeMismatch("json", "executable")).toBe(true);
+    expect(isContentTypeMismatch("html", "executable")).toBe(true);
   });
 });
 
@@ -918,5 +1037,225 @@ describe("safeFetch — requestHeaders", () => {
     );
     // Same host — Authorization is preserved
     expect(secondHopHeaders["Authorization"]).toBe("Bearer my-token");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// safeFetch — declared-vs-sniffed Content-Type mismatch (INV-0028-6)
+// Operator decision D1 2026-05-18: production wiring of
+// ContentTypeMismatchError at safe-fetch boundary.
+// ---------------------------------------------------------------------------
+
+describe("safeFetch — declared-vs-sniffed Content-Type mismatch (INV-0028-6)", () => {
+  beforeEach(() => clearRobotsCache());
+
+  it("passes when declared application/json + body sniffs as json", async () => {
+    const fetcher = makeFetcher([
+      { status: 404, body: "" }, // robots.txt 404 → allow
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+        body: '{"feed": []}',
+      },
+    ]);
+    const result = await safeFetch(
+      "https://example.com/api",
+      { maxBytes: MAX_BYTES.json },
+      { dnsLookup: publicDns, fetcher },
+    );
+    expect(result.status).toBe(200);
+    expect(result.contentKind).toBe("json");
+  });
+
+  it("passes when declared application/rss+xml + body sniffs as xml", async () => {
+    const fetcher = makeFetcher([
+      { status: 404, body: "" },
+      {
+        status: 200,
+        headers: { "Content-Type": "application/rss+xml; charset=utf-8" },
+        body: '<?xml version="1.0"?><rss><channel></channel></rss>',
+      },
+    ]);
+    const result = await safeFetch(
+      "https://example.com/feed",
+      { maxBytes: MAX_BYTES.rss },
+      { dnsLookup: publicDns, fetcher },
+    );
+    expect(result.status).toBe(200);
+    expect(result.contentKind).toBe("xml");
+  });
+
+  it("passes when declared text/html + body sniffs as html", async () => {
+    const fetcher = makeFetcher([
+      { status: 404, body: "" },
+      {
+        status: 200,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+        body: "<!doctype html><html><body>ok</body></html>",
+      },
+    ]);
+    const result = await safeFetch(
+      "https://example.com/page",
+      { maxBytes: MAX_BYTES.html },
+      { dnsLookup: publicDns, fetcher },
+    );
+    expect(result.status).toBe(200);
+    expect(result.contentKind).toBe("html");
+  });
+
+  it("throws ContentTypeMismatchError when declared application/json + body is HTML error page", async () => {
+    const fetcher = makeFetcher([
+      { status: 404, body: "" },
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+        body: "<!doctype html><html><body>503 backend error</body></html>",
+      },
+    ]);
+    await expect(
+      safeFetch(
+        "https://example.com/api",
+        { maxBytes: MAX_BYTES.json },
+        { dnsLookup: publicDns, fetcher },
+      ),
+    ).rejects.toThrow(ContentTypeMismatchError);
+  });
+
+  it("throws ContentTypeMismatchError when declared application/rss+xml + body is JSON", async () => {
+    const fetcher = makeFetcher([
+      { status: 404, body: "" },
+      {
+        status: 200,
+        headers: { "Content-Type": "application/rss+xml" },
+        body: '{"error": "wrong endpoint"}',
+      },
+    ]);
+    await expect(
+      safeFetch(
+        "https://example.com/feed",
+        { maxBytes: MAX_BYTES.rss },
+        { dnsLookup: publicDns, fetcher },
+      ),
+    ).rejects.toThrow(ContentTypeMismatchError);
+  });
+
+  it("throws ContentTypeMismatchError when declared text/html + body is JSON", async () => {
+    const fetcher = makeFetcher([
+      { status: 404, body: "" },
+      {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+        body: '{"data": []}',
+      },
+    ]);
+    await expect(
+      safeFetch(
+        "https://example.com/page",
+        { maxBytes: MAX_BYTES.html },
+        { dnsLookup: publicDns, fetcher },
+      ),
+    ).rejects.toThrow(ContentTypeMismatchError);
+  });
+
+  it("passes when Content-Type header is missing (operator D1: no hard fail)", async () => {
+    const fetcher: FetchFn = (url, _init) => {
+      if (url.includes("robots.txt"))
+        return Promise.resolve(new Response("", { status: 404 }));
+      // Build response with NO Content-Type header at all.
+      const headers = new Headers();
+      return Promise.resolve(
+        new Response('{"ok": true}', { status: 200, headers }),
+      );
+    };
+    const result = await safeFetch(
+      "https://example.com/api",
+      { maxBytes: MAX_BYTES.json },
+      { dnsLookup: publicDns, fetcher },
+    );
+    expect(result.status).toBe(200);
+    expect(result.contentKind).toBe("json");
+  });
+
+  it("passes when declared is unrecognized MIME (text/plain etc — no hard fail)", async () => {
+    const fetcher = makeFetcher([
+      { status: 404, body: "" },
+      {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+        body: '{"ok": true}',
+      },
+    ]);
+    const result = await safeFetch(
+      "https://example.com/api",
+      { maxBytes: MAX_BYTES.json },
+      { dnsLookup: publicDns, fetcher },
+    );
+    // text/plain → declared=unknown → no mismatch
+    expect(result.status).toBe(200);
+    expect(result.contentKind).toBe("json");
+  });
+
+  it("passes when body is too small to sniff (contentKind=unknown)", async () => {
+    const fetcher = makeFetcher([
+      { status: 404, body: "" },
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+        body: "",
+      },
+    ]);
+    const result = await safeFetch(
+      "https://example.com/api",
+      { maxBytes: MAX_BYTES.json },
+      { dnsLookup: publicDns, fetcher },
+    );
+    // Empty body → sniffMagic returns unknown → no mismatch
+    expect(result.status).toBe(200);
+    expect(result.contentKind).toBe("unknown");
+  });
+
+  it("ContentTypeMismatchError message includes declared and sniffed", async () => {
+    const fetcher = makeFetcher([
+      { status: 404, body: "" },
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+        body: "<!doctype html><html></html>",
+      },
+    ]);
+    try {
+      await safeFetch(
+        "https://example.com/api",
+        { maxBytes: MAX_BYTES.json },
+        { dnsLookup: publicDns, fetcher },
+      );
+      throw new Error("expected ContentTypeMismatchError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContentTypeMismatchError);
+      expect((err as Error).message).toContain("application/json");
+      expect((err as Error).message).toContain("html");
+    }
+  });
+
+  it("throws SsrfBlockedError (not ContentTypeMismatchError) for executable body", async () => {
+    // SsrfBlockedError branch fires BEFORE mismatch check; this assertion
+    // documents the precedence (executable reject is INV-0028-6 rule 3,
+    // mismatch is rules 1+2).
+    const elf = "\x7fELF" + "\x00".repeat(508);
+    const fetcher = makeFetcher([
+      { status: 404, body: "" },
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+        body: elf,
+      },
+    ]);
+    await expect(
+      safeFetch(
+        "https://example.com/api",
+        { maxBytes: MAX_BYTES.json },
+        { dnsLookup: publicDns, fetcher },
+      ),
+    ).rejects.toThrow(SsrfBlockedError);
   });
 });

@@ -69,7 +69,7 @@
 
 | Path | Purpose |
 |---|---|
-| `src/discovery/fetch/safe-fetch.ts` | `safeFetch()` — SSRF/redirect/size/robots/sniff defenses (ADR-0028 INV-0028-1..6, DEC-017, INFRA-1B.2a) |
+| `src/discovery/fetch/safe-fetch.ts` | `safeFetch()` — SSRF/redirect/size/robots/sniff defenses (ADR-0028 INV-0028-1..6, DEC-017, INFRA-1B.2a). Cycle 32: INV-0028-6 declared-vs-sniffed enforcement adds `classifyDeclaredContentType()` + `isContentTypeMismatch()` exports; Step 8 throws `ContentTypeMismatchError` when declared family (xml/json/html) and sniffed `ContentKind` resolve to incompatible groups (e.g. declared=application/json + body sniffs as HTML error page). Missing / unrecognized Content-Type pass through (operator D1 2026-05-18). |
 | `src/discovery/parse/xml-safe.ts` | `RSS_PARSER` singleton — fast-xml-parser with XXE disabled (DEC-018, INFRA-1B.2a) |
 | `src/discovery/scheduler/semaphore.ts` | Bounded semaphore primitive — async acquire/release (INFRA-1B.2b, ADR-0030 INV-0030-1) |
 | `src/discovery/scheduler/pool.ts` | Global + per-host semaphore pool — 8 global / 1 per-host (INFRA-1B.2b, ADR-0030 INV-0030-1) |
@@ -117,7 +117,7 @@
 | `tests/unit/check_secrets_test.ts` | Pre-commit secret scanner pure-function tests — `isStagedEnvFile` / `isEnvFileExempt` filename guard + `redactMatch` preview + `scanForSecrets` vendor patterns (OpenAI / Anthropic / Google / AWS / GitHub PAT classic+fine-grained+oauth / Doppler) + regex `g`-flag state isolation across files | — (INFRA-1B.5.h1-runbook-setup-hygiene, AI-P1-12) |
 | `tests/unit/r2_invariant_scanner_test.ts` | R2 invariant scanner pure + integration tests — `parseSnapIdFromRationale` (5) + `reconcile` 3-axis + combined (9) + `fetchUploadedAuditRows` / `fetchSourcePolicies` SQLite integration (5) + `fetchR2BackedSnapshots` Neo4j-mock integration (2) + `scanR2Invariants` orchestrator aligned + Axis 3 (2) — 24 tests total | — (OPS-1B.h1-runtime-invariant-scanner, AI-P1-6) |
 | `tests/unit/access_intervention_test.ts` | severity scoring + recorder integration + batch-report generation (26 tests) | TEST-024 (AC-024) |
-| `tests/unit/safe_fetch_test.ts` | safe-fetch defense unit tests (117 tests) | — (ADR-0028, DEC-017) |
+| `tests/unit/safe_fetch_test.ts` | safe-fetch defense unit tests (158 tests — Cycle 32 INV-0028-6 declared-vs-sniffed enforcement: +17 `classifyDeclaredContentType` + 12 `isContentTypeMismatch` + 11 safeFetch integration) | — (ADR-0028, DEC-017) |
 | `tests/unit/xml_safe_test.ts` | xml-safe singleton + XXE block tests | — (DEC-018) |
 | `tests/unit/semaphore_test.ts` | Bounded semaphore primitive | — (INFRA-1B.2b) |
 | `tests/unit/pool_test.ts` | Global + per-host pool acquire/release | — (INFRA-1B.2b) |
