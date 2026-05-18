@@ -33,6 +33,7 @@
 import { monotonicFactory } from "ulid";
 import { getDb } from "../sqlite/connection";
 import type { ArchivePolicy, RawCloudPolicy, R2UploadDecision } from "../../utils/enums";
+import { assertValidSnapId as assertValidSnapIdShared } from "../../domain/snapshot-id";
 
 const ulid = monotonicFactory();
 
@@ -48,52 +49,18 @@ export function newUploadAttemptId(): string {
 }
 
 /**
- * Cycle 7 (INFRA-1B.3.h6-schema-hardening) writer-boundary shape regex.
+ * Writer-boundary snap_id shape guard (Cycle 7 INFRA-1B.3.h6 — closes
+ * the contract that AI-P1-15 left half-measured by enforcing shape at
+ * the v9 column write site, not just at the scanner read site).
  *
- * **Contract semantics**: this is a WEAK token shape — `snap_` prefix +
- * one or more `[A-Za-z0-9_-]` characters anchored at both ends. It is
- * NOT a strict ULID check. The strong ULID guarantee is enforced at the
- * snap_id GENERATION site (snapshot-fingerprint.ts uses `snap_${ulid()}`,
- * ulid library produces Crockford base32 26-char identifiers). This
- * validator's job is to catch malformed inputs at the writer boundary —
- * empty strings, missing prefix, invalid characters from manual SQL /
- * repair scripts / fixture mistakes — not to re-validate ULID format
- * (which would couple the audit ledger writer to the ulid library
- * version and break legacy / test snap_ids that pre-date ULID).
- *
- * Cycle 10 (INFRA-1B.3.h7-gate-evidence-hardening) docstring correction:
- * pre-Cycle-10 docstring said "snap_<ULID>" which over-claimed the
- * guarantee. The actual contract is "snap-prefixed identifier matching
- * `^snap_[A-Za-z0-9_-]+$`". Operators relying on strong ULID format must
- * verify at the generation site (snapshot-fingerprint.ts) or downstream
- * parsers, not via this writer-boundary validator.
- *
- * Must mirror the scanner's `SNAP_ID_SHAPE` regex (defense-in-depth
- * symmetry — see r2-invariant-scanner.ts `validSnapIdOrNull` comment for
- * the two-validator shared-shape rationale).
- */
-const SNAP_ID_SHAPE = /^snap_[A-Za-z0-9_-]+$/;
-
-/**
- * Throws if `value` does not match the writer-boundary snap-prefixed
- * identifier shape (weak token contract — see `SNAP_ID_SHAPE` comment
- * for the semantic boundary vs ULID format).
- *
- * Pre-AI-P1-15 the audit ledger trusted TypeScript's static `string` type
- * for `snapId`. Post-AI-P1-15 the scanner has a column-preferred read
- * + `validSnapIdOrNull()` shape guard at the reader boundary, but the
- * writer (`recordR2UploadDecision`) still wrote any input string into the
- * v9 `snap_id` column without checking shape. Cycle 7 closes the writer
- * boundary so every column write carries a verified shape; reader-side
- * `validSnapIdOrNull()` stays as defense-in-depth for legacy / out-of-
- * band SQL writes.
+ * INFRA-1A.x-shared-snapshot-id-constants moved the regex and core
+ * validator to src/domain/snapshot-id.ts. This wrapper preserves the
+ * legacy single-arg signature + caller-context prefix so existing
+ * importers (tests/unit/audit_policy_decisions_test.ts) and the
+ * `recordR2UploadDecision` error message stay byte-compatible.
  */
 export function assertValidSnapId(value: string): void {
-  if (!SNAP_ID_SHAPE.test(value)) {
-    throw new Error(
-      `recordR2UploadDecision: invalid snap_id shape (must match ^snap_[A-Za-z0-9_-]+$): ${JSON.stringify(value)}`
-    );
-  }
+  assertValidSnapIdShared(value, "recordR2UploadDecision");
 }
 
 export interface R2UploadAuditInput {

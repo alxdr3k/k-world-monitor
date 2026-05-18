@@ -6,15 +6,21 @@
  * The prefix list is canonical — every write must pass checkPermittedPrefix().
  */
 
+import { SNAPSHOT_R2_KEY_PREFIX } from "../../domain/snapshot-id";
+
 // Canonical permitted R2 prefixes (from docs/05_RUNBOOK.md DEC-007).
 // Order matters for display only; enforcement uses startsWith.
+//
+// SNAPSHOT_R2_KEY_PREFIX is imported from src/domain/snapshot-id so the
+// snapshot-stage prefix literal stays in lockstep with snapshot-fingerprint
+// (r2Put key construction) and r2-invariant-scanner (expectedR2Key payload).
 export const PERMITTED_PREFIXES = [
   "backups/neo4j/",
   "backups/sqlite/",
   "audit/jsonl/",
   "tmp/multipart/",
   "permitted_artifact/dataset/",
-  "permitted_artifact/derived/snapshot/",
+  SNAPSHOT_R2_KEY_PREFIX,
   "permitted_artifact/derived/dossier/",
   "permitted_artifact/derived/publication/",
   "permitted_artifact/evidence-pack/",
