@@ -64,6 +64,9 @@ invariants:
     status: active
   - id: INV-0012-7
     statement: 외부 LLM에 raw third-party text를 보낼 때는 source_policy.external_llm_policy ≠ prohibited를 명시적으로 만족해야 한다. policy_gate(ADR-0017)가 이 검사를 inline_block한다
+    status: active
+    cross_ref_code:
+      - src/pipeline/policy-gate/risk-triggers.ts:detectRisks
 
 preconditions:
   - id: PRE-0012-1
