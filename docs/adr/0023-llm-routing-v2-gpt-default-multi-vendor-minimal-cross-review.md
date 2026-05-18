@@ -27,6 +27,8 @@ invariants:
   - id: INV-0023-1
     statement: LLM router default vendor = **OpenAI (GPT 계열)**. 각 단계의 default 모델은 OpenAI Tier N 모델이며, 다른 vendor 사용은 (a) 도메인 명확 우위 입증 (운영 데이터 / SPIKE) 또는 (b) cross-vendor review 단계 강제 또는 (c) 탐색(검색 grounding) 보조 + 동일 tier 비용효율 우위, 3 조건 중 하나 충족 시에만 허용.
     status: active
+    cross_ref_code:
+      - src/ops/run-ledger.ts:startRun
   - id: INV-0023-2
     statement: Tier 0 (frontier reasoning, judgment / validation) = **OpenAI frontier reasoning model with extended thinking** (default) + **Anthropic frontier reasoning model with high effort** (cross-vendor review only). Google (Gemini) 사용 절대 금지. 두 모델은 성능/특성 기준으로 동 tier (Anthropic frontier = source-grounded reasoning + agentic long-task 우위, OpenAI extended thinking = 일반 frontier reasoning 우위). 가격 단독 매핑 금지. 실제 model snapshot 은 `data/llm_routing.yaml` operational config — ADR 본문은 capability tier 만 lock.
     status: active
