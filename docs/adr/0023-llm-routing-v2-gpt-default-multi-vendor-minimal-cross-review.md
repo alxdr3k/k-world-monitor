@@ -47,6 +47,8 @@ invariants:
   - id: INV-0023-7
     statement: run_ledger 확장 — `vendor` (openai/anthropic/google), `tier` (0/1/2/3), `cross_vendor_review_of` (FK to other run_id, nullable), `prompt_version`, `system_prompt_sha256`, `cached_tokens`, `batch_id`, `domain_override_reason` (text, nullable). ADR-0006 INV-0006-5 의 확장.
     status: active
+    cross_ref_code:
+      - src/ops/run-ledger.ts:startRun
   - id: INV-0023-8
     statement: Quote substring 검증 (post-LLM deterministic) 은 모든 vendor 의 모든 LLM 호출에 의무 — vendor 별 hallucination rate 차이와 무관. faithfulness_rate ≥ 0.99 KPI.
     status: active
