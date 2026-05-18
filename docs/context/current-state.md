@@ -173,19 +173,22 @@ injection containment / discovery worker concurrency / research app stack)
 
 ### Planned follow-up anchors (NOT gate-blocking, registered for sequencing only)
 
-- `INFRA-1A.9.h1-safe-fetch-raw-fetch-static-check` (Opus PR #66~#78
-  adversarial review F4 + GPT 합의 2026-05-18, **NOT gate-blocking,
-  P2 priority**): ADR-0028 INV-0028-1 ("Discovery worker 의 모든
-  outbound HTTP 요청은 safe-fetch 를 통해야 한다") 의 enforcement 를
-  static check 로 검증하는 validator 확장. 현재 INV-0028-1 cross_ref_code
-  는 `safeFetch` export entry point 만 가리키고 있어 raw `fetch(` 부재를
-  증명하지 못함 (reachability heuristic 수준 — DEC-020 Q-045 semantic
-  scope 참고). 새 validator check 의 scope: `src/discovery/**` +
-  `src/extraction/**` 에서 raw `fetch(` token 검출 (allowlist =
-  `src/discovery/fetch/safe-fetch.ts` 내부 + test fixture). false-positive
-  처리 — `obj.fetch(` / `db.fetch(` 같은 method call 은 제외 (regex
-  word-boundary). 별도 PR + 별도 review surface — 본 PR 의 evaluator
-  변경과 독립적인 invariant validator 확장.
+- ~~`INFRA-1A.9.h1-safe-fetch-raw-fetch-static-check`~~ **landed (Cycle 32
+  dev-cycle, Opus PR #66~#78 review F4 follow-up)** — ADR-0028 INV-0028-1
+  ("Discovery worker 의 모든 outbound HTTP 요청은 safe-fetch 를 통해야 한다")
+  의 static enforcement landed. `scripts/validate_invariants.ts:checkRawFetchBan`
+  이 `src/discovery/**` + `src/extraction/**` 에서 raw `fetch(` token 을
+  comment / string / regex-literal stripping 후 검출 (allowlist =
+  `src/discovery/fetch/safe-fetch.ts` canonical wrapper). false-positive
+  방어 = `(?<![.\p{ID_Continue}$])fetch\s*\(` Unicode-aware negative
+  lookbehind → `.fetch(` / `$fetch(` / `prefetch(` / `한글fetch(` 모두 제외.
+  warning-level (INV-0002-1 contract). `tests/lint/raw_fetch_ban_test.ts`
+  +19 tests 가 production-code compliance 를 hard test failure 로 pin —
+  validator 자체는 warning-level 이지만 repo-wide 위반 introduction 은
+  CI fail. ADR-0028 INV-0028-1 cross_ref_code 에
+  `scripts/validate_invariants.ts:checkRawFetchBan` 추가하여 reachability
+  anchor + enforcement static check 가 statement 와 함께 명시. F4
+  deferred → landed.
 - `INFRA-1A.9.h2-cross-ref-semantic-level` (Opus PR #66~#78 adversarial
   review F3 + GPT 합의 2026-05-18, **NOT gate-blocking, P3 priority,
   defer 가능**): DEC-020 Q-045 semantic scope 명시 (cross_ref_code = reachability

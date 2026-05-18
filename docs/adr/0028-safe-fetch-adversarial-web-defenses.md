@@ -27,6 +27,18 @@ invariants:
       safe-fetch 계약: scheme 허용목록(`https:` 기본 / `http:` 운영자 per-source opt-in),
       DNS pre-resolve + 사설/루프백/링크로컬 IP 거부, 리다이렉트 체인 ≤ 3 홉 + 매 홉 호스트
       재검증, `AbortSignal` 타임아웃 의무, 압축 해제 바이트 상한 의무.
+      Static enforcement landed via `INFRA-1A.9.h1-safe-fetch-raw-fetch-static-check`
+      (Opus PR #66~#78 review F4) — `scripts/validate_invariants.ts:checkRawFetchBan`
+      scans `src/discovery/**` + `src/extraction/**` for raw `fetch(` tokens
+      (allowlist = `src/discovery/fetch/safe-fetch.ts`, the canonical wrapper)
+      and emits INV-0002-1 warning-level diagnostics; `tests/lint/raw_fetch_ban_test.ts`
+      pins production-code compliance as a hard test failure. `cross_ref_code`
+      anchor below points to `safeFetch` only — the static-check function
+      `checkRawFetchBan` lives inside the validator that resolves cross_ref_code,
+      and the validator's self-stripping pass interacts with its own pattern
+      literals such that adding a self-referencing entry is fragile (running
+      backtick parity shift). The body sentence above is the authoritative
+      reference for the static check.
     status: active
     cross_ref_code:
       - src/discovery/fetch/safe-fetch.ts:safeFetch

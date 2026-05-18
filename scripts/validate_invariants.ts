@@ -652,6 +652,123 @@ export function checkCrossRefCode(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Check 6: raw `fetch()` ban in discovery + extraction (ADR-0028 INV-0028-1)
+//
+// Opus PR #66~#78 adversarial review F4 → INFRA-1A.9.h1 follow-up anchor.
+// INV-0028-1 statement explicitly forbids direct `fetch()` calls inside
+// `src/discovery/` and `src/extraction/`: all outbound HTTP must go through
+// `safe-fetch`. The previous `cross_ref_code` (`safeFetch` entry point)
+// only proves that the safe-fetch module exists — it does not prove that
+// raw `fetch(` is absent elsewhere. This static check closes that
+// reachability-vs-enforcement gap (see DEC-020 Q-045 cross_ref_code
+// semantic scope clarification).
+//
+// Detection contract:
+//   - scope: `src/discovery/**`, `src/extraction/**`
+//   - allowlist: `src/discovery/fetch/safe-fetch.ts` (the module that
+//     legitimately calls `fetch()` internally — the very boundary
+//     INV-0028-1 wraps).
+//   - pattern: `fetch(` token in TypeScript source after comment / string
+//     literal stripping. Excludes method calls (`.fetch(`) and identifier-
+//     suffix matches (`obj.fetch(` / `prefetch(`) via a Unicode-aware
+//     negative lookbehind on the preceding character class
+//     `(?<![.\p{ID_Continue}$])`.
+//   - severity: warning (INV-0002-1 — validator stays warning-level; the
+//     ban is enforced at code-review time, not by exiting non-zero).
+// ---------------------------------------------------------------------------
+
+/** Directories whose TS sources may not contain raw `fetch(` calls per INV-0028-1. */
+export const RAW_FETCH_BAN_DIRS: readonly string[] = [
+  "src/discovery",
+  "src/extraction",
+];
+
+/**
+ * Files inside the banned directories that are nonetheless allowed to call
+ * `fetch()` directly. The safe-fetch module is the canonical wrapper —
+ * INV-0028-1 wraps `fetch()` here, so this is the one site where the raw
+ * call is allowed by design.
+ */
+export const RAW_FETCH_BAN_ALLOWLIST: readonly string[] = [
+  "src/discovery/fetch/safe-fetch.ts",
+];
+
+/**
+ * Match a `fetch(` token that is NOT preceded by `.`, `$`, or a Unicode
+ * identifier-continue character. The negative lookbehind excludes method
+ * calls (`x.fetch(`), property-style accesses (`$fetch(`), and identifier-
+ * suffix matches (`prefetch(`). The `\s*` between `fetch` and `(` allows
+ * formatter-introduced whitespace. `g` + `u` flags to enumerate all hits
+ * with Unicode-aware identifier semantics.
+ */
+export const RAW_FETCH_BAN_PATTERN =
+  /(?<![.\p{ID_Continue}$])fetch\s*\(/gu;
+
+/** Collect `.ts` and `.tsx` files under a repo-relative directory. */
+function collectTsSources(repoRelativeDir: string): string[] {
+  const abs = join(REPO_ROOT, repoRelativeDir);
+  if (!existsSync(abs)) return [];
+  const tsFiles = glob(abs, ".ts");
+  const tsxFiles = glob(abs, ".tsx");
+  return [...tsFiles, ...tsxFiles];
+}
+
+/**
+ * Find 1-based line numbers in `code` that contain a raw `fetch(` token,
+ * after comment / string / regex-literal stripping. Returned indices index
+ * into the ORIGINAL source so reported line numbers match what a human
+ * sees in the editor. The stripped variant only neutralizes false-positive
+ * matches inside comments and string literals — line breaks are preserved
+ * by `stripCommentsAndStrings` so absolute offsets line up.
+ */
+export function findRawFetchCalls(code: string): number[] {
+  const stripped = stripCommentsAndStrings(code);
+  const hits: number[] = [];
+  // Reset lastIndex defensively — the regex is module-scoped.
+  RAW_FETCH_BAN_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = RAW_FETCH_BAN_PATTERN.exec(stripped)) !== null) {
+    // Line number = number of `\n` characters before match.index, plus 1.
+    let lineNum = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (stripped[i] === "\n") lineNum++;
+    }
+    hits.push(lineNum);
+  }
+  return hits;
+}
+
+export function checkRawFetchBan(): void {
+  const allowlistAbs = new Set(
+    RAW_FETCH_BAN_ALLOWLIST.map((p) => join(REPO_ROOT, p))
+  );
+  for (const dir of RAW_FETCH_BAN_DIRS) {
+    for (const file of collectTsSources(dir)) {
+      if (allowlistAbs.has(file)) continue;
+      let code: string;
+      try {
+        code = readFileSync(file, "utf-8");
+      } catch {
+        continue;
+      }
+      const hits = findRawFetchCalls(code);
+      if (hits.length === 0) continue;
+      const rel = relative(REPO_ROOT, file);
+      for (const lineNum of hits) {
+        warn(
+          file,
+          `INV-0028-1 violation candidate — raw \`fetch(\` call at ${rel}:${lineNum} ` +
+            `(ADR-0028: all outbound HTTP in src/discovery/** and src/extraction/** ` +
+            `must go through \`safeFetch\`; allowlist = src/discovery/fetch/safe-fetch.ts). ` +
+            `If this is a property access on a custom client that happens to be named ` +
+            `\`fetch\`, rename the property to avoid the static check ambiguity.`
+        );
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generate artifacts (--regenerate)
 // ---------------------------------------------------------------------------
 function generateArtifacts(): void {
@@ -732,6 +849,7 @@ function main(): void {
     checkTermEffects();
     checkScopeCreep();
     checkCrossRefCode();
+    checkRawFetchBan();
 
     if (MODE_REGEN && !MODE_CI) generateArtifacts();
 
