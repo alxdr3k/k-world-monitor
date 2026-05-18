@@ -457,9 +457,19 @@ export function stripCommentsAndStrings(code: string): string {
     // body excludes newlines. Pre-Cycle-17 regex matched multi-line spans
     // when comments contained unpaired apostrophes (`Reuters'`,
     // `let's not...`), eating massive swaths of real code.
+    //
+    // Codex PR #75 round 1 P2 (#2): the escape body MUST stay as
+    // `\\[\s\S]` (any char including newline) because JS allows
+    // backslash-escaped line continuations inside single/double-quoted
+    // strings (LineContinuation production). Restricting it to
+    // `\\[^\n]` made `\<newline>` fail to consume the newline, and the
+    // string regex would then bail mid-string — leaving real string
+    // content (like `"export const ghost"`) un-stripped and giving
+    // `hasNamedDeclaration` a false positive. Only the NON-escape body
+    // excludes `\n` (unescaped newline always closes the string).
     .replace(/`(?:\\[\s\S]|\$\{[^}]*\}|[^`\\])*`/g, "``")
-    .replace(/"(?:\\[^\n]|[^"\\\n])*"/g, '""')
-    .replace(/'(?:\\[^\n]|[^'\\\n])*'/g, "''")
+    .replace(/"(?:\\[\s\S]|[^"\\\n])*"/g, '""')
+    .replace(/'(?:\\[\s\S]|[^'\\\n])*'/g, "''")
     // Codex PR #72 round 6 P2 (#2): regex literal strip must run before
     // line-comment strip so a valid regex `/https?:\/\//` isn't truncated.
     //
@@ -473,6 +483,18 @@ export function stripCommentsAndStrings(code: string): string {
     // can't trigger the regex literal heuristic; regex literals run
     // before line comments so `//` inside a regex body isn't misread
     // as a comment opener.
+    //
+    // Codex PR #75 round 1 P1 (#1) tradeoff: the inverse order (regex
+    // before block) would mis-strip block comments whose bodies contain
+    // a `/`, but the current order can in theory mis-strip a regex
+    // literal whose character class contains `/*` (e.g. `/[/*]/`).
+    // Both cases are mutually exclusive without a single-pass
+    // tokenizer. Codebase grep at Cycle 17 confirmed no
+    // `/[\.\.\.\\/\\*\.\.\.\\]/` literal exists in `src/`; the closest
+    // is `src/discovery/fetch/safe-fetch.ts:379` whose char class
+    // contains `*` but NOT the `/*` sequence. The block-before-regex
+    // order is therefore safer for THIS repo. Re-evaluate if a future
+    // module needs `/[/*]/` style escape patterns.
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(
       // Cycle 17: confine the regex-literal body to a single physical line —

@@ -517,6 +517,25 @@ describe("hasNamedDeclaration uses Unicode-aware boundary (round 5 P3 #3)", () =
   });
 });
 
+describe("stripCommentsAndStrings preserves backslash line continuations (PR #75 round 1 P2)", () => {
+  it("strips a single-quoted string with a `\\<newline>` continuation", () => {
+    // JS allows `'a\<newline>b'` as a multi-line string (LineContinuation).
+    // The escape body must accept any char including newline, otherwise
+    // the string regex fails to consume the continuation and leaves
+    // string content un-stripped — which would let `hasNamedDeclaration`
+    // see `export const ghost` inside the string body.
+    const code = "const s = 'export const ghost \\\nin-string';\nexport const realFn = 1;\n";
+    expect(hasNamedDeclaration(code, "ghost")).toBe(false);
+    expect(hasNamedDeclaration(code, "realFn")).toBe(true);
+  });
+
+  it("strips a double-quoted string with a `\\<newline>` continuation", () => {
+    const code = `const s = "export const ghost \\\nin-string";\nexport const realFn = 1;\n`;
+    expect(hasNamedDeclaration(code, "ghost")).toBe(false);
+    expect(hasNamedDeclaration(code, "realFn")).toBe(true);
+  });
+});
+
 describe("stripCommentsAndStrings string literals are single-line (Cycle 17 hidden-bug fix)", () => {
   it("does not eat real exports following a comment with an unpaired apostrophe", () => {
     // Pre-fix: an unpaired `'` in a comment (e.g. possessive `Reuters'`)
