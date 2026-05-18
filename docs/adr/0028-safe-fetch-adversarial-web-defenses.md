@@ -28,6 +28,8 @@ invariants:
       DNS pre-resolve + 사설/루프백/링크로컬 IP 거부, 리다이렉트 체인 ≤ 3 홉 + 매 홉 호스트
       재검증, `AbortSignal` 타임아웃 의무, 압축 해제 바이트 상한 의무.
     status: active
+    cross_ref_code:
+      - src/discovery/fetch/safe-fetch.ts:safeFetch
   - id: INV-0028-2
     statement: |
       SSRF 방어: safe-fetch 는 DNS 조회 결과가 RFC1918 사설 범위
