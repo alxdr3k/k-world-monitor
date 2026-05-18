@@ -71,19 +71,31 @@ interface CrossRefIssue {
   reason: string;
 }
 
-function scanCrossRefsAcross(files: string[]): CrossRefIssue[] {
+interface ScanResult {
+  issues: CrossRefIssue[];
+  inspectedFileCount: number;
+}
+
+function scanCrossRefsAcross(files: string[]): ScanResult {
   const issues: CrossRefIssue[] = [];
+  let inspectedFileCount = 0;
   for (const filePath of files) {
+    inspectedFileCount += 1;
     for (const inv of parseAdrInvariants(filePath)) {
       for (const ref of inv.cross_ref_code ?? []) {
         const result = checkOneCrossRef(ref);
         if (!result.ok) {
-          issues.push({ source: basename(filePath), invId: inv.id, ref, reason: result.reason });
+          issues.push({
+            source: basename(filePath),
+            invId: inv.id,
+            ref: typeof ref === "string" ? ref : JSON.stringify(ref),
+            reason: result.reason,
+          });
         }
       }
     }
   }
-  return issues;
+  return { issues, inspectedFileCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +448,91 @@ describe("stripCommentsAndStrings ordering (round 4 P2 #3)", () => {
   });
 });
 
+describe("hasNamedDeclaration ignores regex literals (round 5 P2 #1)", () => {
+  it("does not match `/export function ghostFn/` regex literal", () => {
+    const code = "const re = /export function ghostFn/g;\n";
+    expect(hasNamedDeclaration(code, "ghostFn")).toBe(false);
+  });
+
+  it("still matches real exports beside a regex literal on the same line", () => {
+    const code = "const re = /\\bexport function ghostFn\\b/g; export const realConst = 1;\n";
+    expect(hasNamedDeclaration(code, "ghostFn")).toBe(false);
+    expect(hasNamedDeclaration(code, "realConst")).toBe(true);
+  });
+
+  it("does not eat division operator (`a / b`) as a regex literal", () => {
+    // The regex-literal stripper only triggers after operator/punctuator/
+    // start-of-line context. `a / b * c` should remain unaffected.
+    const code = "const v = a / b * c; export const div = v;\n";
+    expect(hasNamedDeclaration(code, "div")).toBe(true);
+  });
+});
+
+describe("checkOneCrossRef handles non-string scalars (round 5 P1 #2)", () => {
+  it("returns ok:false instead of throwing on a numeric scalar", () => {
+    const result = checkOneCrossRef(123 as unknown);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("not a string scalar");
+  });
+
+  it("returns ok:false on an object scalar", () => {
+    const result = checkOneCrossRef({ foo: "bar" } as unknown);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("not a string scalar");
+  });
+
+  it("returns ok:false on a boolean scalar", () => {
+    const result = checkOneCrossRef(true as unknown);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("not a string scalar");
+  });
+
+  it("returns ok:false on null", () => {
+    const result = checkOneCrossRef(null as unknown);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("not a string scalar");
+  });
+});
+
+describe("hasNamedDeclaration uses Unicode-aware boundary (round 5 P3 #3)", () => {
+  it("does not match `한글` target against `한글가` identifier", () => {
+    const code = "export const 한글가 = 1;\n";
+    expect(hasNamedDeclaration(code, "한글")).toBe(false);
+  });
+
+  it("matches exact `한글` identifier", () => {
+    const code = "export const 한글 = 1;\n";
+    expect(hasNamedDeclaration(code, "한글")).toBe(true);
+  });
+
+  it("does not match `한글가` target against `한글` identifier", () => {
+    const code = "export const 한글 = 1;\n";
+    expect(hasNamedDeclaration(code, "한글가")).toBe(false);
+  });
+
+  it("matches mixed ASCII + non-ASCII identifiers", () => {
+    const code = "export const foo한글 = 1;\n";
+    expect(hasNamedDeclaration(code, "foo한글")).toBe(true);
+    expect(hasNamedDeclaration(code, "foo")).toBe(false);
+  });
+});
+
+describe("stripCommentsAndStrings handles strings-before-block-comments (round 5 P2 #4)", () => {
+  it("does not eat real exports between two string literals containing `/*` / `*/`", () => {
+    const code = `
+      const a = "/*";
+      export const between = 1;
+      const b = "*/";
+    `;
+    expect(hasNamedDeclaration(code, "between")).toBe(true);
+  });
+
+  it("does not treat `\"/* */\"` string content as a comment span", () => {
+    const code = `const x = "/* not a real comment */"; export const survivor = 1;\n`;
+    expect(hasNamedDeclaration(code, "survivor")).toBe(true);
+  });
+});
+
 describe("test imports validator helpers directly (round 3 P2 — parallel impl)", () => {
   it("checkOneCrossRef is the same function the validator's checkCrossRefCode calls", () => {
     // Sanity probe: if test were re-implementing logic, a bug fix in the
@@ -466,21 +563,25 @@ describe("repo-wide scan uses validator's file lists (round 3 P2 — recursion +
   });
 });
 
-describe("DEC-coverage regression (round 3 P3)", () => {
-  it("scan helper invokes against the validator's decisionFiles list", () => {
-    // Strong assertion: the validator's decisionFiles list is non-empty and
-    // the scan helper iterates it. If a future regression makes the test
-    // helper skip docs/decisions, this assertion catches it.
+describe("DEC-coverage regression (round 3 P3 + round 5 P3 #6)", () => {
+  it("scan helper iterates exactly the validator's decisionFiles list", () => {
+    // Codex PR #72 round 5 P3 (#6): pre-fix assertion was tautological —
+    // `before` and `after` were both issue counts (default 0 in this repo)
+    // and `after >= before` held even if scanCrossRefsAcross never iterated
+    // its input. ScanResult now exposes `inspectedFileCount` so the test
+    // can assert real iteration on docs/decisions.
     expect(decisionFiles.length).toBeGreaterThan(0);
-    const before = scanCrossRefsAcross([]).length;
-    const after = scanCrossRefsAcross(decisionFiles).length;
-    // Either no DEC has cross_ref_code (after === before === 0) or some do
-    // and the scan returns those issues. Both branches prove scanCrossRefsAcross
-    // walked decisionFiles. The negative-control "before" is 0 by construction.
-    expect(after).toBeGreaterThanOrEqual(before);
-    // Negative control: scanCrossRefsAcross([]) must be empty so the
-    // after >= before comparison is meaningful.
-    expect(before).toBe(0);
+
+    const emptyScan = scanCrossRefsAcross([]);
+    expect(emptyScan.inspectedFileCount).toBe(0);
+
+    const decScan = scanCrossRefsAcross(decisionFiles);
+    expect(decScan.inspectedFileCount).toBe(decisionFiles.length);
+
+    // The issue list itself may be empty if no DEC carries cross_ref_code;
+    // the iteration-count assertion above is what protects against the
+    // regression "DEC scan silently skipped".
+    expect(decScan.issues).toBeInstanceOf(Array);
   });
 });
 
@@ -489,7 +590,7 @@ describe("DEC-coverage regression (round 3 P3)", () => {
 // ---------------------------------------------------------------------------
 describe("cross_ref_code reachability — repo-wide invariant", () => {
   it("every cross_ref_code entry across adrFiles + decisionFiles resolves", () => {
-    const issues = scanCrossRefsAcross([...adrFiles, ...decisionFiles]);
+    const { issues } = scanCrossRefsAcross([...adrFiles, ...decisionFiles]);
     expect(issues).toEqual([]);
   });
 

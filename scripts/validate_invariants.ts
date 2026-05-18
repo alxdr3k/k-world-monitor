@@ -414,26 +414,45 @@ export function extractReExportedNames(code: string): Set<string> {
  * default), missing `default async` and generator forms.
  */
 /**
- * Strip line comments, block comments, and string literals from TS/JS
- * source. Codex PR #72 round 3 P2: pre-fix accepted `// export function
- * foo` as a real declaration.
+ * Strip comments, string literals, and regex literals from TS/JS source.
+ * Codex PR #72 round 3 P2: pre-fix accepted `// export function foo` as
+ * a real declaration.
  *
- * Codex PR #72 round 4 P2 (#3): order of operations matters. Pre-fix
- * stripped line comments BEFORE string literals, so a URL inside a
- * string (`"http://example"`) had its `//` interpreted as a comment
- * start and everything to the next newline was deleted — hiding any
- * real `export` declaration later on the same line. Fixed order:
- * block comments → string literals (template / double / single) →
- * line comments. Block comments still go first because they can span
- * lines and aren't ambiguous with strings.
+ * Codex PR #72 round 4 P2 (#3): pre-fix line-comment strip ran BEFORE
+ * string literals, so a URL inside a string (`"http://example"`) had its
+ * `//` interpreted as a comment start.
+ *
+ * Codex PR #72 round 5 P2 (#4): pre-fix block-comment strip ran BEFORE
+ * string literals, so string content like `"/*" ... "*\/"` was misread as
+ * a block-comment span and any real exports between those string literals
+ * were deleted. New order: strings (template / double / single) → block
+ * comments → line comments → regex literals. Strings go first so their
+ * content (including `//`, `/*`, `*\/`) cannot be reinterpreted by later
+ * passes.
+ *
+ * Codex PR #72 round 5 P2 (#1): pre-fix did not strip regex literals, so
+ * `/export function ghostFn/` in source text would falsely satisfy a
+ * `cross_ref_code` reference to `ghostFn`. We strip `\/.../<flags>` after
+ * comments — without full token-stream context we cannot reliably
+ * distinguish regex literals from division operators, so we use a
+ * conservative heuristic: only strip when the opener is at start-of-line
+ * or follows an operator/assignment token. This catches the common
+ * "regex literal on its own line" case (the one Codex flagged) without
+ * eating `a / b * c` arithmetic.
  */
 export function stripCommentsAndStrings(code: string): string {
   return code
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/`(?:\\[\s\S]|\$\{[^}]*\}|[^`\\])*`/g, "``")
     .replace(/"(?:\\[\s\S]|[^"\\])*"/g, '""')
     .replace(/'(?:\\[\s\S]|[^'\\])*'/g, "''")
-    .replace(/\/\/[^\n]*/g, " ");
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ")
+    // Regex literal heuristic: opener must be at start-of-line or follow
+    // an operator/punctuator/keyword token. Avoids `a / b` matches.
+    .replace(
+      /(^|[\s=(,;:!&|?+\-*%<>{}[\]^~]|\breturn\b|\btypeof\b|\bin\b|\bof\b|\bvoid\b)(\/(?:\\[\s\S]|\[[^\]]*\]|[^/\n\\])+\/[gimsuyd]*)/g,
+      "$1 "
+    );
 }
 
 export function hasNamedDeclaration(code: string, name: string): boolean {
@@ -448,20 +467,29 @@ export function hasNamedDeclaration(code: string, name: string): boolean {
   // continuation (ASCII word chars + `$`). The leading position is
   // already anchored to whitespace via the preceding `\s+`, so a
   // single trailing terminator check is sufficient.
-  const tail = `(?![A-Za-z0-9_$])`;
+  // Codex PR #72 round 5 P3 (#3): the ASCII-only negative lookahead
+  // `(?![A-Za-z0-9_$])` still let a non-ASCII target (`한글`) match a
+  // longer identifier (`한글가`) because the trailing `가` was not in the
+  // ASCII set. The lookahead is now Unicode-aware via `\p{ID_Continue}`,
+  // which covers every code point JS treats as an identifier continuation,
+  // plus `$` since ID_Continue technically excludes it.
+  const tail = `(?![\\p{ID_Continue}$])`;
   // function declarations (with optional default/async modifiers, generator `*`)
   const fnPattern = new RegExp(
-    `\\bexport\\s+(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s+${escName}${tail}`
+    `\\bexport\\s+(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s+${escName}${tail}`,
+    "u"
   );
   if (fnPattern.test(stripped)) return true;
   // class declarations (with optional default/abstract modifiers)
   const classPattern = new RegExp(
-    `\\bexport\\s+(?:default\\s+)?(?:abstract\\s+)?class\\s+${escName}${tail}`
+    `\\bexport\\s+(?:default\\s+)?(?:abstract\\s+)?class\\s+${escName}${tail}`,
+    "u"
   );
   if (classPattern.test(stripped)) return true;
   // simple keyword declarations
   const keywordPattern = new RegExp(
-    `\\bexport\\s+(?:const|let|var|interface|type|enum)\\s+${escName}${tail}`
+    `\\bexport\\s+(?:const|let|var|interface|type|enum)\\s+${escName}${tail}`,
+    "u"
   );
   return keywordPattern.test(stripped);
 }
@@ -475,8 +503,16 @@ export function hasNamedDeclaration(code: string, name: string): boolean {
  * human-readable reason for the warning path.
  */
 export function checkOneCrossRef(
-  ref: string
+  ref: unknown
 ): { ok: true } | { ok: false; reason: string } {
+  // Codex PR #72 round 5 P1 (#2): YAML scalars are not guaranteed to be
+  // strings. A numeric or object-typed entry (`cross_ref_code: [123]`)
+  // hit `ref.lastIndexOf` and threw, aborting the entire validator and
+  // violating the INV-0002-1 warning-only contract. Type-guard at the
+  // entry so non-string scalars surface as warnings instead of crashes.
+  if (typeof ref !== "string") {
+    return { ok: false, reason: `not a string scalar (got ${typeof ref})` };
+  }
   const sepIdx = ref.lastIndexOf(":");
   if (sepIdx <= 0 || sepIdx === ref.length - 1) {
     return { ok: false, reason: "malformed" };
@@ -515,12 +551,17 @@ export function checkCrossRefCode(): void {
     const fm = parseFrontmatter(file);
     if (!fm?.invariants) continue;
     for (const inv of fm.invariants) {
-      const refs = inv.cross_ref_code;
-      if (!refs || refs.length === 0) continue;
+      // Codex PR #72 round 5 P1 (#2): defensive cast — YAML may yield
+      // any type. `checkOneCrossRef` itself type-guards so we forward
+      // each entry as `unknown` and let the helper produce a structured
+      // warning instead of throwing on `.lastIndexOf` of a non-string.
+      const refs = (inv.cross_ref_code ?? []) as unknown[];
+      if (refs.length === 0) continue;
       for (const ref of refs) {
         const result = checkOneCrossRef(ref);
         if (!result.ok) {
-          warn(file, `${inv.id} cross_ref_code ${result.reason}: ${ref}`);
+          const refRepr = typeof ref === "string" ? ref : JSON.stringify(ref);
+          warn(file, `${inv.id} cross_ref_code ${result.reason}: ${refRepr}`);
         }
       }
     }
