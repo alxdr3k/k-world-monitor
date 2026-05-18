@@ -136,7 +136,7 @@
 
 | Path | Purpose |
 |---|---|
-| `scripts/validate_invariants.ts` | ADR-0002 invariant checker (warning-level, exit 0) |
+| `scripts/validate_invariants.ts` | ADR-0002 invariant checker (warning-level, exit 0) — Cycle 14 (INFRA-1A.9-validator-extension) adds `checkCrossRefCode()`: each invariant's optional `cross_ref_code[]` frontmatter list is parsed as `<file>:<exportName>` or `<file>:<line>`, files resolved relative to repo root, exports matched against `export <kw> <name>` declarations or `export { <name> }` re-export blocks, lines bounds-checked. Broken refs surface as warnings. INV-0012-3 backfilled (DEC-020 Q-045 priority); INV-0028-* / INV-0023-3 / INV-0017 backfill 다음 cycles. |
 | `scripts/migrate.ts` | Applies Neo4j + SQLite migrations |
 | `scripts/check-doc-governance.rb` | Doc governance lint (Ruby) |
 | `scripts/seed-sources.ts` | Seed `source_material_policy` from `data/sources_seed.yaml` (`--dry-run` flag, INFRA-1B.1) |

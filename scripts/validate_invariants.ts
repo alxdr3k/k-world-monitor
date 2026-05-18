@@ -11,8 +11,8 @@
  *   --ci                annotation-only mode (never writes files)
  */
 
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "fs";
-import { join, basename } from "path";
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, realpathSync } from "fs";
+import { join, basename, isAbsolute, relative, sep } from "path";
 
 // js-yaml — types cast because @types/js-yaml may not expose all overloads
 import jsYaml from "js-yaml";
@@ -44,7 +44,20 @@ interface DocFrontmatter {
   id?: string;
   type?: string;
   status?: string;
-  invariants?: Array<{ id: string; statement: string; status: string }>;
+  invariants?: Array<{
+    id: string;
+    statement: string;
+    status: string;
+    /**
+     * Optional cross-references from this invariant to the code that enforces
+     * it. Each entry is `<file>:<exportName>` (preferred, stable across line
+     * shifts) or `<file>:<line>` (precise, fragile). Validator reports broken
+     * references as warnings — INV-0002-1 keeps the validator warning-level.
+     * Backfill priority per DEC-020 Q-045: INV-0012-3 / INV-0028-* /
+     * INV-0023-3 / INV-0017 (INFRA-1A.9-validator-extension).
+     */
+    cross_ref_code?: string[];
+  }>;
   scope?: { in?: string[]; out?: string[] };
   defines?: Array<{ term: string; role: string }>;
   touches?: Array<{ id: string; relation: string }>;
@@ -109,11 +122,11 @@ function glob(dir: string, ext: string): string[] {
   return results;
 }
 
-const adrFiles = glob(join(DOCS, "adr"), ".md").filter(
+export const adrFiles = glob(join(DOCS, "adr"), ".md").filter(
   (f) => !basename(f).startsWith("README") && !basename(f).startsWith("0001-example")
 );
 const questionFiles = glob(join(DOCS, "questions"), ".md");
-const decisionFiles = glob(join(DOCS, "decisions"), ".md");
+export const decisionFiles = glob(join(DOCS, "decisions"), ".md");
 const glossaryFiles = glob(join(DOCS, "glossary"), ".md");
 
 // ---------------------------------------------------------------------------
@@ -283,6 +296,324 @@ function checkRequiredFields(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Check 5: cross_ref_code reachability (DEC-020 Q-045 / INFRA-1A.9)
+// ---------------------------------------------------------------------------
+export function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function isInsideRepo(filePart: string): boolean {
+  if (isAbsolute(filePart)) return false;
+  const joined = join(REPO_ROOT, filePart);
+  const rel = relative(REPO_ROOT, joined);
+  if (rel.startsWith("..") || isAbsolute(rel)) return false;
+  if (rel === "") return false;
+  if (joined !== REPO_ROOT && !joined.startsWith(REPO_ROOT + sep)) return false;
+
+  // Canonicalize via realpathSync to defeat symlink escapes. Walk up to the
+  // nearest existing ancestor so non-existing files don't crash this check
+  // (they fail later at existsSync with a clearer warning).
+  const canonicalRoot = (() => {
+    try { return realpathSync(REPO_ROOT); } catch { return REPO_ROOT; }
+  })();
+  let probe = joined;
+  let canonicalResolved: string | null = null;
+  // Safety bound: REPO_ROOT length / 2 is a generous depth ceiling.
+  for (let depth = 0; depth < 64; depth++) {
+    try {
+      canonicalResolved = realpathSync(probe);
+      break;
+    } catch {
+      const parent = relative(REPO_ROOT, probe);
+      if (parent === "" || parent === "." || probe === sep) break;
+      const nextProbe = join(probe, "..");
+      if (nextProbe === probe) break;
+      probe = nextProbe;
+    }
+  }
+  if (canonicalResolved === null) {
+    // No ancestor exists (extreme edge): rely on the syntactic check alone.
+    return true;
+  }
+  return (
+    canonicalResolved === canonicalRoot ||
+    canonicalResolved.startsWith(canonicalRoot + sep)
+  );
+}
+
+/**
+ * Physical line count that matches `wc -l + 1 if file does not end with
+ * newline` semantics — i.e., the number of addressable lines a human or
+ * editor sees. `String#split("\n").length` overcounts by one when the
+ * file is newline-terminated (the final split yields an empty element).
+ * Codex PR #72 round 2 P2 (#1): pre-fix accepted `last_line + 1` as
+ * in-range for newline-terminated files (which is most source code).
+ */
+export function physicalLineCount(code: string): number {
+  if (code === "") return 0;
+  const parts = code.split("\n");
+  // If the file ends with `\n`, split produces one trailing empty entry;
+  // drop it so the count matches the highest addressable line.
+  if (parts.length > 0 && parts[parts.length - 1] === "") {
+    return parts.length - 1;
+  }
+  return parts.length;
+}
+
+/**
+ * Parse `export { ... }` re-export blocks and return the set of externally
+ * importable names. Aliases follow `import-name as exported-name` — only the
+ * right-hand side is importable from outside the module.
+ * Codex PR #72 round 1 P2: pre-fix regex treated both sides of `foo as bar`
+ * as valid, silently passing broken cross_ref_code entries.
+ */
+export function extractReExportedNames(code: string): Set<string> {
+  // Codex PR #72 round 4 P2 (#1): pre-fix matched `export { ... }` blocks
+  // in raw source text, so a snippet like `// export { internal as fakeName }`
+  // would add `fakeName` to the importable set. Strip comments/strings first
+  // (same defang as hasNamedDeclaration) so only real re-export blocks
+  // contribute names.
+  const stripped = stripCommentsAndStrings(code);
+  const names = new Set<string>();
+  const blockPattern = /\bexport\s*(?:type\s+)?\{([^}]*)\}/g;
+  for (const match of stripped.matchAll(blockPattern)) {
+    const body = match[1] ?? "";
+    for (const rawEntry of body.split(",")) {
+      // Strip an optional `type ` prefix on individual specifiers — TypeScript
+      // 4.5+ allows `export { type Foo }` and `export { type Foo as Bar }` to
+      // mark a single specifier as type-only inside a value re-export block.
+      // Codex PR #72 round 2 P2 (#3): pre-fix dropped these specifiers and
+      // emitted false `export not found` warnings for type-only re-exports.
+      const entry = rawEntry.trim().replace(/^type\s+/, "");
+      if (!entry) continue;
+      // Codex PR #72 round 6 P3 (#3): alias + bare regexes used to be
+      // ASCII-only (`[\w$]+`), so `export { 한글 as 공개 }` and other
+      // non-ASCII identifiers were silently dropped from the importable
+      // set. Now use Unicode-aware identifier classes via `\p{ID_Start}`
+      // + `\p{ID_Continue}` with the `/u` flag — consistent with the
+      // hasNamedDeclaration boundary check upgraded in round 5.
+      const aliasMatch = entry.match(
+        /^[\p{ID_Start}$_][\p{ID_Continue}$]*\s+as\s+([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u
+      );
+      if (aliasMatch && aliasMatch[1]) {
+        names.add(aliasMatch[1]);
+        continue;
+      }
+      const bareMatch = entry.match(/^([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u);
+      if (bareMatch && bareMatch[1]) {
+        names.add(bareMatch[1]);
+      }
+      // Anything else (malformed entry, or ES2020+ string-literal alias
+      // `foo as "name"` — Cycle 14 follow-up anchor) is silently skipped.
+      // The validator does not own TypeScript syntax validation.
+    }
+  }
+  return names;
+}
+
+/**
+ * Match `export ... name` declarations including:
+ *   - `export function name`, `export async function name`, `export function* name`,
+ *     `export async function* name`
+ *   - `export default function name`, `export default async function name`,
+ *     `export default function* name`, `export default async function* name`
+ *   - `export class name`, `export default class name`, `export abstract class name`
+ *   - `export const|let|var name`, `export interface|type|enum name`
+ * Codex PR #72 round 1 P2: pre-fix regex permitted only ONE modifier (async OR
+ * default), missing `default async` and generator forms.
+ */
+/**
+ * Strip comments, string literals, and regex literals from TS/JS source.
+ * Codex PR #72 round 3 P2: pre-fix accepted `// export function foo` as
+ * a real declaration.
+ *
+ * Codex PR #72 round 4 P2 (#3): pre-fix line-comment strip ran BEFORE
+ * string literals, so a URL inside a string (`"http://example"`) had its
+ * `//` interpreted as a comment start.
+ *
+ * Codex PR #72 round 5 P2 (#4): pre-fix block-comment strip ran BEFORE
+ * string literals, so string content like `"/*" ... "*\/"` was misread as
+ * a block-comment span and any real exports between those string literals
+ * were deleted. New order: strings (template / double / single) → block
+ * comments → line comments → regex literals. Strings go first so their
+ * content (including `//`, `/*`, `*\/`) cannot be reinterpreted by later
+ * passes.
+ *
+ * Codex PR #72 round 5 P2 (#1): pre-fix did not strip regex literals, so
+ * `/export function ghostFn/` in source text would falsely satisfy a
+ * `cross_ref_code` reference to `ghostFn`. We strip `\/.../<flags>` after
+ * comments — without full token-stream context we cannot reliably
+ * distinguish regex literals from division operators, so we use a
+ * conservative heuristic: only strip when the opener is at start-of-line
+ * or follows an operator/assignment token. This catches the common
+ * "regex literal on its own line" case (the one Codex flagged) without
+ * eating `a / b * c` arithmetic.
+ */
+export function stripCommentsAndStrings(code: string): string {
+  return code
+    .replace(/`(?:\\[\s\S]|\$\{[^}]*\}|[^`\\])*`/g, "``")
+    .replace(/"(?:\\[\s\S]|[^"\\])*"/g, '""')
+    .replace(/'(?:\\[\s\S]|[^'\\])*'/g, "''")
+    // Codex PR #72 round 6 P2 (#2): line-comment strip used to run BEFORE
+    // regex-literal strip, so a valid regex like `/https?:\/\//` had its
+    // inner `//` interpreted as a line-comment opener and the rest of the
+    // line (including any real export) was deleted. Regex literals are now
+    // stripped before the line-comment pass. Block comments stay before
+    // line comments because block-comment content can be multi-line; their
+    // strip order is independent of regex literals (regex bodies can't
+    // contain unescaped block-comment terminators).
+    .replace(
+      /(^|[\s=(,;:!&|?+\-*%<>{}[\]^~]|\breturn\b|\btypeof\b|\bin\b|\bof\b|\bvoid\b)(\/(?:\\[\s\S]|\[[^\]]*\]|[^/\n\\])+\/[gimsuyd]*)/g,
+      "$1 "
+    )
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ");
+}
+
+export function hasNamedDeclaration(code: string, name: string): boolean {
+  const stripped = stripCommentsAndStrings(code);
+  const escName = escapeRegex(name);
+  // Codex PR #72 round 4 P2 (#2): JS regex `\b` only treats ASCII
+  // [A-Za-z0-9_] as word characters, so identifiers ending in `$` or
+  // containing non-ASCII letters (e.g. `한글`) failed the trailing
+  // boundary check and were reported as `export not found` even when
+  // genuinely exported. Replace the trailing `\b` with a negative
+  // lookahead that excludes any character JS allows as an identifier
+  // continuation (ASCII word chars + `$`). The leading position is
+  // already anchored to whitespace via the preceding `\s+`, so a
+  // single trailing terminator check is sufficient.
+  // Codex PR #72 round 5 P3 (#3): the ASCII-only negative lookahead
+  // `(?![A-Za-z0-9_$])` still let a non-ASCII target (`한글`) match a
+  // longer identifier (`한글가`) because the trailing `가` was not in the
+  // ASCII set. The lookahead is now Unicode-aware via `\p{ID_Continue}`,
+  // which covers every code point JS treats as an identifier continuation,
+  // plus `$` since ID_Continue technically excludes it.
+  const tail = `(?![\\p{ID_Continue}$])`;
+  // function declarations (with optional default/async modifiers, generator `*`)
+  const fnPattern = new RegExp(
+    `\\bexport\\s+(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s+${escName}${tail}`,
+    "u"
+  );
+  if (fnPattern.test(stripped)) return true;
+  // class declarations (with optional default/abstract modifiers)
+  const classPattern = new RegExp(
+    `\\bexport\\s+(?:default\\s+)?(?:abstract\\s+)?class\\s+${escName}${tail}`,
+    "u"
+  );
+  if (classPattern.test(stripped)) return true;
+  // simple keyword declarations
+  const keywordPattern = new RegExp(
+    `\\bexport\\s+(?:const|let|var|interface|type|enum)\\s+${escName}${tail}`,
+    "u"
+  );
+  return keywordPattern.test(stripped);
+}
+
+/**
+ * Single-ref validation extracted from `checkCrossRefCode` so external
+ * callers (the test suite) can exercise the exact production logic
+ * instead of reimplementing it. Codex PR #72 round 3 P2: pre-extract
+ * the test file mirrored helpers — a shared mistake on both sides could
+ * pass green tests while regressing production. Returns ok/false with a
+ * human-readable reason for the warning path.
+ */
+export function checkOneCrossRef(
+  ref: unknown
+): { ok: true } | { ok: false; reason: string } {
+  // Codex PR #72 round 5 P1 (#2): YAML scalars are not guaranteed to be
+  // strings. A numeric or object-typed entry (`cross_ref_code: [123]`)
+  // hit `ref.lastIndexOf` and threw, aborting the entire validator and
+  // violating the INV-0002-1 warning-only contract. Type-guard at the
+  // entry so non-string scalars surface as warnings instead of crashes.
+  if (typeof ref !== "string") {
+    return { ok: false, reason: `not a string scalar (got ${typeof ref})` };
+  }
+  const sepIdx = ref.lastIndexOf(":");
+  if (sepIdx <= 0 || sepIdx === ref.length - 1) {
+    return { ok: false, reason: "malformed" };
+  }
+  const filePart = ref.slice(0, sepIdx);
+  const tail = ref.slice(sepIdx + 1);
+  if (!isInsideRepo(filePart)) {
+    return { ok: false, reason: `path escapes repo root: ${filePart}` };
+  }
+  const fullPath = join(REPO_ROOT, filePart);
+  if (!existsSync(fullPath)) {
+    return { ok: false, reason: `missing file: ${filePart}` };
+  }
+  let code: string;
+  try {
+    code = readFileSync(fullPath, "utf-8");
+  } catch {
+    return { ok: false, reason: `file unreadable: ${filePart}` };
+  }
+  if (/^\d+$/.test(tail)) {
+    const lineNum = Number.parseInt(tail, 10);
+    const lineCount = physicalLineCount(code);
+    if (lineNum < 1 || lineNum > lineCount) {
+      return { ok: false, reason: `line ${lineNum} out of range (1..${lineCount})` };
+    }
+    return { ok: true };
+  }
+  if (hasNamedDeclaration(code, tail) || extractReExportedNames(code).has(tail)) {
+    return { ok: true };
+  }
+  return { ok: false, reason: `export not found: ${tail}` };
+}
+
+export function checkCrossRefCode(): void {
+  for (const file of [...adrFiles, ...decisionFiles]) {
+    const fm = parseFrontmatter(file);
+    if (!fm?.invariants) continue;
+    // Codex PR #72 round 7 P1: pre-fix assumed `fm.invariants` was always
+    // a list of objects. A doc that accidentally authored `invariants:` as
+    // a mapping, or included a `null` item, threw on `for...of` or
+    // `inv.cross_ref_code` and aborted the validator — breaking the
+    // INV-0002-1 warning-only contract. Validate the shape up front and
+    // per-item before any field access; downgrade bad shapes to warnings.
+    if (!Array.isArray(fm.invariants)) {
+      warn(
+        file,
+        `invariants must be a YAML list (got ${typeof fm.invariants}) — cross_ref_code checks skipped`
+      );
+      continue;
+    }
+    for (const inv of fm.invariants) {
+      if (typeof inv !== "object" || inv === null) {
+        warn(file, `invariants[] contains a non-object entry (${typeof inv}) — entry skipped`);
+        continue;
+      }
+      const invObj = inv as { id?: unknown; cross_ref_code?: unknown };
+      const invId = typeof invObj.id === "string" ? invObj.id : "<unknown invariant>";
+      const refsRaw = invObj.cross_ref_code;
+      if (refsRaw === undefined || refsRaw === null) continue;
+      // Codex PR #72 round 6 P2 (#1): YAML allows an unwrapped scalar
+      // when only one value is intended. The pre-fix path cast that
+      // scalar to `unknown[]` and iterated it — for a string that means
+      // per-character iteration. `Array.isArray` guards emit ONE
+      // actionable schema warning instead.
+      if (!Array.isArray(refsRaw)) {
+        warn(
+          file,
+          `${invId} cross_ref_code must be a YAML list (got ${typeof refsRaw}): ${JSON.stringify(refsRaw)}`
+        );
+        continue;
+      }
+      // Codex PR #72 round 5 P1 (#2): `checkOneCrossRef` itself type-guards
+      // each entry so non-string list members surface as structured warnings
+      // rather than throws on `.lastIndexOf`.
+      for (const ref of refsRaw as unknown[]) {
+        const result = checkOneCrossRef(ref);
+        if (!result.ok) {
+          const refRepr = typeof ref === "string" ? ref : JSON.stringify(ref);
+          warn(file, `${invId} cross_ref_code ${result.reason}: ${refRepr}`);
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generate artifacts (--regenerate)
 // ---------------------------------------------------------------------------
 function generateArtifacts(): void {
@@ -362,6 +693,7 @@ function main(): void {
     checkIdUniqueness();
     checkTermEffects();
     checkScopeCreep();
+    checkCrossRefCode();
 
     if (MODE_REGEN && !MODE_CI) generateArtifacts();
 
@@ -377,4 +709,6 @@ function main(): void {
   process.exit(0);
 }
 
-main();
+if (import.meta.main) {
+  main();
+}
