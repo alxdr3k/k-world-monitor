@@ -368,9 +368,15 @@ export function physicalLineCount(code: string): number {
  * as valid, silently passing broken cross_ref_code entries.
  */
 export function extractReExportedNames(code: string): Set<string> {
+  // Codex PR #72 round 4 P2 (#1): pre-fix matched `export { ... }` blocks
+  // in raw source text, so a snippet like `// export { internal as fakeName }`
+  // would add `fakeName` to the importable set. Strip comments/strings first
+  // (same defang as hasNamedDeclaration) so only real re-export blocks
+  // contribute names.
+  const stripped = stripCommentsAndStrings(code);
   const names = new Set<string>();
   const blockPattern = /\bexport\s*(?:type\s+)?\{([^}]*)\}/g;
-  for (const match of code.matchAll(blockPattern)) {
+  for (const match of stripped.matchAll(blockPattern)) {
     const body = match[1] ?? "";
     for (const rawEntry of body.split(",")) {
       // Strip an optional `type ` prefix on individual specifiers — TypeScript
@@ -409,38 +415,53 @@ export function extractReExportedNames(code: string): Set<string> {
  */
 /**
  * Strip line comments, block comments, and string literals from TS/JS
- * source so `hasNamedDeclaration` does not match `export` patterns
- * inside `// ...`, `/* ... *\/`, single/double-quoted strings, or template
- * literals. Codex PR #72 round 3 P2: pre-fix accepted `// export function
- * foo` as a real declaration. This is a lightweight tokenization (not a
- * full TS AST) — sufficient to defang the common "doc string" / "snippet
- * in code comment" false positive without pulling in a parser dependency.
+ * source. Codex PR #72 round 3 P2: pre-fix accepted `// export function
+ * foo` as a real declaration.
+ *
+ * Codex PR #72 round 4 P2 (#3): order of operations matters. Pre-fix
+ * stripped line comments BEFORE string literals, so a URL inside a
+ * string (`"http://example"`) had its `//` interpreted as a comment
+ * start and everything to the next newline was deleted — hiding any
+ * real `export` declaration later on the same line. Fixed order:
+ * block comments → string literals (template / double / single) →
+ * line comments. Block comments still go first because they can span
+ * lines and aren't ambiguous with strings.
  */
 export function stripCommentsAndStrings(code: string): string {
   return code
     .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/\/\/[^\n]*/g, " ")
     .replace(/`(?:\\[\s\S]|\$\{[^}]*\}|[^`\\])*`/g, "``")
     .replace(/"(?:\\[\s\S]|[^"\\])*"/g, '""')
-    .replace(/'(?:\\[\s\S]|[^'\\])*'/g, "''");
+    .replace(/'(?:\\[\s\S]|[^'\\])*'/g, "''")
+    .replace(/\/\/[^\n]*/g, " ");
 }
 
 export function hasNamedDeclaration(code: string, name: string): boolean {
   const stripped = stripCommentsAndStrings(code);
   const escName = escapeRegex(name);
-  // function declarations (with optional default/async modifiers in either order, generator `*`)
+  // Codex PR #72 round 4 P2 (#2): JS regex `\b` only treats ASCII
+  // [A-Za-z0-9_] as word characters, so identifiers ending in `$` or
+  // containing non-ASCII letters (e.g. `한글`) failed the trailing
+  // boundary check and were reported as `export not found` even when
+  // genuinely exported. Replace the trailing `\b` with a negative
+  // lookahead that excludes any character JS allows as an identifier
+  // continuation (ASCII word chars + `$`). The leading position is
+  // already anchored to whitespace via the preceding `\s+`, so a
+  // single trailing terminator check is sufficient.
+  const tail = `(?![A-Za-z0-9_$])`;
+  // function declarations (with optional default/async modifiers, generator `*`)
   const fnPattern = new RegExp(
-    `\\bexport\\s+(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s+${escName}\\b`
+    `\\bexport\\s+(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s+${escName}${tail}`
   );
   if (fnPattern.test(stripped)) return true;
   // class declarations (with optional default/abstract modifiers)
   const classPattern = new RegExp(
-    `\\bexport\\s+(?:default\\s+)?(?:abstract\\s+)?class\\s+${escName}\\b`
+    `\\bexport\\s+(?:default\\s+)?(?:abstract\\s+)?class\\s+${escName}${tail}`
   );
   if (classPattern.test(stripped)) return true;
   // simple keyword declarations
   const keywordPattern = new RegExp(
-    `\\bexport\\s+(?:const|let|var|interface|type|enum)\\s+${escName}\\b`
+    `\\bexport\\s+(?:const|let|var|interface|type|enum)\\s+${escName}${tail}`
   );
   return keywordPattern.test(stripped);
 }

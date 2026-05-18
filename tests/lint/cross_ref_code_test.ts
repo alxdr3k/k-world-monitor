@@ -352,6 +352,90 @@ describe("ignore exports inside comments and strings (round 3 P2 — raw-text re
   });
 });
 
+describe("re-export block matching ignores comments/strings (round 4 P2 #1)", () => {
+  it("does not import names from `// export { ... }`", () => {
+    const code = "// export { internal as fakeName };\n";
+    const names = extractReExportedNames(code);
+    expect(names.has("fakeName")).toBe(false);
+    expect(names.has("internal")).toBe(false);
+  });
+
+  it("does not import names from `/* export { ... } */`", () => {
+    const code = "/* export { internal as fakeName }; */\n";
+    expect(extractReExportedNames(code).has("fakeName")).toBe(false);
+  });
+
+  it("does not import names from a string-literal `export { ... }` snippet", () => {
+    const code = `const sample = "export { internal as fakeName }";\n`;
+    expect(extractReExportedNames(code).has("fakeName")).toBe(false);
+  });
+
+  it("still imports names from a real `export { ... }` block beside commented ones", () => {
+    const code = `
+      // export { ghost as ghostAlias };
+      export { real as realAlias };
+    `;
+    const names = extractReExportedNames(code);
+    expect(names.has("ghostAlias")).toBe(false);
+    expect(names.has("realAlias")).toBe(true);
+  });
+});
+
+describe("hasNamedDeclaration accepts non-ASCII / `$` identifiers (round 4 P2 #2)", () => {
+  it("matches `export const foo$ = ...`", () => {
+    const code = "export const foo$ = 1;\n";
+    expect(hasNamedDeclaration(code, "foo$")).toBe(true);
+  });
+
+  it("matches `export const $$ = ...`", () => {
+    const code = "export const $$ = 2;\n";
+    expect(hasNamedDeclaration(code, "$$")).toBe(true);
+  });
+
+  it("matches `export const 한글 = ...` (non-ASCII identifier)", () => {
+    const code = "export const 한글 = 3;\n";
+    expect(hasNamedDeclaration(code, "한글")).toBe(true);
+  });
+
+  it("still rejects a partial match where the target is a prefix of a longer identifier", () => {
+    // `foo` should NOT match `fooBar` because the trailing terminator
+    // check excludes ASCII word chars + `$`.
+    const code = "export const fooBar = 1;\n";
+    expect(hasNamedDeclaration(code, "foo")).toBe(false);
+  });
+
+  it("still rejects when an identifier prefix is followed by `$`", () => {
+    const code = "export const foo$ = 1;\n";
+    expect(hasNamedDeclaration(code, "foo")).toBe(false);
+  });
+});
+
+describe("stripCommentsAndStrings ordering (round 4 P2 #3)", () => {
+  it("does not eat real exports on the same line as a URL string literal", () => {
+    // `"http://example"` must be stripped as a string before the `//`
+    // inside it is interpreted as a line comment. The real export later
+    // on the same line must survive.
+    const code = `const u = "http://example"; export const realExport = 1;\n`;
+    expect(hasNamedDeclaration(code, "realExport")).toBe(true);
+  });
+
+  it("does not eat real exports on the same line as a `//` inside a single-quoted string", () => {
+    const code = `const u = 'a//b'; export function ghostFn(): void {}\n`;
+    expect(hasNamedDeclaration(code, "ghostFn")).toBe(true);
+  });
+
+  it("does not eat real exports on the same line as a `//` inside a template literal", () => {
+    const code = "const u = `a//b`; export class HoldIt {}\n";
+    expect(hasNamedDeclaration(code, "HoldIt")).toBe(true);
+  });
+
+  it("still strips genuine line comments after stripping strings", () => {
+    const code = `// export function ghostFn(): void {}\nexport function realFn(): void {}\n`;
+    expect(hasNamedDeclaration(code, "ghostFn")).toBe(false);
+    expect(hasNamedDeclaration(code, "realFn")).toBe(true);
+  });
+});
+
 describe("test imports validator helpers directly (round 3 P2 — parallel impl)", () => {
   it("checkOneCrossRef is the same function the validator's checkCrossRefCode calls", () => {
     // Sanity probe: if test were re-implementing logic, a bug fix in the
