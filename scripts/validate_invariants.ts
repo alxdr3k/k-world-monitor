@@ -565,19 +565,37 @@ export function checkCrossRefCode(): void {
   for (const file of [...adrFiles, ...decisionFiles]) {
     const fm = parseFrontmatter(file);
     if (!fm?.invariants) continue;
+    // Codex PR #72 round 7 P1: pre-fix assumed `fm.invariants` was always
+    // a list of objects. A doc that accidentally authored `invariants:` as
+    // a mapping, or included a `null` item, threw on `for...of` or
+    // `inv.cross_ref_code` and aborted the validator — breaking the
+    // INV-0002-1 warning-only contract. Validate the shape up front and
+    // per-item before any field access; downgrade bad shapes to warnings.
+    if (!Array.isArray(fm.invariants)) {
+      warn(
+        file,
+        `invariants must be a YAML list (got ${typeof fm.invariants}) — cross_ref_code checks skipped`
+      );
+      continue;
+    }
     for (const inv of fm.invariants) {
-      const refsRaw = (inv as { cross_ref_code?: unknown }).cross_ref_code;
+      if (typeof inv !== "object" || inv === null) {
+        warn(file, `invariants[] contains a non-object entry (${typeof inv}) — entry skipped`);
+        continue;
+      }
+      const invObj = inv as { id?: unknown; cross_ref_code?: unknown };
+      const invId = typeof invObj.id === "string" ? invObj.id : "<unknown invariant>";
+      const refsRaw = invObj.cross_ref_code;
       if (refsRaw === undefined || refsRaw === null) continue;
       // Codex PR #72 round 6 P2 (#1): YAML allows an unwrapped scalar
-      // when only one value is intended (`cross_ref_code: src/foo.ts:bar`).
-      // The pre-fix path cast that scalar to `unknown[]` and then iterated
-      // it — for a string that means per-character iteration, producing a
-      // burst of meaningless warnings. Validate the array shape up front
-      // so an operator gets ONE actionable schema warning instead.
+      // when only one value is intended. The pre-fix path cast that
+      // scalar to `unknown[]` and iterated it — for a string that means
+      // per-character iteration. `Array.isArray` guards emit ONE
+      // actionable schema warning instead.
       if (!Array.isArray(refsRaw)) {
         warn(
           file,
-          `${inv.id} cross_ref_code must be a YAML list (got ${typeof refsRaw}): ${JSON.stringify(refsRaw)}`
+          `${invId} cross_ref_code must be a YAML list (got ${typeof refsRaw}): ${JSON.stringify(refsRaw)}`
         );
         continue;
       }
@@ -588,7 +606,7 @@ export function checkCrossRefCode(): void {
         const result = checkOneCrossRef(ref);
         if (!result.ok) {
           const refRepr = typeof ref === "string" ? ref : JSON.stringify(ref);
-          warn(file, `${inv.id} cross_ref_code ${result.reason}: ${refRepr}`);
+          warn(file, `${invId} cross_ref_code ${result.reason}: ${refRepr}`);
         }
       }
     }
