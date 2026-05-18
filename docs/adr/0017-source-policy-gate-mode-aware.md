@@ -46,6 +46,8 @@ invariants:
   - id: INV-0017-5
     statement: 모든 policy_gate 결정은 policy_decisions ledger에 기록한다 — (decision_id, session_id, source_id, url, intended_action, decision, gate_mode, risk_level, reason, created_at)
     status: active
+    cross_ref_code:
+      - src/pipeline/policy-gate/decision-ledger.ts:recordPolicyGateDecision
   - id: INV-0017-6
     statement: 탐색·콘텐츠 제작 단계의 막힘은 access_interventions로 누적되고 세션 종료 시 batch 보고된다. access_interventions 필드 — (intervention_id, session_id, scenario_id, thesis_id, url, source_name, attempted_action, access_result, policy_result, related_query, why_it_matters, importance_score, severity, fallback_used_json, requested_user_action, status, created_at, resolved_at) (R18)
     status: active
