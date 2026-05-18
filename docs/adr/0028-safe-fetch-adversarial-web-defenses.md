@@ -55,6 +55,8 @@ invariants:
       상한 초과 시 연결을 즉시 끊고 `BodyTooLargeError` 를 throw 한다.
       zip bomb 방어: 압축 해제 중 decompressed / compressed 비율이 100:1 초과 시 중단.
     status: active
+    cross_ref_code:
+      - src/discovery/fetch/safe-fetch.ts:safeFetch
   - id: INV-0028-5
     statement: |
       robots.txt 준수: ADR-0016 INV-0016-1 ("no bot bypass") 의 코드 레벨 구현.
