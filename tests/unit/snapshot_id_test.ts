@@ -16,6 +16,7 @@ import {
   RATIONALE_SNAP_ID_PREFIX_REGEX,
   SNAPSHOT_R2_KEY_PREFIX,
   assertValidSnapId,
+  formatSnapIdRationalePrefix,
   parseSnapIdFromRationale,
   snapshotR2Key,
   validSnapIdOrNull,
@@ -137,6 +138,25 @@ describe("parseSnapIdFromRationale — Cycle 10 delimiter strictness", () => {
     expect(parseSnapIdFromRationale("snap_id=snap_A/evil; ...")).toBeNull();
     expect(parseSnapIdFromRationale("snap_id=snap_A=evil; ...")).toBeNull();
     expect(parseSnapIdFromRationale("snap_id=snap_A archive_policy=x")).toBeNull();
+  });
+});
+
+describe("formatSnapIdRationalePrefix — writer-side prefix builder", () => {
+  it("builds the canonical `snap_id=<id>` prefix without trailing delimiter", () => {
+    expect(formatSnapIdRationalePrefix("snap_ABC")).toBe("snap_id=snap_ABC");
+  });
+
+  it("round-trips with parseSnapIdFromRationale when caller appends `;`", () => {
+    const built = `${formatSnapIdRationalePrefix("snap_RT")}; archive_policy=full_snapshot_allowed`;
+    expect(parseSnapIdFromRationale(built)).toBe("snap_RT");
+  });
+
+  it("round-trips with parseSnapIdFromRationale at end-of-string (no `;`)", () => {
+    expect(parseSnapIdFromRationale(formatSnapIdRationalePrefix("snap_END"))).toBe("snap_END");
+  });
+
+  it("does not validate the snapId (caller obligation — assertValidSnapId is the writer-boundary guard)", () => {
+    expect(formatSnapIdRationalePrefix("anything-goes")).toBe("snap_id=anything-goes");
   });
 });
 

@@ -33,7 +33,10 @@
 import { monotonicFactory } from "ulid";
 import { getDb } from "../sqlite/connection";
 import type { ArchivePolicy, RawCloudPolicy, R2UploadDecision } from "../../utils/enums";
-import { assertValidSnapId as assertValidSnapIdShared } from "../../domain/snapshot-id";
+import {
+  assertValidSnapId as assertValidSnapIdShared,
+  formatSnapIdRationalePrefix,
+} from "../../domain/snapshot-id";
 
 const ulid = monotonicFactory();
 
@@ -89,7 +92,7 @@ export interface R2UploadAuditInput {
 // stable even when rationale text varies.
 function formatRationale(input: R2UploadAuditInput): string {
   const parts = [
-    `snap_id=${input.snapId}`,
+    formatSnapIdRationalePrefix(input.snapId),
     `archive_policy=${input.archivePolicy}`,
     `raw_cloud_policy=${input.rawCloudPolicy}`,
   ];
