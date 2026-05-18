@@ -46,6 +46,8 @@ invariants:
       등록된 도메인 또는 운영자 승인 CDN 목록에 있는지 재검증한다.
       scheme downgrade(https → http) 가 발생하면 즉시 거부한다. 3홉 초과 시 거부.
     status: active
+    cross_ref_code:
+      - src/discovery/fetch/safe-fetch.ts:safeFetch
   - id: INV-0028-4
     statement: |
       바이트 상한: 컨텐츠 종류별 최대 허용 크기(압축 해제 기준)는 DEC-017에서 정의한다.
