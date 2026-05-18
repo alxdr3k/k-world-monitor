@@ -36,6 +36,8 @@ invariants:
   - id: INV-0006-5
     statement: 모든 LLM 호출은 run_ ledger에 (model, tokens_in, tokens_out, cost, cached_tokens, batch_id?)를 기록한다
     status: active
+    cross_ref_code:
+      - src/ops/run-ledger.ts:startRun
 
 preconditions:
   - id: PRE-0006-1

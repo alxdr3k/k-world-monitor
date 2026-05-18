@@ -29,6 +29,8 @@ invariants:
   - id: INV-0002-1
     statement: invariant validator는 warning level only — CI는 절대 hard-fail 하지 않는다 (exit 0 unconditional)
     status: active
+    cross_ref_code:
+      - scripts/validate_invariants.ts:724
   - id: INV-0002-2
     statement: --write-warnings 모드는 foreground 전용. CI는 doc frontmatter를 절대 수정하지 않는다
     status: active
@@ -41,6 +43,8 @@ invariants:
   - id: INV-0002-5
     statement: glossary term의 attribute 변경은 frontmatter `term_effects[{term, attribute, operation, value, reason}]` 로만 인정. body prose만 변경하면 silent drift (Case 2 차단의 강제 메커니즘)
     status: active
+    cross_ref_code:
+      - scripts/validate_invariants.ts:184
   - id: INV-0002-6
     statement: ADR이 정의 권리 (`defines[]`) 를 가진 glossary term은 단 하나의 ADR이 primary로 선언. 동시 선언 시 hard warning (term_definition_conflict)
     status: active
