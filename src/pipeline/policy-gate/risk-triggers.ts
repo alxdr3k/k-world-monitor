@@ -283,6 +283,27 @@ function detectTermsViolation(ctx: RiskTriggerContext): DetectedRisk | null {
     "external_llm_call_with_excerpt",
   ];
   if (!collectionActions.includes(ctx.intendedAction)) return null;
+  // Opus PR #66~#78 review F2: sourceId=null (unregistered source) general
+  // fail-closed for ALL collection actions. Pre-fix, extract_full_text /
+  // chunk_create / discovery_fetch with sourceId=null + archive='unknown'
+  // sentinel fell through every detector and hit stage-default mode —
+  // content_production stage default = batch_report → allow, silently
+  // permitting full-text extraction on an unregistered source whose terms
+  // are unknown by definition. Detector 1 (external_llm) already had this
+  // fail-closed for LLM actions; detectors 5 / 7 / 8 cover quote / embed /
+  // r2 paths via the archive≠full_snapshot_allowed branch. This generalizes
+  // the unregistered-source fail-closed to the remaining extract / chunk /
+  // discovery actions under the same terms_violation trigger ID — semantic
+  // = "no source registry row → no proof of compliant terms → fail-closed".
+  // The symmetric `evaluatePolicyGate` throw guard (sourceId=null requires
+  // all 3 policies = 'unknown') prevents the orthogonal attack where a
+  // caller fills sourceId=null with permissive policy values.
+  if (ctx.sourceId === null) {
+    return {
+      trigger: "terms_violation",
+      rationale: `sourceId=null (unregistered source — no source_material_policy row, terms compliance unproven) + intended_action=${ctx.intendedAction} — fail-closed`,
+    };
+  }
   if (ctx.archivePolicy !== "do_not_collect") return null;
   return {
     trigger: "terms_violation",
@@ -660,6 +681,34 @@ export function evaluatePolicyGate(
     if (input.ctx.externalLlmPolicy === "unknown") {
       throw new Error(
         `evaluatePolicyGate: registered source (sourceId=${JSON.stringify(input.ctx.sourceId)}) cannot have externalLlmPolicy='unknown' — 'unknown' sentinel is for unregistered sources only. Likely source policy lookup bug.`
+      );
+    }
+  }
+  // Opus PR #66~#78 review F2: symmetric throw for the unregistered source
+  // direction. `unknown` sentinel 은 unregistered source (sourceId === null)
+  // 의 documented contract — registered source 가 'unknown' 을 가지면 위
+  // throw 가 잡듯이, unregistered source 가 'unknown' 이 아닌 구체적
+  // policy 값을 가지는 것도 call-site bug (caller 가 등록되지 않은 source
+  // 에 임의의 permissive 값을 채워 넣는 경로). 이 throw 가 없으면 detector
+  // 5/7/8 의 archive≠full_snapshot_allowed branch 가 caller 의 거짓
+  // permissive 값에 속아 risk 를 누락시킬 수 있다. 이 boundary throw 는
+  // sourceId=null 의 모든 policy 필드가 정확히 'unknown' 이어야 함을
+  // 강제하여 detector 의 fail-closed 가설 (registered 만 구체 값을 가짐)
+  // 을 유지한다.
+  if (input.ctx.sourceId === null) {
+    if (input.ctx.archivePolicy !== "unknown") {
+      throw new Error(
+        `evaluatePolicyGate: unregistered source (sourceId=null) must have archivePolicy='unknown' sentinel (got ${JSON.stringify(input.ctx.archivePolicy)}). Likely caller bug: filling source-policy fields on a source that lacks a source_material_policy row.`
+      );
+    }
+    if (input.ctx.rawCloudPolicy !== "unknown") {
+      throw new Error(
+        `evaluatePolicyGate: unregistered source (sourceId=null) must have rawCloudPolicy='unknown' sentinel (got ${JSON.stringify(input.ctx.rawCloudPolicy)}). Likely caller bug: filling source-policy fields on a source that lacks a source_material_policy row.`
+      );
+    }
+    if (input.ctx.externalLlmPolicy !== "unknown") {
+      throw new Error(
+        `evaluatePolicyGate: unregistered source (sourceId=null) must have externalLlmPolicy='unknown' sentinel (got ${JSON.stringify(input.ctx.externalLlmPolicy)}). Likely caller bug: filling source-policy fields on a source that lacks a source_material_policy row.`
       );
     }
   }

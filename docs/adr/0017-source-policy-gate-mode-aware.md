@@ -48,7 +48,7 @@ invariants:
       - src/pipeline/policy-gate/risk-triggers.ts:detectRisks
       - src/pipeline/policy-gate/risk-triggers.ts:evaluatePolicyGate
   - id: INV-0017-5
-    statement: 모든 policy_gate 결정은 policy_decisions ledger에 기록한다 — (decision_id, session_id, source_id, url, intended_action, decision, gate_mode, risk_level, reason, created_at)
+    statement: 모든 policy_gate 결정은 policy_decisions ledger에 기록한다 — v9 schema canonical fields = (decision_id, session_id, source_id, url, trigger_type, policy_gate_mode, decision, rationale, intended_action, snap_id, created_at). v0 partial coverage (Opus PR #66~#78 review F8 correction 2026-05-18) — pre-correction statement listed `gate_mode` / `reason` / `risk_level` / `intervention_id` field names that do not exist in actual v1+v7+v9 schema. Actual writer (`src/pipeline/policy-gate/decision-ledger.ts:recordPolicyGateDecision`) emits `policy_gate_mode` (not `gate_mode`) + `rationale` (not `reason`) + `trigger_type` (operator-gate namespace, intended_action=NULL); `risk_level` + `intervention_id` are NOT in v1 schema (writer-side comment 명시) — future hardening anchor = v10 migration `policy_decisions_risk_level_intervention_id` (planned, NOT gate-blocking). Production wiring scope (Opus PR #66~#78 review F1 partial — caller wiring 명시): chunker / R2 upload / embed / external LLM call site 의 generic `evaluatePolicyGate()` 호출 + `recordPolicyGateDecision()` ledger 기록은 EXTR-1A.* 슬라이스 (P0-M3+) scope 임. v0 state — chunker는 INFRA-1B.4.h1-chunker-policy-gate (PR #47) archive_policy gate 별도 enforce, R2 upload는 INFRA-1B.3.x-audit (PR #39) `recordR2UploadDecision()` 별도 ledger writer 사용 (operator-gate namespace 아닌 `intended_action='r2_upload'` namespace). 따라서 INV-0017-5 는 v0 에서 `recordPolicyGateDecision()` operator-gate namespace 의 ledger writer contract 만 closed; generic `evaluatePolicyGate()` production caller 의 ledger persistence 는 EXTR-1A.* wiring 시점까지 deferred.
     status: active
   - id: INV-0017-6
     statement: 탐색·콘텐츠 제작 단계의 막힘은 access_interventions로 누적되고 세션 종료 시 batch 보고된다. access_interventions 필드 — (intervention_id, session_id, scenario_id, thesis_id, url, source_name, attempted_action, access_result, policy_result, related_query, why_it_matters, importance_score, severity, fallback_used_json, requested_user_action, status, created_at, resolved_at) (R18)
@@ -212,22 +212,28 @@ projection edges (ADR-0014 native 활용과 일관):
 (:ManualClaimEntry)-[:RESOLVES]->(:AccessIntervention)
 ```
 
-policy_decisions ledger (SQLite, audit trail):
+policy_decisions ledger (SQLite, audit trail) — **v9 actual schema** (Opus PR #66~#78 review F8 correction 2026-05-18; pre-correction body listed an aspirational schema that drifted from `migrations/sqlite/v1_schema.sql` + v7 + v9 actual columns):
 ```sql
 policy_decisions (
-  decision_id text primary key,
-  session_id text not null,
-  source_id text,
-  url text,
-  intended_action text not null,
-  decision text not null,                  -- allow | warn | block
-  gate_mode text not null,                 -- inline_block | inline_warn | batch_report
-  risk_level text,
-  reason text,
-  intervention_id text references access_intervention(intervention_id),
-  created_at text not null
+  decision_id        text primary key,                                -- `pdec_<ULID>`
+  session_id         text not null,
+  source_id          text,                                            -- FK to Neo4j Source.source_id (nullable for unregistered)
+  url                text,
+  trigger_type       text not null,                                   -- 1..8 from ADR-0017 INV-0017-4 List A, or `non_risk_action` sentinel, or `r2_upload`
+  policy_gate_mode   text not null check (policy_gate_mode in ('inline_block','inline_warn','batch_report')),
+  decision           text not null,                                   -- allow | warn | block (operator-gate namespace) | uploaded | skipped | failed (r2_upload namespace)
+  rationale          text,                                            -- free-form audit trace; serialized multi-trigger format `[trigger_id] rationale | ...`
+  intended_action    text,                                            -- NULL = operator-gate namespace (ADR-0017); 'r2_upload' = R2 upload audit namespace (ADR-0012)
+  upload_attempt_id  text,                                            -- v8: BEFORE/AFTER audit pair correlation key (only when intended_action='r2_upload')
+  snap_id            text,                                            -- v9: structured FK to Snapshot for INV-0012-3 audit-by-absence reconcile
+  created_at         text not null default (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 ```
+
+**Schema drift notes** (Opus PR #66~#78 review F8):
+
+- Pre-correction body listed `gate_mode` / `reason` / `risk_level` / `intervention_id` columns that do not exist in actual v1+v7+v9 schema. Actual writer uses `policy_gate_mode` / `rationale` / `trigger_type`; `risk_level` + `intervention_id` deferred to v10 hardening anchor (`policy_decisions_risk_level_intervention_id`, NOT gate-blocking).
+- Multi-trigger ledger: `recordPolicyGateDecision()` writes ONE row per evaluation (Option A — operator decision 옵션 b+ 2026-05-17 post-PR-#68 GPT review). Primary trigger goes into `trigger_type`; all detected triggers serialized into `rationale` as `[trigger_id] rationale | [trigger_id] rationale | ...`. Operator multi-trigger aggregation queries `rationale LIKE '%[trigger_id]%'`. v0 audit query quality trade-off (Opus PR #66~#78 review F7 acknowledged) — future hardening anchor = `policy_decisions_triggers` junction table OR `trigger_types_json` column (v10 schema slice, NOT gate-blocking).
 
 ## Alternatives Considered
 
@@ -300,3 +306,39 @@ policy_decisions (
   disallow stays at ADR-0028 safe-fetch boundary, not a ninth
   RiskTrigger). PR #68 implementation `RISK_TRIGGER` enum matches body
   §Decision exactly.
+
+- 2026-05-18: INV-0017-5 frontmatter statement + body §Decision
+  policy_decisions SQL schema corrected to match actual v1+v7+v9 schema
+  (Opus PR #66~#78 adversarial review F8). Pre-correction statement
+  listed `gate_mode` / `reason` / `risk_level` / `intervention_id`
+  columns that do not exist in `migrations/sqlite/v1_schema.sql` +
+  `v7_policy_decisions_intended_action.sql` + `v9_policy_decisions_snap_id.sql`.
+  Actual writer (`src/pipeline/policy-gate/decision-ledger.ts:recordPolicyGateDecision`)
+  emits `policy_gate_mode` / `rationale` / `trigger_type` columns; the
+  missing `risk_level` + `intervention_id` columns were called out as
+  v0 partial coverage in `decision-ledger.ts` comment lines 25-29 but
+  the ADR frontmatter/body had not been synced. Drift was first detected
+  in PR #76 (which attempted to add INV-0017-5 `cross_ref_code` to
+  `recordPolicyGateDecision` but reverted on the writer-vs-production-caller
+  argument; the secondary drift between INV-0017-5 statement field
+  names and writer field names was not caught at that time). Future
+  hardening anchor for the missing columns = v10 migration
+  `policy_decisions_risk_level_intervention_id` (planned, NOT
+  gate-blocking).
+
+- 2026-05-18: PR #76 metadata correction recorded (Opus PR #66~#78
+  adversarial review F5). PR #76 title/body described an INV-0017-5
+  `cross_ref_code` backfill against `recordPolicyGateDecision`, but the
+  final merged patch reverted the backfill attempt (single-file change
+  to `docs/current/TESTING.md` only) because `recordPolicyGateDecision`
+  had no production caller — a `cross_ref_code` to a writer-only
+  function would have asserted enforcement that did not exist at the
+  call sites. The reverted decision is correct (no false enforcement
+  proof in the cross_ref system), but PR #76's title/body remained as
+  "INV-0017-5 cross_ref_code backfill" instead of the more accurate
+  "INV-0017-5 backfill reverted + TESTING baseline correction." This
+  is recorded here as a known PR-metadata defect — future audits
+  reading the PR-list alone may otherwise misinterpret PR #76 as
+  closing INV-0017-5 enforcement. INV-0017-5 cross_ref_code remains
+  absent until generic `evaluatePolicyGate()` production callers land
+  in EXTR-1A.* (see INV-0017-5 statement scope note).
