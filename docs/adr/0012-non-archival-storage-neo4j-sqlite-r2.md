@@ -35,6 +35,11 @@ invariants:
   - id: INV-0012-3
     statement: Snapshot은 fingerprint record(URL, accessed_at, content_hash, locator)다. R2 binary 보관은 예외로만 허용한다 — open-license dataset, 공식 허용 API 응답, 자체 산출물(차트/export)만. 일반 article/report raw text의 R2 업로드는 영구 금지 (R8/Q3, R14/Q9-4)
     status: active
+    cross_ref_code:
+      - src/storage/r2/policy.ts:checkPermittedPrefix
+      - src/storage/audit/policy-decisions.ts:recordR2UploadDecision
+      - src/ops/r2-invariant-scanner.ts:scanR2Invariants
+      - src/discovery/worker/snapshot-fingerprint.ts:120
     enforcement:
       # INFRA-1B.3 snapshot-fingerprint 구현에서 cross-source dedup이 INV-0012-3을
       # 우회할 수 있는 두 TOCTOU window가 식별되어 다음 방어책을 적용한다 (PR #25).

@@ -44,7 +44,20 @@ interface DocFrontmatter {
   id?: string;
   type?: string;
   status?: string;
-  invariants?: Array<{ id: string; statement: string; status: string }>;
+  invariants?: Array<{
+    id: string;
+    statement: string;
+    status: string;
+    /**
+     * Optional cross-references from this invariant to the code that enforces
+     * it. Each entry is `<file>:<exportName>` (preferred, stable across line
+     * shifts) or `<file>:<line>` (precise, fragile). Validator reports broken
+     * references as warnings — INV-0002-1 keeps the validator warning-level.
+     * Backfill priority per DEC-020 Q-045: INV-0012-3 / INV-0028-* /
+     * INV-0023-3 / INV-0017 (INFRA-1A.9-validator-extension).
+     */
+    cross_ref_code?: string[];
+  }>;
   scope?: { in?: string[]; out?: string[] };
   defines?: Array<{ term: string; role: string }>;
   touches?: Array<{ id: string; relation: string }>;
@@ -283,6 +296,73 @@ function checkRequiredFields(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Check 5: cross_ref_code reachability (DEC-020 Q-045 / INFRA-1A.9)
+// ---------------------------------------------------------------------------
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function checkCrossRefCode(): void {
+  for (const file of [...adrFiles, ...decisionFiles]) {
+    const fm = parseFrontmatter(file);
+    if (!fm?.invariants) continue;
+    for (const inv of fm.invariants) {
+      const refs = inv.cross_ref_code;
+      if (!refs || refs.length === 0) continue;
+      for (const ref of refs) {
+        const sepIdx = ref.lastIndexOf(":");
+        if (sepIdx <= 0 || sepIdx === ref.length - 1) {
+          warn(
+            file,
+            `${inv.id} cross_ref_code malformed (expected '<file>:<exportName>' or '<file>:<line>'): ${ref}`
+          );
+          continue;
+        }
+        const filePart = ref.slice(0, sepIdx);
+        const tail = ref.slice(sepIdx + 1);
+        const fullPath = join(REPO_ROOT, filePart);
+        if (!existsSync(fullPath)) {
+          warn(file, `${inv.id} cross_ref_code points to missing file: ${ref}`);
+          continue;
+        }
+        let code: string;
+        try {
+          code = readFileSync(fullPath, "utf-8");
+        } catch {
+          warn(file, `${inv.id} cross_ref_code file unreadable: ${ref}`);
+          continue;
+        }
+        if (/^\d+$/.test(tail)) {
+          const lineNum = Number.parseInt(tail, 10);
+          const lineCount = code.split("\n").length;
+          if (lineNum < 1 || lineNum > lineCount) {
+            warn(
+              file,
+              `${inv.id} cross_ref_code line out of range (file has ${lineCount} lines): ${ref}`
+            );
+          }
+        } else {
+          // file:exportName — accept either `export <kw> <name>` declaration
+          // or a re-export entry `export { <name> ... }`.
+          const declPattern = new RegExp(
+            `\\bexport\\s+(?:async\\s+|default\\s+)?(?:function|class|const|let|var|interface|type|enum)\\s+${escapeRegex(tail)}\\b`
+          );
+          const reExportPattern = new RegExp(
+            `\\bexport\\s*\\{[^}]*\\b${escapeRegex(tail)}\\b[^}]*\\}`
+          );
+          if (!declPattern.test(code) && !reExportPattern.test(code)) {
+            warn(
+              file,
+              `${inv.id} cross_ref_code export not found in ${filePart}: ${tail}`
+            );
+          }
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generate artifacts (--regenerate)
 // ---------------------------------------------------------------------------
 function generateArtifacts(): void {
@@ -362,6 +442,7 @@ function main(): void {
     checkIdUniqueness();
     checkTermEffects();
     checkScopeCreep();
+    checkCrossRefCode();
 
     if (MODE_REGEN && !MODE_CI) generateArtifacts();
 
