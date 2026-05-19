@@ -179,10 +179,10 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 ### Inventory entry — ADR-0029 — LLM Prompt Injection containment (untrusted source content quarantine)
 
 - **Invariants**: INV-0029-1, INV-0029-2, INV-0029-3, INV-0029-4, INV-0029-5
-- **activation_phase**: EXTR-1A.* (LLM call boundary at extraction layer) + AGG-1A.* (dossier / scenario / thesis composers) + PUB-1A.* (publication preflight)
-- **current_status**: design-only
-- **enforcement_status**: not-yet-activated
-- **reason**: LLM call boundary is not yet wired. Prompt injection containment (system / tool / user role separation + untrusted-source quoting) belongs to LLM caller modules in EXTR-1A.* and later.
+- **activation_phase**: EXTR-1A.0 (defensive infrastructure landed via Cycle 38) + EXTR-1A.1+ (extractor router wiring) + AGG-1A.* (dossier / scenario / thesis composers) + PUB-1A.* (publication preflight)
+- **current_status**: partially-implemented (Cycle 38 EXTR-1A.0 landed defensive modules)
+- **enforcement_status**: partially-activated
+- **reason**: EXTR-1A.0 (Cycle 38) landed `src/extraction/sanitize/html-to-text.ts` (INV-0029-5), `src/extraction/prompt/untrusted-wrapper.ts` (INV-0029-1 + INV-0029-3), and `src/extraction/policy/llm-policy-gate.ts` (INV-0029-4) with cross_ref_code on 4/5 invariants. INV-0029-2 (no-eval pattern enforcement) remains a code-pattern invariant — separate static-check anchor pending. EXTR-1A.1+ extractor router must import the defensive helpers per PRE-0029-1 (linter / convention enforce).
 
 ### Inventory entry — ADR-0030 — Discovery Worker concurrency model (bounded pool / host rate limit / SQLite serialization / Neo4j pool)
 
