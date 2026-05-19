@@ -80,6 +80,8 @@
 | `src/extraction/router/registry.ts` | `ExtractorRegistry` + 3 typed errors (`ExtractorNotRegisteredError`, `ExtractorAlreadyRegisteredError`, `InvalidSourceTypeError`) — Map-backed extractor lookup with fail-closed unregistered slot + dup-prevent + off-canonical-defend (EXTR-1A.1). |
 | `src/extraction/router/router.ts` | `routeAndExtract()` — pure dispatch function with envelope validation (input shape + sourceType + sourceId + rawContent) + post-dispatch envelope-consistency fail-closed (extractor wiring mistake defense) (EXTR-1A.1, AC-009). |
 | `src/extraction/router/index.ts` | Public re-export of types/registry/router for the extractor router surface (EXTR-1A.1). |
+| `src/extraction/llm/client.ts` | `LlmClient` interface + `LlmInvokeParams` + `LlmInvokeResult` + `LlmTier` type — vendor-agnostic LLM abstraction. Concrete clients (OpenAI Tier 2, Anthropic Sonnet override) wired in EXTR-1A.2b / 1A.2c (EXTR-1A.2a). |
+| `src/extraction/article/article-extractor.ts` | `ArticleExtractor implements Extractor` + `ARTICLE_EXTRACTION_SYSTEM_PROMPT` — article path with full INV-0029-* defensive pipeline (`checkLlmPolicy` fail-closed → `htmlToText` → `wrapUntrustedForTier` → `LlmClient.invoke`). Concrete LLM client + run_ledger integration deferred to EXTR-1A.2b (EXTR-1A.2a). |
 | `src/discovery/scheduler/semaphore.ts` | Bounded semaphore primitive — async acquire/release (INFRA-1B.2b, ADR-0030 INV-0030-1) |
 | `src/discovery/scheduler/pool.ts` | Global + per-host semaphore pool — 8 global / 1 per-host (INFRA-1B.2b, ADR-0030 INV-0030-1) |
 | `src/discovery/scheduler/crawl-state.ts` | etag/Last-Modified + consecutive_failures + next_eligible_at upsert (INFRA-1B.2b) |
@@ -131,6 +133,7 @@
 | `tests/unit/untrusted_wrapper_test.ts` | ADR-0029 INV-0029-1 + INV-0029-3 sentinel wrapper tests (20 tests — basic sentinel + Korean preservation + custom sentinel + token cap truncation + per-tier caps + adversarial sentinel-in-content + injection payload preservation). Cycle 38 EXTR-1A.0. | (ADR-0029, EXTR-1A.0) |
 | `tests/unit/llm_policy_gate_test.ts` | ADR-0029 INV-0029-4 + ADR-0017 source policy gate tests (12 tests — in-memory SQLite fixture: allowed-pass + each enum case throw + sourceId field on errors + fail-closed for unregistered + TypeError on empty/non-string + scoped per sourceId). Cycle 38 EXTR-1A.0. | (ADR-0029, ADR-0017, EXTR-1A.0) |
 | `tests/unit/extractor_router_test.ts` | EXTR-1A.1 extractor router tests (25 tests — SOURCE_TYPE enum + isSourceType + ExtractorRegistry round-trip + 3 typed errors + TEST-009 article/dataset/report dispatch + envelope validation + envelope-consistency fail-closed + TEST-021 dry-run extensibility). Cycle 39 EXTR-1A.1. | (REQ-009, AC-009, AC-021, NFR-007, EXTR-1A.1) |
+| `tests/unit/article_extractor_test.ts` | EXTR-1A.2a article extractor tests (23 tests — envelope + INV-0029-4 policy gate fail-closed + INV-0029-5 sanitization + INV-0029-1 sentinel + INV-0029-3 per-tier token cap + registry integration + multi-vector adversarial defense-in-depth). Cycle 40 EXTR-1A.2a. | (ADR-0029, ADR-0023, AC-009, AC-010, EXTR-1A.2a) |
 | `tests/unit/xml_safe_test.ts` | xml-safe singleton + XXE block tests | — (DEC-018) |
 | `tests/unit/semaphore_test.ts` | Bounded semaphore primitive | — (INFRA-1B.2b) |
 | `tests/unit/pool_test.ts` | Global + per-host pool acquire/release | — (INFRA-1B.2b) |

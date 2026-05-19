@@ -1,0 +1,75 @@
+/**
+ * LLM client abstraction for the extraction layer (EXTR-1A.2a).
+ *
+ * Vendor-agnostic interface that concrete clients (OpenAI Tier 2 in
+ * EXTR-1A.2b, Anthropic Sonnet override in EXTR-1A.2c, plus a mock
+ * for tests) implement. Keeps the article / report extractors free
+ * of vendor-specific wiring.
+ *
+ * The interface is intentionally small — the extractor assembles the
+ * full prompt (system + user, where `userPrompt` is already wrapped
+ * in `<untrusted>...</untrusted>` per ADR-0029 INV-0029-1) and passes
+ * it through. Streaming is not exposed at this layer (extractors
+ * await the full response to return a single `ExtractorOutput`
+ * envelope per AC-009).
+ *
+ * Operator decision: EXTR-1A.2a (Cycle 40, operator delegated cut
+ * "그럼 몇 개의 슬라이스로 나눠서 작업해" 2026-05-19).
+ */
+
+import type { LlmVendor } from "../../utils/enums";
+
+/**
+ * Tier index aligned to ADR-0023 + INV-0029-3 caps. Mirrors
+ * `TIER_TOKEN_CAPS` in `src/extraction/prompt/untrusted-wrapper.ts`.
+ */
+export type LlmTier = 0 | 1 | 2 | 3;
+
+export interface LlmInvokeParams {
+  /**
+   * Pre-built system prompt. INV-0029-1 contract requires the system
+   * prompt to warn the model that the `<untrusted>...</untrusted>`
+   * block in `userPrompt` is data, not instructions. Concrete
+   * extractors own this warning (see `ARTICLE_EXTRACTION_SYSTEM_PROMPT`).
+   */
+  readonly systemPrompt: string;
+  /**
+   * Pre-built user prompt. MUST already be wrapped in
+   * `<untrusted>...</untrusted>` (or the caller's configured
+   * sentinel) per INV-0029-1. The client does NOT wrap or escape —
+   * that obligation is on the extractor calling `wrapUntrusted()`.
+   */
+  readonly userPrompt: string;
+  /**
+   * Tier hint — concrete clients use this to pick model + per-tier
+   * limits (ADR-0023). Mock clients ignore it.
+   */
+  readonly tier: LlmTier;
+  /**
+   * Optional output token cap. If omitted, the concrete client uses
+   * its own per-tier default.
+   */
+  readonly maxOutputTokens?: number;
+}
+
+export interface LlmInvokeResult {
+  readonly text: string;
+  readonly vendor: LlmVendor | "mock";
+  /**
+   * Concrete model identifier (e.g. `gpt-5-mini-2025-08-07`). Mock
+   * clients return a stable placeholder.
+   */
+  readonly model: string;
+  readonly tier: LlmTier;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  /**
+   * Cached input tokens (OpenAI prompt caching / Anthropic prompt
+   * caching). Optional — not all vendors expose this.
+   */
+  readonly cachedTokens?: number;
+}
+
+export interface LlmClient {
+  invoke(params: LlmInvokeParams): Promise<LlmInvokeResult>;
+}
