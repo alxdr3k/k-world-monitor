@@ -73,12 +73,27 @@ export const ANTHROPIC_TIER_DEFAULT_MODEL: Record<LlmTier, string> = {
  * verification at integration time (follow-up parallel to PR #101's
  * OpenAI pricing ratification). Placeholders below derive from
  * Anthropic's public list pricing for the Claude 4.x family as of
- * EXTR-1A.2c authoring (2026-05). `cachedInput` reflects Anthropic
- * prompt-caching read pricing (~10% of standard input); cache write
- * (cache_creation_input_tokens) is billed separately at ~125% of
- * standard input — this client treats cache_creation as standard
- * input for v1 cost calc and surfaces refinement as an ADR-0023
- * ratification follow-up so AC-019 aggregation does not undercount.
+ * EXTR-1A.2c authoring (2026-05).
+ *
+ * **Anthropic billing model (PR #103 codex round 1 P1)** — unlike
+ * OpenAI where `cached_tokens` is a SUBSET of `input_tokens`,
+ * Anthropic reports `input_tokens` / `cache_read_input_tokens` /
+ * `cache_creation_input_tokens` as **separate, non-overlapping
+ * buckets**. Each is billed at its own rate:
+ *
+ *   - `input_tokens`           → `pricing.input`  (standard)
+ *   - `cache_read_input_tokens` → `pricing.cachedInput` (~10% standard,
+ *     Anthropic prompt-cache read discount)
+ *   - `cache_creation_input_tokens` → `pricing.cacheCreationInput`
+ *     (~125% standard for the default 5-minute cache; 200% for the
+ *     1-hour beta. v1 uses the 5-minute rate.)
+ *
+ * Treating them as overlapping (subtracting cache reads from input
+ * before applying the standard rate, or omitting cache creation
+ * entirely) materially undercounts AC-019 cost aggregation on
+ * cache-heavy traffic and breaks legitimate cached responses by
+ * rejecting `cache_read > input` as inconsistent — both are normal
+ * Anthropic states.
  *
  * Dated snapshots (e.g. `claude-sonnet-4-6-20260101`) returned in
  * `response.model` are routed to the matching alias via
@@ -86,16 +101,40 @@ export const ANTHROPIC_TIER_DEFAULT_MODEL: Record<LlmTier, string> = {
  */
 export const ANTHROPIC_PRICING_USD_PER_1M_TOKENS: Record<
   string,
-  { input: number; output: number; cachedInput?: number }
+  {
+    input: number;
+    output: number;
+    cachedInput?: number;
+    cacheCreationInput?: number;
+  }
 > = {
   // Placeholders — ratification follow-up tracked alongside the
   // OpenAI pricing ratification pattern (PR #101). Operator must
   // verify each value against the Anthropic Messages API catalog
   // before EXTR-1A.2c.2 wires the real-vendor swap into
   // ArticleExtractor's billable path.
-  "claude-opus-4-7": { input: 15.0, output: 75.0, cachedInput: 1.5 },
-  "claude-sonnet-4-6": { input: 3.0, output: 15.0, cachedInput: 0.3 },
-  "claude-haiku-4-5": { input: 0.8, output: 4.0, cachedInput: 0.08 },
+  //
+  // cacheCreationInput = standard input × 1.25 (Anthropic 5-minute
+  // cache write rate). Switch to ×2.0 if/when operator opts into the
+  // 1-hour cache beta.
+  "claude-opus-4-7": {
+    input: 15.0,
+    output: 75.0,
+    cachedInput: 1.5,
+    cacheCreationInput: 18.75,
+  },
+  "claude-sonnet-4-6": {
+    input: 3.0,
+    output: 15.0,
+    cachedInput: 0.3,
+    cacheCreationInput: 3.75,
+  },
+  "claude-haiku-4-5": {
+    input: 0.8,
+    output: 4.0,
+    cachedInput: 0.08,
+    cacheCreationInput: 1.0,
+  },
 };
 
 /**
@@ -140,6 +179,13 @@ export function resolveAnthropicPricingKey(model: string): string | null {
  * throw `AnthropicPricingUnknownError` so explicit Opus / new-SKU
  * calls that the table does not yet know about surface as a hard
  * error instead of being billed at Sonnet (or other) rates.
+ *
+ * PR #103 codex round 1 P1 — `inputTokens` / `cachedTokens` /
+ * `cacheCreationTokens` are SEPARATE non-overlapping buckets in the
+ * Anthropic billing model. Each is multiplied by its own rate and
+ * summed; cache reads are NOT subtracted from input (which would
+ * undercount on cache-heavy traffic), and cache creation is NOT
+ * omitted (which silently lost cache-write spend from AC-019).
  */
 export function computeAnthropicTotalCostUsd(
   model: string,
@@ -147,6 +193,7 @@ export function computeAnthropicTotalCostUsd(
     inputTokens?: number;
     outputTokens?: number;
     cachedTokens?: number;
+    cacheCreationTokens?: number;
   },
 ): number {
   const key = resolveAnthropicPricingKey(model);
@@ -155,12 +202,17 @@ export function computeAnthropicTotalCostUsd(
   const input = usage.inputTokens ?? 0;
   const output = usage.outputTokens ?? 0;
   const cached = usage.cachedTokens ?? 0;
-  const nonCached = Math.max(0, input - cached);
-  const inputCost = (nonCached / 1_000_000) * pricing.input;
+  const creation = usage.cacheCreationTokens ?? 0;
+  const inputCost = (input / 1_000_000) * pricing.input;
   const cachedCost =
     (cached / 1_000_000) * (pricing.cachedInput ?? pricing.input);
+  // Default cache-creation rate = 1.25× standard input (Anthropic
+  // 5-minute cache). Models that pin an explicit `cacheCreationInput`
+  // (see ANTHROPIC_PRICING_USD_PER_1M_TOKENS) override the default.
+  const creationRate = pricing.cacheCreationInput ?? pricing.input * 1.25;
+  const creationCost = (creation / 1_000_000) * creationRate;
   const outputCost = (output / 1_000_000) * pricing.output;
-  return inputCost + cachedCost + outputCost;
+  return inputCost + cachedCost + creationCost + outputCost;
 }
 
 export interface AnthropicClientOptions {
@@ -502,14 +554,22 @@ export class AnthropicClient implements LlmClient {
       data.model && data.model.trim().length > 0 ? data.model : this.model;
 
     // Strict usage validation — both input_tokens and output_tokens
-    // must be present non-negative integers. cache_read is optional.
-    // Mirrors OpenAIClient round 6 F21: silent acceptance of
-    // missing/null counters would let buildBillableUsage emit
-    // payloads failRun rejects, leaving rows stuck in `running`.
+    // must be present non-negative integers. cache_read and
+    // cache_creation are optional.
+    //
+    // PR #103 codex round 1 P1 — `cache_read_input_tokens` >
+    // `input_tokens` is a VALID Anthropic state (the two counters are
+    // separate non-overlapping buckets; on cache-heavy traffic, cache
+    // reads commonly exceed standard input). The previous OpenAI-
+    // style `cached > input` veto rejected legitimate successful
+    // responses as `usage_inconsistent`, breaking extraction whenever
+    // prompt caching was effective. Veto removed; counter shape
+    // check (non-negative integer) remains.
     const usageBlock = data.usage;
     const inputTokensRaw = usageBlock?.input_tokens;
     const outputTokensRaw = usageBlock?.output_tokens;
     const cachedTokensRaw = usageBlock?.cache_read_input_tokens;
+    const cacheCreationTokensRaw = usageBlock?.cache_creation_input_tokens;
     const isCounter = (n: unknown): n is number =>
       typeof n === "number" && Number.isInteger(n) && n >= 0;
     const inputTokens = isCounter(inputTokensRaw) ? inputTokensRaw : undefined;
@@ -519,18 +579,13 @@ export class AnthropicClient implements LlmClient {
     const cachedTokens = isCounter(cachedTokensRaw)
       ? cachedTokensRaw
       : undefined;
-    // Reject impossible accounting where cached > input (matches
-    // OpenAIClient round 8 F29 — protects AC-019 against inflated
-    // cost from malformed provider responses).
-    const usageInconsistent =
-      cachedTokens !== undefined &&
-      inputTokens !== undefined &&
-      cachedTokens > inputTokens;
+    const cacheCreationTokens = isCounter(cacheCreationTokensRaw)
+      ? cacheCreationTokensRaw
+      : undefined;
     const usagePresent =
       usageBlock !== undefined &&
       inputTokens !== undefined &&
-      outputTokens !== undefined &&
-      !usageInconsistent;
+      outputTokens !== undefined;
 
     const buildBillableUsage = () =>
       usagePresent
@@ -542,6 +597,7 @@ export class AnthropicClient implements LlmClient {
               inputTokens,
               outputTokens,
               cachedTokens,
+              cacheCreationTokens,
             }),
             modelId: resolvedModel,
           }
@@ -568,16 +624,19 @@ export class AnthropicClient implements LlmClient {
           buildBillableUsage(),
         );
       }
-      // Anthropic delivers `input` as a parsed JSON object on the
-      // tool_use block. Reject non-object inputs (string / array /
-      // null) so the extractor never sees a malformed strict-schema
-      // payload masquerading as success.
+      // Anthropic delivers `input` as a parsed JSON value on the
+      // tool_use block — typically an object, but JSON Schema spec
+      // permits root-level arrays / scalars / `null` when the
+      // caller's schema declares them. PR #103 codex round 1 P2 —
+      // the previous object-only check turned legitimate non-object
+      // tool calls into `malformed_tool_input` failures, so this
+      // adapter now only rejects the one case the Anthropic API
+      // contract bars: a missing `input` field. Schema-level
+      // validity of the value remains the caller's responsibility
+      // (the downstream `parseExtractedArticle()` etc. enforce their
+      // own root-shape contracts).
       const toolInput = toolUseBlock.input;
-      if (
-        toolInput === null ||
-        typeof toolInput !== "object" ||
-        Array.isArray(toolInput)
-      ) {
+      if (toolInput === undefined) {
         throw new AnthropicIncompleteCompletionError(
           "malformed_tool_input",
           "",
@@ -599,7 +658,7 @@ export class AnthropicClient implements LlmClient {
 
       if (!usagePresent) {
         throw new AnthropicIncompleteCompletionError(
-          usageInconsistent ? "usage_inconsistent" : "missing_usage",
+          "missing_usage",
           text,
           undefined,
         );
@@ -609,6 +668,7 @@ export class AnthropicClient implements LlmClient {
         inputTokens,
         outputTokens,
         cachedTokens,
+        cacheCreationTokens,
       });
 
       return {
@@ -659,7 +719,7 @@ export class AnthropicClient implements LlmClient {
 
     if (!usagePresent) {
       throw new AnthropicIncompleteCompletionError(
-        usageInconsistent ? "usage_inconsistent" : "missing_usage",
+        "missing_usage",
         text,
         undefined,
       );
@@ -669,6 +729,7 @@ export class AnthropicClient implements LlmClient {
       inputTokens,
       outputTokens,
       cachedTokens,
+      cacheCreationTokens,
     });
 
     return {

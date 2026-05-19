@@ -366,6 +366,52 @@ describe("AnthropicClient.invoke — response parsing", () => {
     });
   });
 
+  it("accepts tool_use.input that is a JSON array root (PR #103 codex round 1 P2 — JSON Schema spec allows non-object roots)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      model: "claude-sonnet-4-6",
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          name: "article_extraction",
+          input: ["item1", "item2"],
+        },
+      ],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    const c = new AnthropicClient({ apiKey: "sk-ant-test", fetch });
+    const r = await c.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+      responseFormat: SAMPLE_JSON_SCHEMA_RESPONSE_FORMAT,
+    });
+    expect(JSON.parse(r.text)).toEqual(["item1", "item2"]);
+  });
+
+  it("accepts tool_use.input that is JSON null (schema may allow null root)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      model: "claude-sonnet-4-6",
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          name: "article_extraction",
+          input: null,
+        },
+      ],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    const c = new AnthropicClient({ apiKey: "sk-ant-test", fetch });
+    const r = await c.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+      responseFormat: SAMPLE_JSON_SCHEMA_RESPONSE_FORMAT,
+    });
+    expect(r.text).toBe("null");
+  });
+
   it("concatenates multiple text content blocks on free-form path", async () => {
     const { fetch } = makeFetchMock(200, {
       model: "claude-sonnet-4-6",
@@ -482,7 +528,7 @@ describe("AnthropicClient.invoke — incomplete completion rejection", () => {
     );
   });
 
-  it("throws Incomplete with malformed_tool_input when tool_use input is not an object", async () => {
+  it("throws Incomplete with malformed_tool_input only when tool_use input field is undefined (PR #103 codex round 1 P2 — JSON Schema allows non-object roots)", async () => {
     const { fetch } = makeFetchMock(200, {
       model: "claude-sonnet-4-6",
       stop_reason: "tool_use",
@@ -490,7 +536,9 @@ describe("AnthropicClient.invoke — incomplete completion rejection", () => {
         {
           type: "tool_use",
           name: "article_extraction",
-          input: "this should be an object",
+          // `input` field intentionally omitted — Anthropic API
+          // contract requires it, so missing = malformed provider
+          // response.
         },
       ],
       usage: { input_tokens: 100, output_tokens: 50 },
@@ -603,7 +651,7 @@ describe("AnthropicClient.invoke — incomplete completion rejection", () => {
     );
   });
 
-  it("throws Incomplete with usage_inconsistent when cached > input", async () => {
+  it("accepts cache_read_input_tokens > input_tokens as a valid Anthropic usage state (PR #103 codex round 1 P1 — separate non-overlapping buckets, not OpenAI-style subset)", async () => {
     const { fetch } = makeFetchMock(200, {
       model: "claude-sonnet-4-6",
       stop_reason: "end_turn",
@@ -611,21 +659,16 @@ describe("AnthropicClient.invoke — incomplete completion rejection", () => {
       usage: {
         input_tokens: 100,
         output_tokens: 50,
-        cache_read_input_tokens: 200,
+        cache_read_input_tokens: 5000,
       },
     });
     const c = new AnthropicClient({ apiKey: "sk-ant-test", fetch });
-    let caught: unknown;
-    try {
-      await c.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(AnthropicIncompleteCompletionError);
-    expect((caught as AnthropicIncompleteCompletionError).reason).toBe(
-      "usage_inconsistent",
-    );
-    expect((caught as AnthropicIncompleteCompletionError).usage).toBeUndefined();
+    const r = await c.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    expect(r.inputTokens).toBe(100);
+    expect(r.cachedTokens).toBe(5000);
+    // cost = 100/1M * $3 + 5000/1M * $0.3 + 50/1M * $15
+    //      = 0.0003 + 0.0015 + 0.00075 = 0.00255
+    expect(r.totalCostUsd).toBeCloseTo(0.00255, 6);
   });
 
   it("rejects null/non-integer counters as missing_usage", async () => {
@@ -663,17 +706,56 @@ describe("computeAnthropicTotalCostUsd — pricing math", () => {
     expect(c).toBeCloseTo(18.0, 6);
   });
 
-  it("Sonnet 4.6 with cached input billed at 10% rate", () => {
-    // input 1000 tokens, 800 cached → 200 nonCached @ $3/1M = $0.0006
+  it("Sonnet 4.6 — separate bucket model: input + cache_read + output summed at their own rates (PR #103 codex round 1 P1)", () => {
+    // PR #103 codex round 1 P1: Anthropic billing model treats
+    // `input_tokens`, `cache_read_input_tokens`, and
+    // `cache_creation_input_tokens` as SEPARATE non-overlapping
+    // buckets. cache_read is NOT subtracted from input.
+    //
+    // input 1000 @ $3/1M = $0.003
     // cached 800 @ $0.3/1M = $0.00024
     // output 250 @ $15/1M = $0.00375
-    // total = $0.00459
+    // total = $0.00699
     const c = computeAnthropicTotalCostUsd("claude-sonnet-4-6", {
       inputTokens: 1000,
       outputTokens: 250,
       cachedTokens: 800,
     });
-    expect(c).toBeCloseTo(0.00459, 6);
+    expect(c).toBeCloseTo(0.00699, 6);
+  });
+
+  it("Sonnet 4.6 with cache_creation_input_tokens billed at 125% standard input rate (PR #103 codex round 1 P1)", () => {
+    // PR #103 codex round 1 P1: cache write tokens billed separately
+    // from cache reads. Sonnet 4.6 cacheCreationInput = $3 × 1.25 = $3.75/1M.
+    //
+    // input 1000 @ $3/1M = $0.003
+    // creation 2000 @ $3.75/1M = $0.0075
+    // output 250 @ $15/1M = $0.00375
+    // total = $0.01425
+    const c = computeAnthropicTotalCostUsd("claude-sonnet-4-6", {
+      inputTokens: 1000,
+      outputTokens: 250,
+      cacheCreationTokens: 2000,
+    });
+    expect(c).toBeCloseTo(0.01425, 6);
+  });
+
+  it("Sonnet 4.6 — input + cache_read + cache_creation + output all priced as separate buckets", () => {
+    // Combined: standard input 1000 + cache_read 4000 + cache_creation 500
+    // + output 250.
+    //
+    // input    1000 @ $3/1M    = $0.003
+    // cached   4000 @ $0.3/1M  = $0.0012
+    // creation  500 @ $3.75/1M = $0.001875
+    // output    250 @ $15/1M   = $0.00375
+    // total = $0.009825
+    const c = computeAnthropicTotalCostUsd("claude-sonnet-4-6", {
+      inputTokens: 1000,
+      outputTokens: 250,
+      cachedTokens: 4000,
+      cacheCreationTokens: 500,
+    });
+    expect(c).toBeCloseTo(0.009825, 6);
   });
 
   it("Opus 4.7 pricing higher than Sonnet", () => {
@@ -769,6 +851,20 @@ describe("AnthropicClient — LlmClient interface compliance", () => {
     for (const tier of [0, 1, 2, 3] as const) {
       const model = ANTHROPIC_TIER_DEFAULT_MODEL[tier];
       expect(ANTHROPIC_PRICING_USD_PER_1M_TOKENS[model]).toBeDefined();
+    }
+  });
+
+  it("ANTHROPIC_PRICING entries each carry cacheCreationInput rate (PR #103 codex round 1 P1)", () => {
+    // cache_creation_input_tokens must be priceable for every SKU
+    // the client can construct — otherwise computeAnthropicTotalCostUsd
+    // silently falls back to 1.25× input which masks per-SKU rate
+    // divergence at ratification time.
+    for (const [model, pricing] of Object.entries(
+      ANTHROPIC_PRICING_USD_PER_1M_TOKENS,
+    )) {
+      expect(pricing.cacheCreationInput).toBeDefined();
+      expect(pricing.cacheCreationInput).toBeGreaterThan(pricing.input);
+      expect(model).toMatch(/^claude-/);
     }
   });
 });
