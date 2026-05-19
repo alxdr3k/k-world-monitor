@@ -1,6 +1,6 @@
 # Code Map
 
-> Last verified against code: pending merge SHA (2026-05-17) — INFRA-1B.5.h2-policy-gate-risk-triggers landed (AC-023 / TEST-023 evidence, AI-P1-11 D1a/D2a 결정 lock, ADR-0017 INV-0017-3/4/5). Previous code baseline = fdb847a (2026-05-17, Cycle 10 INFRA-1B.3.h7-gate-evidence-hardening). Earlier baselines: 75706c4 (2026-05-14, INFRA-1B.3.x-audit) → 13d61af (2026-05-13, comprehensive review backfill).
+> Last verified against code: pending merge SHA (2026-05-19) — EXTR-1A.2a Article extractor skeleton + LlmClient interface + INV-0029-* defensive pipeline (mock LLM) landed (Cycle 40, **code change**: 2 신규 modules in `src/extraction/llm/client.ts` + `src/extraction/article/article-extractor.ts` + 1 신규 test in `tests/unit/article_extractor_test.ts`, 1234 → 1257 tests). Previous code baseline = 5d037d3 (2026-05-19, Cycle 39 PR #98 EXTR-1A.1 Extractor router + interface contract). Earlier baselines: 49d4a79 (2026-05-19, Cycle 38 PR #97 EXTR-1A.0 Prompt Injection 방어 기반) → fdb847a (2026-05-17, Cycle 10 INFRA-1B.3.h7-gate-evidence-hardening) → 75706c4 (2026-05-14, INFRA-1B.3.x-audit) → 13d61af (2026-05-13, comprehensive review backfill).
 
 ## Runtime stack
 
