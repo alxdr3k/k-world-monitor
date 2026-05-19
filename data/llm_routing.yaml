@@ -83,7 +83,7 @@ tiers:
       role: disabled
 
   tier_3:
-    capability: low_cost_high_volume_and_search_grounding
+    capability: high_volume_throughput_and_search_grounding
     used_in:
       - cite_check_overclaim_llm_judge_default
       - evidence_pack_simple_conversion

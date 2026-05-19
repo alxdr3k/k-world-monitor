@@ -23,6 +23,7 @@
 | `scripts/check-secrets.ts` | Pre-commit secret scanner — pure `scanForSecrets()` + CLI entry (`bun run check-secrets`). 2-layer defense: filename guard (`.env` family reject, exempt `.env.example` / `.sample` / `.template`) + content pattern guard (OpenAI / Anthropic / Google / AWS / GitHub PAT / Doppler). Redacted preview (`first4...last4`) — no token re-leak in stderr. AI-P1-12 / INFRA-1B.5.h1-runbook-setup-hygiene |
 | `scripts/git-hooks/pre-commit` | Bash shim invoking `scripts/check-secrets.ts`. Activated via `git config core.hooksPath = scripts/git-hooks` (`bun run hooks:install`). Operator override: `git commit --no-verify`. AI-P1-12 |
 | `scripts/install-git-hooks.sh` | One-shot fresh-worktree installer — sets `core.hooksPath` + `chmod +x` all hooks. `bun run hooks:install`. AI-P1-12 |
+| `scripts/check-llm-routing-config.ts` | Pure config validator for `data/llm_routing.yaml` (ADR-0023 INV-0023-2 / INV-0023-3 / INV-0023-5 — operator D3 2026-05-18). Exports `loadLlmRoutingConfig` + `assertTier0VendorRoles` (Tier 0 vendor role lock) + `assertTiersCapabilityCanonical` (capability mandatory; no `price`/`cost`/`cheap`/`budget` tier-canonical keys) + `assertGoogleScopeIsTier3Only` (Google only at Tier 3) + `checkLlmRoutingConfig` aggregate. CLI entry: `bun run scripts/check-llm-routing-config.ts data/llm_routing.yaml`. No runtime LLM wiring — pure policy validator. |
 | `src/discovery/worker/run-discovery.ts` | Discovery worker entry (`bun run discovery:run`, `:dry-run`, INFRA-1B.2) |
 | `tests/bench/neo4j_fts_search_bench.ts` | SPIKE-001 FTS bench (`bun run bench:neo4j`) |
 
@@ -129,6 +130,7 @@
 | `tests/unit/run_ledger_test.ts` | startRun / completeRun / failRun + daily cost aggregation (29 tests) | TEST-019 (AC-019) |
 | `tests/unit/audit_policy_decisions_test.ts` | recordR2UploadDecision audit ledger — IntendedAction + R2UploadDecision enum + canonical column INSERT + 4 lifecycle decisions + snap_id rationale anchor correlation (16 tests) | — (INFRA-1B.3.x-audit, AC-032 / NFR-008) |
 | `tests/policy/gate_test.ts` | ADR-0017 INV-0017-3/4/5 policy_gate evaluator — stageDefaultMode (6) + detectRisks 8 trigger × fire/not-fire/mode-invariance/multi-trigger (24) + evaluatePolicyGate combined (8) + recordPolicyGateDecision intended_action=NULL namespace + writer-boundary guard (6) + TEST-023 E2E 8 trigger × ledger record × INV-0017-4 mode-invariance (9). 53 tests total. | TEST-023 (AC-023, INFRA-1B.5.h2-policy-gate-risk-triggers) |
+| `tests/policy/llm_routing_config_test.ts` | ADR-0023 INV-0023-2 / INV-0023-3 / INV-0023-5 pure config validator tests (37 tests). Live integration (5) + assertTier0VendorRoles (8) + assertTiersCapabilityCanonical (11) + assertGoogleScopeIsTier3Only (12) + loader (1). Cycle 34 operator D3 2026-05-18. | (ADR-0023 config-level enforcement) |
 | `tests/test-helpers/neo4j-mock.ts` | Shared Neo4j mock helper | (test infra) |
 | `tests/bench/neo4j_fts_search_bench.ts` | Neo4j FTS p95 < 1s bench (SPIKE-001) | TEST-002 (needs Neo4j) |
 
