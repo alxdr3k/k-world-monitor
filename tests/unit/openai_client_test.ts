@@ -17,6 +17,7 @@ import { describe, it, expect } from "bun:test";
 import {
   computeTotalCostUsd,
   OPENAI_PRICING_USD_PER_1M_TOKENS,
+  OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS,
   OPENAI_TIER_DEFAULT_MODEL,
   OpenAIApiError,
   OpenAIClient,
@@ -201,10 +202,9 @@ describe("OpenAIClient.invoke — request shape", () => {
       role: "user",
       content: "<untrusted>article body</untrusted>",
     });
-    expect(body.max_completion_tokens).toBeUndefined();
   });
 
-  it("body includes max_completion_tokens when maxOutputTokens passed", async () => {
+  it("explicit maxOutputTokens wins over per-tier default", async () => {
     const { fetch, calls } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
     const client = new OpenAIClient({ apiKey: "sk", fetch });
     await client.invoke({
@@ -217,6 +217,40 @@ describe("OpenAIClient.invoke — request shape", () => {
       max_completion_tokens?: number;
     };
     expect(body.max_completion_tokens).toBe(1234);
+  });
+
+  it("applies per-tier default max_completion_tokens when caller omits maxOutputTokens (PR #100 P2)", async () => {
+    const { fetch, calls } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
+    const client = new OpenAIClient({ apiKey: "sk", tier: 2, fetch });
+    await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    const body = JSON.parse((calls[0]!.init?.body as string) ?? "{}") as {
+      max_completion_tokens?: number;
+    };
+    expect(body.max_completion_tokens).toBe(
+      OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS[2],
+    );
+  });
+
+  it("per-tier default max_completion_tokens varies by tier", async () => {
+    for (const tier of [0, 1, 2, 3] as const) {
+      const { fetch, calls } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
+      const client = new OpenAIClient({ apiKey: "sk", tier, fetch });
+      await client.invoke({
+        systemPrompt: "s",
+        userPrompt: "u",
+        tier,
+      });
+      const body = JSON.parse((calls[0]!.init?.body as string) ?? "{}") as {
+        max_completion_tokens?: number;
+      };
+      expect(body.max_completion_tokens).toBe(
+        OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS[tier],
+      );
+    }
   });
 });
 
@@ -272,6 +306,45 @@ describe("OpenAIClient.invoke — response parsing", () => {
       tier: 2,
     });
     expect(result.text).toBe("");
+  });
+
+  it("prefers response.model resolved snapshot over request-time alias (PR #100 P2)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      model: "gpt-5-mini-2025-08-07",
+      choices: [{ message: { content: "ok" } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    });
+    const client = new OpenAIClient({
+      apiKey: "sk",
+      tier: 2,
+      model: "gpt-5-mini",
+      fetch,
+    });
+    const result = await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    expect(result.model).toBe("gpt-5-mini-2025-08-07");
+  });
+
+  it("falls back to request-time alias if response.model is missing/blank", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "ok" } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    });
+    const client = new OpenAIClient({
+      apiKey: "sk",
+      tier: 2,
+      model: "gpt-5-mini",
+      fetch,
+    });
+    const result = await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    expect(result.model).toBe("gpt-5-mini");
   });
 });
 

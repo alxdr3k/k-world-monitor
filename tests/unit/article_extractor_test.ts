@@ -593,7 +593,7 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
     expect(ledgerRows().length).toBe(0);
   });
 
-  it("writes startRun → completeRun for real-vendor clients (openai)", async () => {
+  it("writes startRun → completeRun for real-vendor clients (openai) — no fake session_id from sourceId", async () => {
     const response: LlmInvokeResult = {
       text: "extracted",
       vendor: "openai",
@@ -627,10 +627,83 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
     expect(row.output_tokens).toBe(200);
     expect(row.cached_tokens).toBe(100);
     expect(row.total_cost_usd).toBe(0.0123);
-    expect(row.session_id).toBe("src_ok");
+    // PR #100 codex P2 — session_id stays NULL unless an explicit
+    // `researchSessionId` dep is supplied. sourceId MUST NOT leak
+    // into this FK column.
+    expect(row.session_id).toBeNull();
     expect(row.completed_at).not.toBeNull();
-    // Envelope.result includes runId for traceability.
     expect((out.result as { runId: string }).runId).toMatch(/^run_/);
+  });
+
+  it("writes session_id only when researchSessionId dep supplied (sess_* format)", async () => {
+    const llm = new MockLlmClient(defaultMockResponse(), {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+    });
+    const ext = new ArticleExtractor({
+      llmClient: llm,
+      researchSessionId: "sess_01HXYZ",
+    });
+    await ext.extract({
+      sourceType: "article",
+      sourceId: "src_ok",
+      rawContent: "<p>Body</p>",
+    });
+    const row = ledgerRows()[0]!;
+    expect(row.session_id).toBe("sess_01HXYZ");
+  });
+
+  it("rewrites model_id to resolved snapshot from LlmInvokeResult.model (alias → dated)", async () => {
+    const response: LlmInvokeResult = {
+      text: "extracted",
+      vendor: "openai",
+      // Resolved snapshot differs from the client's request-time alias.
+      model: "gpt-5-mini-2025-08-07",
+      tier: 2,
+      inputTokens: 100,
+      outputTokens: 50,
+      totalCostUsd: 0.001,
+    };
+    const llm = new MockLlmClient(response, {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini", // alias used for startRun
+    });
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await ext.extract({
+      sourceType: "article",
+      sourceId: "src_ok",
+      rawContent: "<p>Body</p>",
+    });
+    const row = ledgerRows()[0]!;
+    // model_id should be the dated snapshot (reproducibility anchor).
+    expect(row.model_id).toBe("gpt-5-mini-2025-08-07");
+  });
+
+  it("keeps model_id at alias when LlmInvokeResult.model matches client.model (no-op rewrite)", async () => {
+    const response: LlmInvokeResult = {
+      text: "extracted",
+      vendor: "openai",
+      model: "gpt-5-mini",
+      tier: 2,
+      inputTokens: 100,
+      outputTokens: 50,
+      totalCostUsd: 0.001,
+    };
+    const llm = new MockLlmClient(response, {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+    });
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await ext.extract({
+      sourceType: "article",
+      sourceId: "src_ok",
+      rawContent: "<p>Body</p>",
+    });
+    const row = ledgerRows()[0]!;
+    expect(row.model_id).toBe("gpt-5-mini");
   });
 
   it("writes failRun when LlmClient.invoke throws (status='failed')", async () => {

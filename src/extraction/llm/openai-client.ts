@@ -118,6 +118,14 @@ export interface OpenAIClientOptions {
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
 interface OpenAIChatResponseShape {
+  /**
+   * Resolved model snapshot returned by OpenAI (e.g.
+   * `gpt-5-mini-2025-08-07` when the request used the alias
+   * `gpt-5-mini`). Preferred over `OpenAIClient.model` for the
+   * ledger model_id so the row records the dated snapshot that
+   * actually produced the result (PR #100 codex P2).
+   */
+  model?: string;
   choices?: Array<{
     message?: {
       content?: string | null;
@@ -131,6 +139,25 @@ interface OpenAIChatResponseShape {
     };
   };
 }
+
+/**
+ * Per-tier default `max_completion_tokens` cap. Bounds OpenAI
+ * output regardless of caller (PR #100 codex P2 — Tier 2 default
+ * extraction had no output cap, allowing prompt-injected article
+ * bodies to drive unbounded generation cost before run_ledger
+ * captured it).
+ *
+ * Values chosen as conservative envelopes for the extraction stage —
+ * extractor outputs are short JSON envelopes, not free-form prose.
+ * Callers may still override via `LlmInvokeParams.maxOutputTokens`
+ * for stages that legitimately need more (dossier / scenario).
+ */
+export const OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS: Record<LlmTier, number> = {
+  0: 4_000,
+  1: 4_000,
+  2: 2_000,
+  3: 1_000,
+};
 
 export class OpenAIApiError extends Error {
   constructor(
@@ -167,15 +194,19 @@ export class OpenAIClient implements LlmClient {
 
   async invoke(params: LlmInvokeParams): Promise<LlmInvokeResult> {
     const url = `${this.baseUrl}/chat/completions`;
+    // Apply per-tier default output cap when caller omits an
+    // explicit `maxOutputTokens` (PR #100 codex P2). Caller's
+    // explicit value wins (including `0` is rejected by OpenAI as
+    // invalid — left to the API).
+    const maxCompletionTokens =
+      params.maxOutputTokens ?? OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS[this.tier];
     const body = JSON.stringify({
       model: this.model,
       messages: [
         { role: "system", content: params.systemPrompt },
         { role: "user", content: params.userPrompt },
       ],
-      ...(params.maxOutputTokens !== undefined
-        ? { max_completion_tokens: params.maxOutputTokens }
-        : {}),
+      max_completion_tokens: maxCompletionTokens,
     });
 
     const response = await this.fetchImpl(url, {
@@ -194,10 +225,21 @@ export class OpenAIClient implements LlmClient {
 
     const data = (await response.json()) as OpenAIChatResponseShape;
     const text = data.choices?.[0]?.message?.content ?? "";
+    // Prefer resolved snapshot from response.model (e.g. dated
+    // `gpt-5-mini-2025-08-07`) over the request-time alias
+    // `this.model`, so consumers writing to run_ledger.model_id
+    // record the reproducibility anchor (PR #100 codex P2). Fall
+    // back to `this.model` only if the response omits it (defensive
+    // — OpenAI Chat Completions always returns it in practice).
+    const resolvedModel =
+      data.model && data.model.trim().length > 0 ? data.model : this.model;
     const inputTokens = data.usage?.prompt_tokens;
     const outputTokens = data.usage?.completion_tokens;
     const cachedTokens = data.usage?.prompt_tokens_details?.cached_tokens;
-    const totalCostUsd = computeTotalCostUsd(this.model, {
+    // Cost computation prefers the resolved snapshot so dated
+    // models get their own pricing row if present in the table;
+    // unknown-model fallback still applies for forward compatibility.
+    const totalCostUsd = computeTotalCostUsd(resolvedModel, {
       inputTokens,
       outputTokens,
       cachedTokens,
@@ -206,7 +248,7 @@ export class OpenAIClient implements LlmClient {
     return {
       text,
       vendor: "openai",
-      model: this.model,
+      model: resolvedModel,
       tier: this.tier,
       inputTokens,
       outputTokens,

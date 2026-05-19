@@ -43,6 +43,16 @@ export interface CompleteRunInput {
   cachedTokens?: number;
   /** Required — null cost silently disappears from SUM aggregation (AC-019). */
   totalCostUsd: number;
+  /**
+   * Optional resolved-model snapshot. When the request was issued
+   * with an alias (e.g. `gpt-5-mini`) and the vendor response
+   * carries the dated snapshot (e.g. `gpt-5-mini-2025-08-07`), the
+   * ledger row's `model_id` is rewritten on completion so the
+   * stored value matches what actually produced the result
+   * (reproducibility anchor — PR #100 codex P2). Omit to keep the
+   * `startRun` value as-is. Must be non-empty when supplied.
+   */
+  modelId?: string;
 }
 
 export interface DailyCostRow {
@@ -136,23 +146,45 @@ export function completeRun(runId: string, output: CompleteRunInput): void {
       );
   }
 
+  // Optional resolved-model snapshot must be a non-empty string when supplied.
+  if (output.modelId !== undefined && !output.modelId.trim())
+    throw new Error("completeRun: modelId, when supplied, must be a non-empty string");
+
   const now = new Date().toISOString();
-  const result = getDb()
-    .prepare(
-      `UPDATE run_ledger
-       SET status = 'completed', completed_at = ?,
-           input_tokens = ?, output_tokens = ?, cached_tokens = ?,
-           total_cost_usd = ?
-       WHERE run_id = ? AND status = 'running'`
-    )
-    .run(
-      now,
-      output.inputTokens ?? null,
-      output.outputTokens ?? null,
-      output.cachedTokens ?? null,
-      output.totalCostUsd,
-      runId
-    );
+  const result = output.modelId !== undefined
+    ? getDb()
+        .prepare(
+          `UPDATE run_ledger
+           SET status = 'completed', completed_at = ?,
+               input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+               total_cost_usd = ?, model_id = ?
+           WHERE run_id = ? AND status = 'running'`
+        )
+        .run(
+          now,
+          output.inputTokens ?? null,
+          output.outputTokens ?? null,
+          output.cachedTokens ?? null,
+          output.totalCostUsd,
+          output.modelId,
+          runId
+        )
+    : getDb()
+        .prepare(
+          `UPDATE run_ledger
+           SET status = 'completed', completed_at = ?,
+               input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+               total_cost_usd = ?
+           WHERE run_id = ? AND status = 'running'`
+        )
+        .run(
+          now,
+          output.inputTokens ?? null,
+          output.outputTokens ?? null,
+          output.cachedTokens ?? null,
+          output.totalCostUsd,
+          runId
+        );
   if (result.changes === 0) {
     throw new Error(`completeRun: no running row found for run_id=${runId}`);
   }

@@ -84,6 +84,18 @@ export interface ArticleExtractorDeps {
    * be wired in EXTR-1A.2c).
    */
   readonly domainOverrideReason?: string;
+  /**
+   * Optional research-session ID (`sess_<ULID>` per
+   * migrations/sqlite/v1_schema.sql `research_session` table) to
+   * record on the run_ledger row. Must NOT be a `sourceId`
+   * (`src_*`) — `run_ledger.session_id` is an FK to
+   * `research_session` per the schema (PR #100 codex P2).
+   * Standalone extractor calls outside a research session leave
+   * this unset, and the ledger row stores NULL — preferable to
+   * writing a fake session ID that would corrupt per-session
+   * cost/throttle/audit groupings.
+   */
+  readonly researchSessionId?: string;
 }
 
 /**
@@ -133,7 +145,16 @@ export class ArticleExtractor implements Extractor {
         vendor,
         tier,
         modelId: this.deps.llmClient.model,
-        sessionId: input.sourceId,
+        // PR #100 codex P2 — `run_ledger.session_id` is an FK to
+        // `research_session` (`sess_<ULID>` format), NOT a free-text
+        // identifier. Previous wiring wrote `input.sourceId` (e.g.
+        // `src_ok`) into this column, which would have corrupted
+        // per-session cost/throttle/audit groupings and conflicted
+        // with the planned FK enforcement. Only set when the caller
+        // explicitly provides a valid research session ID via deps.
+        ...(this.deps.researchSessionId
+          ? { sessionId: this.deps.researchSessionId }
+          : {}),
         ...(this.deps.domainOverrideReason
           ? { domainOverrideReason: this.deps.domainOverrideReason }
           : {}),
@@ -153,11 +174,22 @@ export class ArticleExtractor implements Extractor {
       throw err;
     }
     if (runId !== undefined) {
+      // PR #100 codex P2 — pass the resolved-snapshot `model` from
+      // LlmInvokeResult so completeRun rewrites `run_ledger.model_id`
+      // from the request-time alias (e.g. `gpt-5-mini`) to the dated
+      // snapshot (e.g. `gpt-5-mini-2025-08-07`). Only rewrite when
+      // the resolved value differs from the alias used at startRun
+      // time — preserves a no-op when client is mock or response
+      // omits the field.
+      const startedModelId = this.deps.llmClient.model;
       completeRun(runId, {
         inputTokens: llmResult.inputTokens,
         outputTokens: llmResult.outputTokens,
         cachedTokens: llmResult.cachedTokens,
         totalCostUsd: llmResult.totalCostUsd ?? 0,
+        ...(llmResult.model && llmResult.model !== startedModelId
+          ? { modelId: llmResult.model }
+          : {}),
       });
     }
 

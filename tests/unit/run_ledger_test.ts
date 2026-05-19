@@ -219,6 +219,57 @@ describe("failRun", () => {
   });
 });
 
+describe("completeRun resolved-model rewrite (PR #100 P2)", () => {
+  it("rewrites model_id when modelId option supplied (alias → dated snapshot)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    completeRun(id, {
+      totalCostUsd: 0.01,
+      inputTokens: 100,
+      outputTokens: 50,
+      modelId: "gpt-5-mini-2025-08-07",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT * FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.model_id).toBe("gpt-5-mini-2025-08-07");
+    expect(row.total_cost_usd).toBe(0.01);
+    expect(row.status).toBe("completed");
+  });
+
+  it("preserves startRun model_id when modelId option omitted (backward-compat)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    completeRun(id, { totalCostUsd: 0.01 });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT model_id FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.model_id).toBe("gpt-5-mini");
+  });
+
+  it("throws when modelId is supplied but empty/whitespace", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    expect(() =>
+      completeRun(id, { totalCostUsd: 0.01, modelId: "   " }),
+    ).toThrow("modelId, when supplied, must be a non-empty string");
+  });
+});
+
 describe("completeRun terminal-state guard", () => {
   it("throws when run_id does not exist", () => {
     expect(() => completeRun("run_NONEXISTENT", { totalCostUsd: 0.01 })).toThrow("no running row");
