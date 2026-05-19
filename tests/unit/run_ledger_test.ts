@@ -67,6 +67,87 @@ afterEach(() => {
   }
 });
 
+describe("startRun sessionId writer-boundary validation (PR #100 round 7 F24)", () => {
+  it("accepts well-formed sess_<ULID>", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+      sessionId: "sess_01HXYZ",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT session_id FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.session_id).toBe("sess_01HXYZ");
+  });
+
+  it("rejects sessionId without sess_ prefix", () => {
+    expect(() =>
+      startRun({
+        stage: "extract",
+        vendor: "openai",
+        tier: 2,
+        modelId: "gpt-5-mini",
+        sessionId: "src_typo",
+      }),
+    ).toThrow(/sessionId must be a non-blank `sess_<ULID>`/);
+  });
+
+  it("rejects blank/whitespace sessionId", () => {
+    expect(() =>
+      startRun({
+        stage: "extract",
+        vendor: "openai",
+        tier: 2,
+        modelId: "gpt-5-mini",
+        sessionId: "   ",
+      }),
+    ).toThrow(/sessionId must be a non-blank `sess_<ULID>`/);
+    expect(() =>
+      startRun({
+        stage: "extract",
+        vendor: "openai",
+        tier: 2,
+        modelId: "gpt-5-mini",
+        sessionId: "",
+      }),
+    ).toThrow(/sessionId must be a non-blank `sess_<ULID>`/);
+  });
+
+  it("accepts omitted sessionId (column stays NULL)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT session_id FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.session_id).toBeNull();
+  });
+
+  it("trims padded sessionId before INSERT (PR #100 round 8 F28)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+      sessionId: "  sess_01HXYZ  ",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT session_id FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    // Stored value has no surrounding whitespace — matches
+    // research_session.session_id round-trip.
+    expect(row.session_id).toBe("sess_01HXYZ");
+  });
+});
+
 describe("startRun", () => {
   it("returns a run_ prefixed ID", () => {
     const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
@@ -219,6 +300,159 @@ describe("failRun", () => {
   });
 });
 
+describe("failRun cost-preserving payload (PR #100 round 4 F13)", () => {
+  it("records token counts + totalCostUsd on the failed row when payload supplied", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(id, {
+      inputTokens: 1000,
+      outputTokens: 200,
+      cachedTokens: 50,
+      totalCostUsd: 0.0123,
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT * FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.status).toBe("failed");
+    expect(row.input_tokens).toBe(1000);
+    expect(row.output_tokens).toBe(200);
+    expect(row.cached_tokens).toBe(50);
+    expect(row.total_cost_usd).toBe(0.0123);
+    expect(row.completed_at).not.toBeNull();
+  });
+
+  it("preserves legacy no-payload behavior (NULL cost)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(id);
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT * FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.status).toBe("failed");
+    expect(row.total_cost_usd).toBeNull();
+    expect(row.input_tokens).toBeNull();
+  });
+
+  it("rejects negative totalCostUsd payload", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    expect(() => failRun(id, { totalCostUsd: -0.01 })).toThrow(
+      "must be a finite non-negative number",
+    );
+  });
+
+  it("rejects non-integer inputTokens payload", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    expect(() => failRun(id, { inputTokens: 1.5 })).toThrow(
+      "must be a non-negative integer",
+    );
+  });
+
+  it("rewrites model_id when modelId option supplied (PR #100 round 5 F15)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(id, {
+      totalCostUsd: 0.005,
+      inputTokens: 100,
+      outputTokens: 50,
+      modelId: "gpt-5-mini-2025-08-07",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT * FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.status).toBe("failed");
+    expect(row.model_id).toBe("gpt-5-mini-2025-08-07");
+    expect(row.total_cost_usd).toBe(0.005);
+  });
+
+  it("rejects blank modelId in failRun payload", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    expect(() => failRun(id, { modelId: "   " })).toThrow(
+      "modelId, when supplied, must be a non-empty string",
+    );
+  });
+});
+
+describe("completeRun resolved-model rewrite (PR #100 P2)", () => {
+  it("rewrites model_id when modelId option supplied (alias → dated snapshot)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    completeRun(id, {
+      totalCostUsd: 0.01,
+      inputTokens: 100,
+      outputTokens: 50,
+      modelId: "gpt-5-mini-2025-08-07",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT * FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.model_id).toBe("gpt-5-mini-2025-08-07");
+    expect(row.total_cost_usd).toBe(0.01);
+    expect(row.status).toBe("completed");
+  });
+
+  it("preserves startRun model_id when modelId option omitted (backward-compat)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    completeRun(id, { totalCostUsd: 0.01 });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT model_id FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.model_id).toBe("gpt-5-mini");
+  });
+
+  it("throws when modelId is supplied but empty/whitespace", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    expect(() =>
+      completeRun(id, { totalCostUsd: 0.01, modelId: "   " }),
+    ).toThrow("modelId, when supplied, must be a non-empty string");
+  });
+});
+
 describe("completeRun terminal-state guard", () => {
   it("throws when run_id does not exist", () => {
     expect(() => completeRun("run_NONEXISTENT", { totalCostUsd: 0.01 })).toThrow("no running row");
@@ -333,6 +567,64 @@ describe("getDailyCostUsd", () => {
     completeRun(id, { totalCostUsd: 0.10 });
     expect(getDailyCostUsd("2020-01-01")).toBe(0);
     expect(getDailyCostUsd(today)).toBeCloseTo(0.10, 6);
+  });
+});
+
+describe("getDailyCostUsd includes billable failed rows (PR #100 round 5 F17)", () => {
+  function startAndFailWithCost(cost: number, completedDate: string): void {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(id, { totalCostUsd: cost });
+    // Backdate completed_at so the test isolates the bucket.
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    getDb()
+      .prepare("UPDATE run_ledger SET completed_at = ? WHERE run_id = ?")
+      .run(`${completedDate}T12:00:00.000Z`, id);
+  }
+
+  function startAndCompleteWithCost(cost: number, completedDate: string): void {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    completeRun(id, { totalCostUsd: cost });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    getDb()
+      .prepare("UPDATE run_ledger SET completed_at = ? WHERE run_id = ?")
+      .run(`${completedDate}T12:00:00.000Z`, id);
+  }
+
+  it("getDailyCostUsd sums BOTH completed and billable-failed (status-agnostic)", () => {
+    startAndCompleteWithCost(0.01, "2026-05-19");
+    startAndFailWithCost(0.005, "2026-05-19");
+    // Failed row with NULL cost (legacy) must NOT contribute.
+    const noCostId = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(noCostId);
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    getDb()
+      .prepare("UPDATE run_ledger SET completed_at = ? WHERE run_id = ?")
+      .run("2026-05-19T12:00:00.000Z", noCostId);
+    expect(getDailyCostUsd("2026-05-19")).toBeCloseTo(0.015, 6);
+  });
+
+  it("getDailyCostBreakdown counts billable failed rows in runCount", () => {
+    startAndCompleteWithCost(0.01, "2026-05-19");
+    startAndFailWithCost(0.005, "2026-05-19");
+    const rows = getDailyCostBreakdown("2026-05-19");
+    const openai = rows.find((r) => r.vendor === "openai")!;
+    expect(openai.totalCostUsd).toBeCloseTo(0.015, 6);
+    expect(openai.runCount).toBe(2);
   });
 });
 

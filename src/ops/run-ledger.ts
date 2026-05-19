@@ -43,6 +43,16 @@ export interface CompleteRunInput {
   cachedTokens?: number;
   /** Required — null cost silently disappears from SUM aggregation (AC-019). */
   totalCostUsd: number;
+  /**
+   * Optional resolved-model snapshot. When the request was issued
+   * with an alias (e.g. `gpt-5-mini`) and the vendor response
+   * carries the dated snapshot (e.g. `gpt-5-mini-2025-08-07`), the
+   * ledger row's `model_id` is rewritten on completion so the
+   * stored value matches what actually produced the result
+   * (reproducibility anchor — PR #100 codex P2). Omit to keep the
+   * `startRun` value as-is. Must be non-empty when supplied.
+   */
+  modelId?: string;
 }
 
 export interface DailyCostRow {
@@ -72,6 +82,22 @@ export function startRun(input: StartRunInput): string {
     throw new Error(
       `startRun: domainOverrideReason is required for non-openai vendor '${input.vendor}'`
     );
+  // PR #100 codex round 7 F24 + round 8 F28 — validate AND
+  // normalize the sessionId. Earlier round validated `trimmed` but
+  // wrote `input.sessionId` raw, so a padded but otherwise valid
+  // ID (e.g. `" sess_01HXYZ "`) was accepted with whitespace
+  // intact, never matching research_session.session_id or the
+  // per-session cost / audit grouping. Round 8 stores the trimmed
+  // value so the FK constraint holds round-trip.
+  let trimmedSessionId: string | undefined;
+  if (input.sessionId !== undefined) {
+    const trimmed = input.sessionId.trim();
+    if (trimmed === "" || !trimmed.startsWith("sess_"))
+      throw new Error(
+        `startRun: sessionId must be a non-blank \`sess_<ULID>\` (research_session FK), got '${input.sessionId}'`
+      );
+    trimmedSessionId = trimmed;
+  }
 
   const runId = `run_${ulid()}`;
   const now = new Date().toISOString();
@@ -101,7 +127,7 @@ export function startRun(input: StartRunInput): string {
       input.datasetVintageId ?? null,
       input.libraryVersionLockSha256 ?? null,
       input.domainOverrideReason ?? null,
-      input.sessionId ?? null,
+      trimmedSessionId ?? null,
       now
     );
   return runId;
@@ -136,37 +162,157 @@ export function completeRun(runId: string, output: CompleteRunInput): void {
       );
   }
 
+  // Optional resolved-model snapshot must be a non-empty string when supplied.
+  if (output.modelId !== undefined && !output.modelId.trim())
+    throw new Error("completeRun: modelId, when supplied, must be a non-empty string");
+
   const now = new Date().toISOString();
-  const result = getDb()
-    .prepare(
-      `UPDATE run_ledger
-       SET status = 'completed', completed_at = ?,
-           input_tokens = ?, output_tokens = ?, cached_tokens = ?,
-           total_cost_usd = ?
-       WHERE run_id = ? AND status = 'running'`
-    )
-    .run(
-      now,
-      output.inputTokens ?? null,
-      output.outputTokens ?? null,
-      output.cachedTokens ?? null,
-      output.totalCostUsd,
-      runId
-    );
+  const result = output.modelId !== undefined
+    ? getDb()
+        .prepare(
+          `UPDATE run_ledger
+           SET status = 'completed', completed_at = ?,
+               input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+               total_cost_usd = ?, model_id = ?
+           WHERE run_id = ? AND status = 'running'`
+        )
+        .run(
+          now,
+          output.inputTokens ?? null,
+          output.outputTokens ?? null,
+          output.cachedTokens ?? null,
+          output.totalCostUsd,
+          output.modelId,
+          runId
+        )
+    : getDb()
+        .prepare(
+          `UPDATE run_ledger
+           SET status = 'completed', completed_at = ?,
+               input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+               total_cost_usd = ?
+           WHERE run_id = ? AND status = 'running'`
+        )
+        .run(
+          now,
+          output.inputTokens ?? null,
+          output.outputTokens ?? null,
+          output.cachedTokens ?? null,
+          output.totalCostUsd,
+          runId
+        );
   if (result.changes === 0) {
     throw new Error(`completeRun: no running row found for run_id=${runId}`);
   }
 }
 
-export function failRun(runId: string): void {
+/**
+ * Optional cost payload for `failRun` (PR #100 codex round 4 F13).
+ * When the failure was caused by an upstream LLM error AFTER the
+ * vendor billed for the call (e.g. OpenAI `finish_reason: "length"`
+ * with non-zero usage), the caller can record the billable cost on
+ * the failed row so it still contributes to AC-019 daily cost /
+ * throttling aggregation. Omit when the failure happened before
+ * usage was available (transient network errors, schema
+ * validation in completeRun, etc.).
+ */
+export interface FailRunInput {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  /** Optional billable cost. Must be a finite non-negative number when supplied. */
+  totalCostUsd?: number;
+  /**
+   * Optional resolved-model snapshot. Same rewrite semantics as
+   * `CompleteRunInput.modelId` — when the request was issued with
+   * an alias (e.g. `gpt-5-mini`) and the vendor response carried a
+   * dated snapshot (e.g. `gpt-5-mini-2025-08-07`) before the
+   * incomplete-completion error fired, the failed row's `model_id`
+   * is rewritten to the resolved value so failed billable rows
+   * retain the reproducibility anchor (PR #100 codex round 5 F15).
+   * Must be non-empty when supplied.
+   */
+  modelId?: string;
+}
+
+export function failRun(runId: string, output?: FailRunInput): void {
+  // Validate optional cost payload up front so a malformed call
+  // does not corrupt the row.
+  if (output !== undefined) {
+    if (output.totalCostUsd !== undefined) {
+      if (!Number.isFinite(output.totalCostUsd) || output.totalCostUsd < 0)
+        throw new Error(
+          `failRun: totalCostUsd must be a finite non-negative number, got ${output.totalCostUsd}`
+        );
+    }
+    if (output.inputTokens !== undefined) {
+      if (!Number.isInteger(output.inputTokens) || output.inputTokens < 0)
+        throw new Error(
+          `failRun: inputTokens must be a non-negative integer, got ${output.inputTokens}`
+        );
+    }
+    if (output.outputTokens !== undefined) {
+      if (!Number.isInteger(output.outputTokens) || output.outputTokens < 0)
+        throw new Error(
+          `failRun: outputTokens must be a non-negative integer, got ${output.outputTokens}`
+        );
+    }
+    if (output.cachedTokens !== undefined) {
+      if (!Number.isInteger(output.cachedTokens) || output.cachedTokens < 0)
+        throw new Error(
+          `failRun: cachedTokens must be a non-negative integer, got ${output.cachedTokens}`
+        );
+    }
+    if (output.modelId !== undefined && !output.modelId.trim())
+      throw new Error("failRun: modelId, when supplied, must be a non-empty string");
+  }
+
   const now = new Date().toISOString();
-  const result = getDb()
-    .prepare(
-      `UPDATE run_ledger
-       SET status = 'failed', completed_at = ?
-       WHERE run_id = ? AND status = 'running'`
-    )
-    .run(now, runId);
+  let result;
+  if (output === undefined) {
+    result = getDb()
+      .prepare(
+        `UPDATE run_ledger
+         SET status = 'failed', completed_at = ?
+         WHERE run_id = ? AND status = 'running'`
+      )
+      .run(now, runId);
+  } else if (output.modelId !== undefined) {
+    result = getDb()
+      .prepare(
+        `UPDATE run_ledger
+         SET status = 'failed', completed_at = ?,
+             input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+             total_cost_usd = ?, model_id = ?
+         WHERE run_id = ? AND status = 'running'`
+      )
+      .run(
+        now,
+        output.inputTokens ?? null,
+        output.outputTokens ?? null,
+        output.cachedTokens ?? null,
+        output.totalCostUsd ?? null,
+        output.modelId,
+        runId
+      );
+  } else {
+    result = getDb()
+      .prepare(
+        `UPDATE run_ledger
+         SET status = 'failed', completed_at = ?,
+             input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+             total_cost_usd = ?
+         WHERE run_id = ? AND status = 'running'`
+      )
+      .run(
+        now,
+        output.inputTokens ?? null,
+        output.outputTokens ?? null,
+        output.cachedTokens ?? null,
+        output.totalCostUsd ?? null,
+        runId
+      );
+  }
   if (result.changes === 0) {
     throw new Error(`failRun: no running row found for run_id=${runId}`);
   }
@@ -187,11 +333,12 @@ function validateDate(date: string, caller: string): void {
     throw new Error(`${caller}: date '${date}' is not a valid calendar date`);
 }
 
-// Returns total cost in USD for all completed runs on a UTC calendar date (YYYY-MM-DD).
-// Filters by completed_at so cross-midnight runs are attributed to the day they billed.
-// Uses a half-open range (>= date AND < next-day) to allow the composite index on
-// (completed_at, vendor) to be used efficiently — LIKE does not reliably use B-tree indexes.
-// Optional vendor filter.
+// Returns total cost in USD for all billable runs on a UTC calendar date (YYYY-MM-DD).
+// PR #100 codex round 5 F17 — filter `total_cost_usd IS NOT NULL` instead of
+// `status = 'completed'` so billable-but-failed rows (truncated/filtered LLM
+// completions where failRun preserved the cost via F13) are included in the
+// AC-019 daily total. Running rows are still excluded because their cost is
+// always NULL until startRun → completeRun/failRun finalize.
 export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
   validateDate(date, "getDailyCostUsd");
   if (vendor !== undefined && !VALID_VENDORS.has(vendor))
@@ -202,20 +349,25 @@ export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
         .prepare(
           `SELECT COALESCE(SUM(total_cost_usd), 0) AS total
            FROM run_ledger
-           WHERE completed_at >= ? AND completed_at < ? AND vendor = ? AND status = 'completed'`
+           WHERE completed_at >= ? AND completed_at < ? AND vendor = ?
+             AND total_cost_usd IS NOT NULL`
         )
         .get(date, nextDay, vendor) as { total: number })
     : (getDb()
         .prepare(
           `SELECT COALESCE(SUM(total_cost_usd), 0) AS total
            FROM run_ledger
-           WHERE completed_at >= ? AND completed_at < ? AND status = 'completed'`
+           WHERE completed_at >= ? AND completed_at < ?
+             AND total_cost_usd IS NOT NULL`
         )
         .get(date, nextDay) as { total: number });
   return row.total;
 }
 
 // Returns per-vendor daily cost breakdown for a UTC calendar date.
+// PR #100 codex round 5 F17 — same `total_cost_usd IS NOT NULL` filter as
+// getDailyCostUsd; runCount counts billable rows (completed + billable
+// failed), not just completed.
 export function getDailyCostBreakdown(date: string): DailyCostRow[] {
   validateDate(date, "getDailyCostBreakdown");
   const nextDay = nextDateString(date);
@@ -226,7 +378,8 @@ export function getDailyCostBreakdown(date: string): DailyCostRow[] {
               COALESCE(SUM(total_cost_usd), 0) AS totalCostUsd,
               COUNT(*) AS runCount
        FROM run_ledger
-       WHERE completed_at >= ? AND completed_at < ? AND status = 'completed'
+       WHERE completed_at >= ? AND completed_at < ?
+         AND total_cost_usd IS NOT NULL
        GROUP BY vendor`
     )
     .all(date, nextDay) as DailyCostRow[];

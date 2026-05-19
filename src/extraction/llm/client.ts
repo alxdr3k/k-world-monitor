@@ -50,6 +50,24 @@ export interface LlmInvokeParams {
    * its own per-tier default.
    */
   readonly maxOutputTokens?: number;
+  /**
+   * Sampling temperature override (DEC-010 §8 + PR #100 codex
+   * round 6 F19). Concrete clients default to `0` for extract /
+   * cite_check / thesis stages; scenario branch passes `0.3`. Mock
+   * clients ignore it.
+   */
+  readonly temperature?: number;
+  /**
+   * Structured-output schema (DEC-010 §8 strict schema invariant).
+   * When supplied, concrete clients map it to the vendor's native
+   * structured-output API (OpenAI `response_format: json_schema`,
+   * Anthropic `tool_choice` with strict input schema, Google
+   * `responseSchema`). PR #100 codex round 6 F19 — surface added
+   * so future ArticleExtractor schema can flow through without
+   * client changes. Caller owns the schema definition. Free-form
+   * text remains the default when omitted.
+   */
+  readonly responseFormat?: Record<string, unknown>;
 }
 
 export interface LlmInvokeResult {
@@ -68,8 +86,65 @@ export interface LlmInvokeResult {
    * caching). Optional — not all vendors expose this.
    */
   readonly cachedTokens?: number;
+  /**
+   * Total cost in USD for this invocation. Required by the OPS-1A.1
+   * run_ledger (AC-019 — `completeRun` rejects null cost to prevent
+   * silent SUM aggregation loss). Concrete clients compute this from
+   * per-token pricing × token counts (PR #99 codex round 2 + EXTR-
+   * 1A.2b).
+   */
+  readonly totalCostUsd?: number;
 }
 
+/**
+ * LLM client contract. Vendor-agnostic. Concrete clients (OpenAI
+ * Responses API, Anthropic Messages, etc.) declare their canonical
+ * `vendor` + `tier` + `model` at construction time so the calling
+ * extractor can issue `startRun` ledger rows BEFORE invoke completes
+ * (EXTR-1A.2b run_ledger integration — the ledger row needs vendor +
+ * tier + modelId up front; the per-call counters arrive via
+ * `LlmInvokeResult` post-invoke).
+ */
 export interface LlmClient {
+  readonly vendor: LlmVendor | "mock";
+  readonly tier: LlmTier;
+  readonly model: string;
   invoke(params: LlmInvokeParams): Promise<LlmInvokeResult>;
+}
+
+/**
+ * Vendor-agnostic incomplete-invocation error (PR #100 codex round
+ * 4). Concrete vendor clients extend this when they detect that the
+ * response did not produce a usable result but the API call was
+ * billable (e.g. OpenAI `finish_reason: "length"` with non-zero
+ * usage). The optional `usage` payload allows the caller (extractor)
+ * to record the billable cost on the failed run_ledger row instead
+ * of recording a NULL cost that would disappear from AC-019 daily
+ * aggregation.
+ */
+export class LlmIncompleteResultError extends Error {
+  constructor(
+    public readonly reason: string,
+    public readonly partialText: string,
+    public readonly usage?: {
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly cachedTokens?: number;
+      readonly totalCostUsd?: number;
+      /**
+       * Resolved model snapshot (e.g. `gpt-5-mini-2025-08-07`) for
+       * the failed billable call. When provided, the extractor's
+       * failRun path rewrites `run_ledger.model_id` from the
+       * request-time alias to this snapshot so failed billable rows
+       * retain the same reproducibility anchor as completed rows
+       * (PR #100 codex round 5 F15).
+       */
+      readonly modelId?: string;
+    },
+  ) {
+    super(
+      `LLM invocation incomplete: reason='${reason}' (partial text length=${partialText.length})`,
+    );
+    this.name = "LlmIncompleteResultError";
+  }
 }
