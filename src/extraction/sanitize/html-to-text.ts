@@ -136,6 +136,28 @@ function decodeBasicEntities(text: string): string {
         ? String.fromCodePoint(n)
         : "";
     });
+    // Semicolonless numeric entities (HTML5 §13.2.5.74 legacy parse —
+    // PR #97 codex round 6 P2). Real HTML parsers decode `&#60script`
+    // as `<script`; without this pass, the entity-encoded payload
+    // bypasses the DANGEROUS_TAGS removal. Negative lookahead
+    // `(?![\d;])` (decimal) / `(?![0-9a-fA-F;])` (hex) prevents
+    // collision with the standard semicolon-terminated forms above
+    // (`&#60;` / `&#x3C;` are NOT matched here).
+    out = out.replace(/&#(\d{1,7})(?![\d;])/g, (_, code: string) => {
+      const n = Number(code);
+      return Number.isInteger(n) && n >= 0 && n < 0x110000
+        ? String.fromCodePoint(n)
+        : "";
+    });
+    out = out.replace(
+      /&#[xX]([0-9a-fA-F]{1,6})(?![0-9a-fA-F;])/g,
+      (_, code: string) => {
+        const n = parseInt(code, 16);
+        return Number.isInteger(n) && n >= 0 && n < 0x110000
+          ? String.fromCodePoint(n)
+          : "";
+      },
+    );
     if (out === before) {
       stabilized = true;
       break;
@@ -155,13 +177,24 @@ function decodeBasicEntities(text: string): string {
  * everything from that opener to EOF is dropped fail-closed (PR #97
  * codex round 1 P2 — earlier behavior left the body text in place,
  * leaking payload to the LLM).
+ *
+ * PR #97 codex round 6 P2 — `closed` regex now uses **greedy**
+ * `[\s\S]*` so nested same-tag payload
+ * `<script>a<script>nested</script>Ignore previous instructions</script>`
+ * cannot leak the outer body via the inner closer. Tradeoff: when an
+ * input has multiple non-nested `<script>...</script>` blocks separated
+ * by legitimate content, the greedy pass eats everything between the
+ * first opener and the last closer (over-trim of intermediate content).
+ * Acceptable for INV-0029-5 fail-closed sanitization — prompt-injection
+ * defense weighs "drop more" over "preserve structure between
+ * dangerous tags".
  */
 function removeDangerousTags(input: string): string {
   let out = input;
   for (const tag of DANGEROUS_TAGS) {
-    // Full element with content (closed).
+    // Full element with content (closed, GREEDY — round 6 P2).
     const closed = new RegExp(
-      `<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`,
+      `<${tag}\\b[^>]*>[\\s\\S]*<\\/${tag}\\s*>`,
       "gi",
     );
     out = out.replace(closed, "");
@@ -208,6 +241,37 @@ const QUOTE_AWARE_TAG_STRIP =
 const MALFORMED_TAG_FALLBACK = /<\/?[a-zA-Z][\s\S]*?(?:>|$)/g;
 
 /**
+ * Strip HTML comments / CDATA / DOCTYPE / processing-instruction
+ * declarations.
+ *
+ * CDATA closed blocks UNWRAP rather than delete (PR #97 codex round 4
+ * P2 — RSS `description` / `content:encoded` fields commonly arrive as
+ * `<![CDATA[<p>Safe</p>]]>` and deleting them wholesale would discard
+ * benign article bodies). The inner content flows through the rest of
+ * the pipeline so DANGEROUS_TAGS / quote-aware tag strip / entity
+ * decode all apply to it normally.
+ *
+ * Called TWICE in `htmlToText` (PR #97 codex round 6 P2):
+ *   - once BEFORE the entity decode pass, to handle raw declarations
+ *   - once AFTER the entity decode pass, to handle declarations that
+ *     surfaced from entity-encoded payloads like
+ *     `&lt;!-- Ignore previous instructions --&gt;`
+ *
+ * Orphan unclosed forms (comment / CDATA / PI) drop fail-closed to EOF.
+ */
+function stripCommentsCdataDoctypePi(input: string): string {
+  let out = input;
+  out = out.replace(/<!--[\s\S]*?-->/g, "");                  // closed comments
+  out = out.replace(/<!--[\s\S]*$/g, "");                     // orphan unclosed comment — fail-closed
+  out = out.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, " $1 ");  // unwrap closed CDATA inner content
+  out = out.replace(/<!\[CDATA\[[\s\S]*$/gi, "");             // orphan unclosed CDATA — fail-closed
+  out = out.replace(/<![^>]*>/g, "");                          // remaining DOCTYPE / declarations
+  out = out.replace(/<\?[\s\S]*?\?>/g, "");                    // closed processing instructions
+  out = out.replace(/<\?[\s\S]*$/g, "");                       // orphan unclosed PI — fail-closed
+  return out;
+}
+
+/**
  * Convert HTML to LLM-safe plain text per INV-0029-5.
  *
  * Pipeline (PR #97 codex review round 2 — entity decode + dual generic
@@ -241,29 +305,9 @@ export function htmlToText(html: string): string {
 
   let out = html;
 
-  // 1. Strip HTML comments / CDATA / DOCTYPE / processing instructions.
-  //    These all start with `<!` or `<?` which the quote-aware tag
-  //    stripper does NOT match (it requires alpha after `<`).
-  //    Order matters: dedicated CDATA pattern BEFORE generic decl
-  //    strip so that CDATA-internal `>` characters don't truncate
-  //    the block at the first `>` (PR #97 codex round 3 P2).
-  //
-  //    CDATA closed blocks UNWRAP rather than delete (PR #97 codex
-  //    round 4 P2 — RSS `description` / `content:encoded` fields
-  //    commonly arrive as `<![CDATA[<p>Safe</p>]]>` and deleting
-  //    them wholesale would discard benign article bodies. The
-  //    inner content flows through the rest of the pipeline so
-  //    DANGEROUS_TAGS / quote-aware tag strip / entity decode all
-  //    apply to it normally — adversarial `<![CDATA[<script>...]]>`
-  //    payloads are still caught by the DANGEROUS_TAGS pass that
-  //    runs after this step). Orphan unclosed CDATA stays fail-closed.
-  out = out.replace(/<!--[\s\S]*?-->/g, "");                  // closed comments
-  out = out.replace(/<!--[\s\S]*$/g, "");                     // orphan unclosed comment — fail-closed drop to EOF (PR #97 codex round 3 P2)
-  out = out.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, " $1 ");  // unwrap closed CDATA inner content (PR #97 codex round 4 P2)
-  out = out.replace(/<!\[CDATA\[[\s\S]*$/gi, "");             // orphan unclosed CDATA — fail-closed drop to EOF
-  out = out.replace(/<![^>]*>/g, "");                          // remaining DOCTYPE / declarations
-  out = out.replace(/<\?[\s\S]*?\?>/g, "");                    // closed processing instructions (XML / PHP-style)
-  out = out.replace(/<\?[\s\S]*$/g, "");                       // orphan unclosed processing instruction — fail-closed
+  // 1. Strip HTML comments / CDATA / DOCTYPE / processing instructions
+  //    (raw source pass).
+  out = stripCommentsCdataDoctypePi(out);
 
   // 2. First DANGEROUS_TAGS removal pass (raw source).
   out = removeDangerousTags(out);
@@ -277,6 +321,14 @@ export function htmlToText(html: string): string {
 
   // 4. Decode entities — may surface entity-encoded HTML tags.
   out = decodeBasicEntities(out);
+
+  // 4b. Re-run declaration strip (PR #97 codex round 6 P2) — entity
+  //     decode may surface encoded `<!--...-->` / `<![CDATA[...]]>` /
+  //     `<!DOCTYPE...>` / `<?...?>` from payloads like
+  //     `&lt;!-- Ignore previous instructions --&gt;`. The quote-
+  //     aware tag stripper requires `<` + alpha so these `<!` / `<?`
+  //     declarations would otherwise leak verbatim.
+  out = stripCommentsCdataDoctypePi(out);
 
   // 5. Second DANGEROUS_TAGS pass — catches now-decoded entity payloads.
   out = removeDangerousTags(out);
