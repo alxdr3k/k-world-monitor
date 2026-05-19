@@ -25,11 +25,12 @@ import {
   ARTICLE_EXTRACTION_SYSTEM_PROMPT,
   ArticleExtractor,
 } from "../../src/extraction/article/article-extractor";
-import type {
-  LlmClient,
-  LlmInvokeParams,
-  LlmInvokeResult,
-  LlmTier,
+import {
+  LlmIncompleteResultError,
+  type LlmClient,
+  type LlmInvokeParams,
+  type LlmInvokeResult,
+  type LlmTier,
 } from "../../src/extraction/llm/client";
 import {
   LlmManualReviewRequiredError,
@@ -652,6 +653,136 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
     });
     const row = ledgerRows()[0]!;
     expect(row.session_id).toBe("sess_01HXYZ");
+  });
+
+  it("rejects researchSessionId without sess_ prefix (PR #100 round 4 F14)", async () => {
+    const llm = new MockLlmClient(defaultMockResponse(), {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+    });
+    const ext = new ArticleExtractor({
+      llmClient: llm,
+      researchSessionId: "src_typo",
+    });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(/researchSessionId must be a non-blank `sess_<ULID>`/);
+    // No ledger row written — validation runs before startRun.
+    expect(ledgerRows().length).toBe(0);
+  });
+
+  it("rejects blank/whitespace researchSessionId (PR #100 round 4 F14)", async () => {
+    const llm = new MockLlmClient(defaultMockResponse(), {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+    });
+    const ext = new ArticleExtractor({
+      llmClient: llm,
+      researchSessionId: "   ",
+    });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(/researchSessionId must be a non-blank `sess_<ULID>`/);
+  });
+
+  it("LlmIncompleteResultError with usage → failRun preserves billable cost (PR #100 round 4 F13)", async () => {
+    const incompleteErr = new LlmIncompleteResultError(
+      "length",
+      "truncated",
+      {
+        inputTokens: 1000,
+        outputTokens: 2000,
+        cachedTokens: 50,
+        totalCostUsd: 0.0042,
+      },
+    );
+    const llm = new MockLlmClient(defaultMockResponse(), {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+      throwOnInvoke: incompleteErr,
+    });
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(LlmIncompleteResultError);
+    const row = ledgerRows()[0]!;
+    expect(row.status).toBe("failed");
+    // Billable cost recorded on the failed row — AC-019 aggregation
+    // captures the truncated completion.
+    expect(row.total_cost_usd).toBe(0.0042);
+    expect(row.input_tokens).toBe(1000);
+    expect(row.output_tokens).toBe(2000);
+    expect(row.cached_tokens).toBe(50);
+  });
+
+  it("LlmIncompleteResultError without usage → failRun with NULL cost (defensive)", async () => {
+    const incompleteErr = new LlmIncompleteResultError(
+      "missing_content",
+      "",
+      undefined,
+    );
+    const llm = new MockLlmClient(defaultMockResponse(), {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+      throwOnInvoke: incompleteErr,
+    });
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(LlmIncompleteResultError);
+    const row = ledgerRows()[0]!;
+    expect(row.status).toBe("failed");
+    expect(row.total_cost_usd).toBeNull();
+  });
+
+  it("completeRun validation throw → row marked failed not stuck running (PR #100 round 4 F11)", async () => {
+    // Construct a response whose totalCostUsd is NaN — completeRun
+    // rejects it. ArticleExtractor's try/catch around completeRun
+    // converts the throw to failRun + rethrow.
+    const response: LlmInvokeResult = {
+      text: "extracted",
+      vendor: "openai",
+      model: "gpt-5-mini",
+      tier: 2,
+      inputTokens: 100,
+      outputTokens: 50,
+      totalCostUsd: Number.NaN,
+    };
+    const llm = new MockLlmClient(response, {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+    });
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(/totalCostUsd must be a finite non-negative number/);
+    const row = ledgerRows()[0]!;
+    expect(row.status).toBe("failed");
   });
 
   it("rewrites model_id to resolved snapshot from LlmInvokeResult.model (alias → dated)", async () => {

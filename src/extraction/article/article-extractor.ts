@@ -34,7 +34,11 @@ import {
 import { htmlToText } from "../sanitize/html-to-text";
 import { wrapUntrustedForTier } from "../prompt/untrusted-wrapper";
 import { checkLlmPolicy } from "../policy/llm-policy-gate";
-import type { LlmClient, LlmInvokeResult } from "../llm/client";
+import {
+  LlmIncompleteResultError,
+  type LlmClient,
+  type LlmInvokeResult,
+} from "../llm/client";
 import {
   completeRun,
   failRun,
@@ -140,21 +144,28 @@ export class ArticleExtractor implements Extractor {
     const ledgerEnabled = isRunVendor(vendor);
     let runId: string | undefined;
     if (ledgerEnabled) {
+      // PR #100 codex P2 — `run_ledger.session_id` is an FK to
+      // `research_session` (`sess_<ULID>` format), NOT a free-text
+      // identifier. Validate the explicit dep at the writer
+      // boundary so mistyped `src_*` / blank / wrong-prefix inputs
+      // surface as a typed error before they corrupt the column
+      // (round 4 F14 — earlier wiring accepted any truthy string).
+      let sessionId: string | undefined;
+      if (this.deps.researchSessionId !== undefined) {
+        const trimmed = this.deps.researchSessionId.trim();
+        if (trimmed === "" || !trimmed.startsWith("sess_")) {
+          throw new Error(
+            `ArticleExtractor: researchSessionId must be a non-blank \`sess_<ULID>\` (research_session FK), got '${this.deps.researchSessionId}'`,
+          );
+        }
+        sessionId = trimmed;
+      }
       runId = startRun({
         stage: this.deps.runStage ?? "extract",
         vendor,
         tier,
         modelId: this.deps.llmClient.model,
-        // PR #100 codex P2 — `run_ledger.session_id` is an FK to
-        // `research_session` (`sess_<ULID>` format), NOT a free-text
-        // identifier. Previous wiring wrote `input.sourceId` (e.g.
-        // `src_ok`) into this column, which would have corrupted
-        // per-session cost/throttle/audit groupings and conflicted
-        // with the planned FK enforcement. Only set when the caller
-        // explicitly provides a valid research session ID via deps.
-        ...(this.deps.researchSessionId
-          ? { sessionId: this.deps.researchSessionId }
-          : {}),
+        ...(sessionId ? { sessionId } : {}),
         ...(this.deps.domainOverrideReason
           ? { domainOverrideReason: this.deps.domainOverrideReason }
           : {}),
@@ -162,6 +173,13 @@ export class ArticleExtractor implements Extractor {
     }
 
     // 6. LLM invocation. failRun on throw, completeRun on success.
+    //    PR #100 codex round 4 F13 — when the vendor signals an
+    //    incomplete result via LlmIncompleteResultError carrying
+    //    usage info (e.g. OpenAI `finish_reason: "length"` with
+    //    non-zero token counts), preserve the billable cost on the
+    //    failed ledger row so it still contributes to AC-019 daily
+    //    aggregation. Generic errors without usage info still mark
+    //    the row failed with NULL cost.
     let llmResult: LlmInvokeResult;
     try {
       llmResult = await this.deps.llmClient.invoke({
@@ -170,7 +188,26 @@ export class ArticleExtractor implements Extractor {
         tier,
       });
     } catch (err) {
-      if (runId !== undefined) failRun(runId);
+      if (runId !== undefined) {
+        if (err instanceof LlmIncompleteResultError && err.usage) {
+          failRun(runId, {
+            ...(err.usage.inputTokens !== undefined
+              ? { inputTokens: err.usage.inputTokens }
+              : {}),
+            ...(err.usage.outputTokens !== undefined
+              ? { outputTokens: err.usage.outputTokens }
+              : {}),
+            ...(err.usage.cachedTokens !== undefined
+              ? { cachedTokens: err.usage.cachedTokens }
+              : {}),
+            ...(err.usage.totalCostUsd !== undefined
+              ? { totalCostUsd: err.usage.totalCostUsd }
+              : {}),
+          });
+        } else {
+          failRun(runId);
+        }
+      }
       throw err;
     }
     if (runId !== undefined) {
@@ -179,37 +216,39 @@ export class ArticleExtractor implements Extractor {
       // previous wiring coalesced to `0`, bypassing completeRun's
       // required-cost guard and making the billable API call vanish
       // from AC-019 daily cost / throttling aggregation. Treat
-      // missing cost as a failed run instead: the run is surfaced
-      // for retry / manual review, the API call is still billed by
-      // the vendor, but the ledger correctly records that we lost
-      // visibility into the cost. OpenAIClient always computes a
-      // finite cost via `computeTotalCostUsd`, so this guard only
-      // fires for misbehaving vendor clients (e.g. a future
-      // Anthropic client whose usage parsing fails, or an
-      // OpenAI-compatible response with malformed `usage`).
+      // missing cost as a failed run instead.
       if (llmResult.totalCostUsd === undefined) {
         failRun(runId);
         throw new Error(
           `ArticleExtractor: LlmInvokeResult.totalCostUsd missing for vendor='${llmResult.vendor}' model='${llmResult.model}' — refusing to record a free run for a billable API call (AC-019). Fix the LlmClient implementation to compute totalCostUsd.`,
         );
       }
-      // PR #100 codex P2 — pass the resolved-snapshot `model` from
-      // LlmInvokeResult so completeRun rewrites `run_ledger.model_id`
-      // from the request-time alias (e.g. `gpt-5-mini`) to the dated
-      // snapshot (e.g. `gpt-5-mini-2025-08-07`). Only rewrite when
-      // the resolved value differs from the alias used at startRun
-      // time — preserves a no-op when client is mock or response
-      // omits the field.
+      // PR #100 codex round 4 F11 — wrap completeRun in try/catch so
+      // its numeric validation throws (NaN cost, non-integer tokens)
+      // do not leave the row stuck in `running`. Rewrap as failRun
+      // (no usage payload — the validation itself failed, so the
+      // input is untrusted) and rethrow.
       const startedModelId = this.deps.llmClient.model;
-      completeRun(runId, {
-        inputTokens: llmResult.inputTokens,
-        outputTokens: llmResult.outputTokens,
-        cachedTokens: llmResult.cachedTokens,
-        totalCostUsd: llmResult.totalCostUsd,
-        ...(llmResult.model && llmResult.model !== startedModelId
-          ? { modelId: llmResult.model }
-          : {}),
-      });
+      try {
+        completeRun(runId, {
+          inputTokens: llmResult.inputTokens,
+          outputTokens: llmResult.outputTokens,
+          cachedTokens: llmResult.cachedTokens,
+          totalCostUsd: llmResult.totalCostUsd,
+          ...(llmResult.model && llmResult.model !== startedModelId
+            ? { modelId: llmResult.model }
+            : {}),
+        });
+      } catch (err) {
+        // completeRun failed mid-write — surface the run as failed
+        // instead of leaving the row in `running`.
+        try {
+          failRun(runId);
+        } catch {
+          // best-effort — original error is the one that matters.
+        }
+        throw err;
+      }
     }
 
     // 7. Envelope build.

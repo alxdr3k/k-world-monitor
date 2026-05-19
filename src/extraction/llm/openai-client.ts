@@ -13,11 +13,12 @@
  * SDK 실제 wiring + run_ledger 한 PR" 2026-05-19).
  */
 
-import type {
-  LlmClient,
-  LlmInvokeParams,
-  LlmInvokeResult,
-  LlmTier,
+import {
+  LlmIncompleteResultError,
+  type LlmClient,
+  type LlmInvokeParams,
+  type LlmInvokeResult,
+  type LlmTier,
 } from "./client";
 
 /**
@@ -71,12 +72,39 @@ export const OPENAI_PRICING_USD_PER_1M_TOKENS: Record<
   string,
   { input: number; output: number; cachedInput?: number }
 > = {
+  // PR #100 codex round 4 P2 (F10) — pro-tier IDs added so callers
+  // who satisfy the Tier 0/1 explicit-model requirement with the
+  // actual OpenAI pro SKUs do not silently fall through to a
+  // wrong-tier pricing fallback. Placeholders pending ADR-0023
+  // ratification — operator may overwrite with verified list prices.
+  "gpt-5-pro-extended-thinking": { input: 5.0, output: 40.0, cachedInput: 0.5 },
+  "gpt-5-pro": { input: 2.5, output: 20.0, cachedInput: 0.25 },
+  "gpt-5.2-pro": { input: 2.5, output: 20.0, cachedInput: 0.25 },
   "gpt-5.5-pro-extended-thinking": { input: 5.0, output: 40.0, cachedInput: 0.5 },
   "gpt-5.5-pro": { input: 2.5, output: 20.0, cachedInput: 0.25 },
   "gpt-5": { input: 1.25, output: 10.0, cachedInput: 0.125 },
   "gpt-5-mini": { input: 0.25, output: 2.0, cachedInput: 0.025 },
   "gpt-5-nano": { input: 0.05, output: 0.4, cachedInput: 0.005 },
 };
+
+/**
+ * Thrown when `computeTotalCostUsd` is asked to price a model that
+ * has no entry in `OPENAI_PRICING_USD_PER_1M_TOKENS` (exact or
+ * prefix). PR #100 codex round 4 P2 (F10) — silent fallback to
+ * `gpt-5-mini` previously undercounted the most expensive
+ * (scenario / thesis) runs whenever callers passed a real pro SKU
+ * ID the table did not yet know about. Operator must either add
+ * the new SKU to the pricing table or pass a verified pricing
+ * override before the client can charge for it.
+ */
+export class OpenAIPricingUnknownError extends Error {
+  constructor(public readonly model: string) {
+    super(
+      `OpenAI pricing unknown for model '${model}' — add to OPENAI_PRICING_USD_PER_1M_TOKENS (or a dated snapshot prefix) before invoking. Silent fallback removed to prevent AC-019 cost undercount.`,
+    );
+    this.name = "OpenAIPricingUnknownError";
+  }
+}
 
 /**
  * Resolve a model identifier to the pricing-table key, handling
@@ -121,12 +149,15 @@ export function computeTotalCostUsd(
     cachedTokens?: number;
   },
 ): number {
-  // PR #100 codex round 2 P2 — resolve dated snapshots (e.g.
-  // `gpt-5-mini-2025-08-07`) to their pricing-table alias via
-  // prefix lookup. Falls back to `gpt-5-mini` only for truly
-  // unknown models (no exact + no prefix match), preserving the
-  // operator-safe fail-closed default for forward compatibility.
-  const key = resolveOpenAIPricingKey(model) ?? "gpt-5-mini";
+  // PR #100 codex round 4 F10 — silent `gpt-5-mini` fallback
+  // removed. Unknown models now throw OpenAIPricingUnknownError so
+  // explicit pro-tier calls (`gpt-5-pro` etc.) that the table does
+  // not yet know about surface as a hard error instead of being
+  // billed at mini rates. Operator must extend the pricing table
+  // when adopting a new SKU. Dated snapshots are still resolved via
+  // longest-prefix match in resolveOpenAIPricingKey.
+  const key = resolveOpenAIPricingKey(model);
+  if (key === null) throw new OpenAIPricingUnknownError(model);
   const pricing = OPENAI_PRICING_USD_PER_1M_TOKENS[key]!;
   const input = usage.inputTokens ?? 0;
   const output = usage.outputTokens ?? 0;
@@ -208,21 +239,27 @@ interface OpenAIChatResponseShape {
  * Thrown when OpenAI returns a 200 response whose first choice did
  * NOT terminate naturally — e.g. `finish_reason: "length"` (token
  * cap hit, output truncated) or `finish_reason: "content_filter"`
- * (safety filter omitted output). The extractor caller catches
- * this and propagates → `failRun` writes a `failed` row to
- * `run_ledger` so the run is surfaced for retry / manual review
- * rather than silently published as a `completed` extraction with
- * empty or partial structured output (PR #100 codex round 2 P2).
+ * (safety filter omitted output). Extends `LlmIncompleteResultError`
+ * so the extractor catch path can record the billable usage (PR
+ * #100 codex round 4 F13) on the failed run_ledger row via the
+ * vendor-agnostic `LlmIncompleteResultError.usage` payload.
  */
-export class OpenAIIncompleteCompletionError extends Error {
+export class OpenAIIncompleteCompletionError extends LlmIncompleteResultError {
   constructor(
-    public readonly finishReason: string,
-    public readonly partialText: string,
+    finishReason: string,
+    partialText: string,
+    usage?: {
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly cachedTokens?: number;
+      readonly totalCostUsd?: number;
+    },
   ) {
-    super(
-      `OpenAI completion did not terminate naturally: finish_reason='${finishReason}' (partial text length=${partialText.length})`,
-    );
+    super(finishReason, partialText, usage);
     this.name = "OpenAIIncompleteCompletionError";
+  }
+  get finishReason(): string {
+    return this.reason;
   }
 }
 
@@ -324,42 +361,7 @@ export class OpenAIClient implements LlmClient {
     }
 
     const data = (await response.json()) as OpenAIChatResponseShape;
-    // PR #100 codex round 3 P2 — reject malformed responses where
-    // `choices` is empty or the first choice lacks `message.content`
-    // (string). Without this, `choices: []` or a missing content
-    // field would surface as a successful "" extraction that
-    // `ArticleExtractor` happily marks `completed` on the ledger —
-    // indistinguishable from a legitimate empty article result and
-    // bypassing retry / manual review. A legitimate empty result
-    // still surfaces normally via `finish_reason: "stop"` with
-    // `content: ""`.
-    const firstChoice = data.choices?.[0];
-    if (firstChoice === undefined) {
-      throw new OpenAIIncompleteCompletionError("missing_choice", "");
-    }
-    const rawContent = firstChoice.message?.content;
-    if (rawContent === undefined || rawContent === null) {
-      throw new OpenAIIncompleteCompletionError("missing_content", "");
-    }
-    const text = rawContent;
-    // PR #100 codex round 2 P2 — reject truncated / filtered
-    // completions instead of silently returning empty / partial
-    // content. ArticleExtractor's try/catch converts this to
-    // `failRun` on the ledger row, so the failure is surfaced for
-    // retry / manual review. `tool_calls` / `function_call` are
-    // also rejected — this layer does not support tool execution,
-    // so a model that requests a tool call is effectively
-    // incomplete for extraction purposes.
-    const finishReason = firstChoice.finish_reason;
-    const incompleteReasons = new Set([
-      "length",
-      "content_filter",
-      "tool_calls",
-      "function_call",
-    ]);
-    if (finishReason && incompleteReasons.has(finishReason)) {
-      throw new OpenAIIncompleteCompletionError(finishReason, text);
-    }
+
     // Prefer resolved snapshot from response.model (e.g. dated
     // `gpt-5-mini-2025-08-07`) over the request-time alias
     // `this.model`, so consumers writing to run_ledger.model_id
@@ -368,12 +370,110 @@ export class OpenAIClient implements LlmClient {
     // — OpenAI Chat Completions always returns it in practice).
     const resolvedModel =
       data.model && data.model.trim().length > 0 ? data.model : this.model;
-    const inputTokens = data.usage?.prompt_tokens;
-    const outputTokens = data.usage?.completion_tokens;
-    const cachedTokens = data.usage?.prompt_tokens_details?.cached_tokens;
-    // Cost computation prefers the resolved snapshot so dated
-    // models get their own pricing row if present in the table;
-    // unknown-model fallback still applies for forward compatibility.
+
+    // PR #100 codex round 4 F12 — `usage` MUST be present with at
+    // least one of prompt_tokens / completion_tokens. Previous
+    // wiring coalesced everything to 0 → finite `totalCostUsd = 0`
+    // → ArticleExtractor's `totalCostUsd === undefined` guard
+    // bypassed → billable call recorded as free. Now: missing usage
+    // is treated as an incomplete response so the ledger row goes
+    // through failRun (no cost recorded — we genuinely don't know
+    // the cost). Operator decides retry / manual review path.
+    const usageBlock = data.usage;
+    const inputTokens = usageBlock?.prompt_tokens;
+    const outputTokens = usageBlock?.completion_tokens;
+    const cachedTokens = usageBlock?.prompt_tokens_details?.cached_tokens;
+    const usagePresent =
+      usageBlock !== undefined &&
+      (inputTokens !== undefined || outputTokens !== undefined);
+
+    // PR #100 codex round 3 P2 — reject malformed responses where
+    // `choices` is empty or the first choice lacks `message.content`.
+    // PR #100 codex round 4 F13 — when usage is present (even on
+    // truncated / filtered completions), carry it through to the
+    // incomplete-error payload so the extractor can record the
+    // billable cost on the failed ledger row instead of NULLing it.
+    const firstChoice = data.choices?.[0];
+    if (firstChoice === undefined) {
+      throw new OpenAIIncompleteCompletionError(
+        "missing_choice",
+        "",
+        usagePresent
+          ? {
+              inputTokens,
+              outputTokens,
+              cachedTokens,
+              totalCostUsd: computeTotalCostUsd(resolvedModel, {
+                inputTokens,
+                outputTokens,
+                cachedTokens,
+              }),
+            }
+          : undefined,
+      );
+    }
+    const rawContent = firstChoice.message?.content;
+    if (rawContent === undefined || rawContent === null) {
+      throw new OpenAIIncompleteCompletionError(
+        "missing_content",
+        "",
+        usagePresent
+          ? {
+              inputTokens,
+              outputTokens,
+              cachedTokens,
+              totalCostUsd: computeTotalCostUsd(resolvedModel, {
+                inputTokens,
+                outputTokens,
+                cachedTokens,
+              }),
+            }
+          : undefined,
+      );
+    }
+    const text = rawContent;
+
+    // PR #100 codex round 2 P2 — reject truncated / filtered
+    // completions instead of silently returning empty / partial
+    // content. `tool_calls` / `function_call` are also rejected —
+    // this layer does not support tool execution.
+    const finishReason = firstChoice.finish_reason;
+    const incompleteReasons = new Set([
+      "length",
+      "content_filter",
+      "tool_calls",
+      "function_call",
+    ]);
+    if (finishReason && incompleteReasons.has(finishReason)) {
+      // F13: preserve billable usage on the failed run.
+      throw new OpenAIIncompleteCompletionError(
+        finishReason,
+        text,
+        usagePresent
+          ? {
+              inputTokens,
+              outputTokens,
+              cachedTokens,
+              totalCostUsd: computeTotalCostUsd(resolvedModel, {
+                inputTokens,
+                outputTokens,
+                cachedTokens,
+              }),
+            }
+          : undefined,
+      );
+    }
+
+    // Success path requires usage present (F12) — silent zero-cost
+    // success would let billable calls disappear from AC-019.
+    if (!usagePresent) {
+      throw new OpenAIIncompleteCompletionError(
+        "missing_usage",
+        text,
+        undefined,
+      );
+    }
+
     const totalCostUsd = computeTotalCostUsd(resolvedModel, {
       inputTokens,
       outputTokens,

@@ -93,3 +93,31 @@ export interface LlmClient {
   readonly model: string;
   invoke(params: LlmInvokeParams): Promise<LlmInvokeResult>;
 }
+
+/**
+ * Vendor-agnostic incomplete-invocation error (PR #100 codex round
+ * 4). Concrete vendor clients extend this when they detect that the
+ * response did not produce a usable result but the API call was
+ * billable (e.g. OpenAI `finish_reason: "length"` with non-zero
+ * usage). The optional `usage` payload allows the caller (extractor)
+ * to record the billable cost on the failed run_ledger row instead
+ * of recording a NULL cost that would disappear from AC-019 daily
+ * aggregation.
+ */
+export class LlmIncompleteResultError extends Error {
+  constructor(
+    public readonly reason: string,
+    public readonly partialText: string,
+    public readonly usage?: {
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly cachedTokens?: number;
+      readonly totalCostUsd?: number;
+    },
+  ) {
+    super(
+      `LLM invocation incomplete: reason='${reason}' (partial text length=${partialText.length})`,
+    );
+    this.name = "LlmIncompleteResultError";
+  }
+}

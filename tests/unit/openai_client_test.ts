@@ -22,6 +22,7 @@ import {
   OpenAIApiError,
   OpenAIClient,
   OpenAIIncompleteCompletionError,
+  OpenAIPricingUnknownError,
   resolveOpenAIPricingKey,
 } from "../../src/extraction/llm/openai-client";
 import type { LlmClient } from "../../src/extraction/llm/client";
@@ -429,16 +430,13 @@ describe("computeTotalCostUsd — pricing math", () => {
     expect(cost).toBeCloseTo(0.025, 5);
   });
 
-  it("unknown model falls back to gpt-5-mini pricing (fail-closed)", () => {
-    const known = computeTotalCostUsd("gpt-5-mini", {
-      inputTokens: 100_000,
-      outputTokens: 100_000,
-    });
-    const unknown = computeTotalCostUsd("future-model-xyz", {
-      inputTokens: 100_000,
-      outputTokens: 100_000,
-    });
-    expect(unknown).toBe(known);
+  it("unknown model throws OpenAIPricingUnknownError (PR #100 round 4 F10 — silent fallback removed)", () => {
+    expect(() =>
+      computeTotalCostUsd("future-model-xyz", {
+        inputTokens: 100_000,
+        outputTokens: 100_000,
+      }),
+    ).toThrow(OpenAIPricingUnknownError);
   });
 
   it("pricing table contains all 4 default tier models (DEC-010 routing)", () => {
@@ -574,6 +572,124 @@ describe("OpenAIClient.invoke — empty/malformed response rejection (PR #100 ro
       tier: 2,
     });
     expect(result.text).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 4 — missing usage rejection (F12)
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient.invoke — missing usage rejection (PR #100 round 4 F12)", () => {
+  it("throws OpenAIIncompleteCompletionError('missing_usage') when usage block absent", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      expect(err).toBeInstanceOf(OpenAIIncompleteCompletionError);
+      expect((err as OpenAIIncompleteCompletionError).finishReason).toBe(
+        "missing_usage",
+      );
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
+  });
+
+  it("throws when usage has neither prompt_tokens nor completion_tokens", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: {},
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIIncompleteCompletionError);
+  });
+
+  it("accepts usage with prompt_tokens only (completion may be 0)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 100 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    const result = await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    expect(result.text).toBe("ok");
+    expect(result.inputTokens).toBe(100);
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 4 — incomplete error carries billable usage (F13)
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient.invoke — incomplete completions preserve billable usage (PR #100 round 4 F13)", () => {
+  it("finish_reason='length' with usage → error.usage carries cost", async () => {
+    const { fetch } = makeFetchMock(200, {
+      model: "gpt-5-mini-2025-08-07",
+      choices: [
+        { message: { content: "truncated" }, finish_reason: "length" },
+      ],
+      usage: {
+        prompt_tokens: 1000,
+        completion_tokens: 2000,
+        prompt_tokens_details: { cached_tokens: 100 },
+      },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", tier: 2, fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      const incomplete = err as OpenAIIncompleteCompletionError;
+      expect(incomplete.finishReason).toBe("length");
+      expect(incomplete.usage).toBeDefined();
+      expect(incomplete.usage!.inputTokens).toBe(1000);
+      expect(incomplete.usage!.outputTokens).toBe(2000);
+      expect(incomplete.usage!.cachedTokens).toBe(100);
+      expect(incomplete.usage!.totalCostUsd).toBeGreaterThan(0);
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
+  });
+
+  it("finish_reason='content_filter' with usage → error.usage carries cost", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [
+        { message: { content: "" }, finish_reason: "content_filter" },
+      ],
+      usage: { prompt_tokens: 500, completion_tokens: 50 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      const incomplete = err as OpenAIIncompleteCompletionError;
+      expect(incomplete.usage).toBeDefined();
+      expect(incomplete.usage!.totalCostUsd).toBeGreaterThan(0);
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
+  });
+
+  it("missing_content with no usage → error.usage is undefined (no fake zero cost)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ finish_reason: "stop" }],
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      const incomplete = err as OpenAIIncompleteCompletionError;
+      expect(incomplete.finishReason).toBe("missing_content");
+      expect(incomplete.usage).toBeUndefined();
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
   });
 });
 

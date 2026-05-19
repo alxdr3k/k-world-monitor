@@ -190,15 +190,79 @@ export function completeRun(runId: string, output: CompleteRunInput): void {
   }
 }
 
-export function failRun(runId: string): void {
+/**
+ * Optional cost payload for `failRun` (PR #100 codex round 4 F13).
+ * When the failure was caused by an upstream LLM error AFTER the
+ * vendor billed for the call (e.g. OpenAI `finish_reason: "length"`
+ * with non-zero usage), the caller can record the billable cost on
+ * the failed row so it still contributes to AC-019 daily cost /
+ * throttling aggregation. Omit when the failure happened before
+ * usage was available (transient network errors, schema
+ * validation in completeRun, etc.).
+ */
+export interface FailRunInput {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  /** Optional billable cost. Must be a finite non-negative number when supplied. */
+  totalCostUsd?: number;
+}
+
+export function failRun(runId: string, output?: FailRunInput): void {
+  // Validate optional cost payload up front so a malformed call
+  // does not corrupt the row.
+  if (output !== undefined) {
+    if (output.totalCostUsd !== undefined) {
+      if (!Number.isFinite(output.totalCostUsd) || output.totalCostUsd < 0)
+        throw new Error(
+          `failRun: totalCostUsd must be a finite non-negative number, got ${output.totalCostUsd}`
+        );
+    }
+    if (output.inputTokens !== undefined) {
+      if (!Number.isInteger(output.inputTokens) || output.inputTokens < 0)
+        throw new Error(
+          `failRun: inputTokens must be a non-negative integer, got ${output.inputTokens}`
+        );
+    }
+    if (output.outputTokens !== undefined) {
+      if (!Number.isInteger(output.outputTokens) || output.outputTokens < 0)
+        throw new Error(
+          `failRun: outputTokens must be a non-negative integer, got ${output.outputTokens}`
+        );
+    }
+    if (output.cachedTokens !== undefined) {
+      if (!Number.isInteger(output.cachedTokens) || output.cachedTokens < 0)
+        throw new Error(
+          `failRun: cachedTokens must be a non-negative integer, got ${output.cachedTokens}`
+        );
+    }
+  }
+
   const now = new Date().toISOString();
-  const result = getDb()
-    .prepare(
-      `UPDATE run_ledger
-       SET status = 'failed', completed_at = ?
-       WHERE run_id = ? AND status = 'running'`
-    )
-    .run(now, runId);
+  const result = output !== undefined
+    ? getDb()
+        .prepare(
+          `UPDATE run_ledger
+           SET status = 'failed', completed_at = ?,
+               input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+               total_cost_usd = ?
+           WHERE run_id = ? AND status = 'running'`
+        )
+        .run(
+          now,
+          output.inputTokens ?? null,
+          output.outputTokens ?? null,
+          output.cachedTokens ?? null,
+          output.totalCostUsd ?? null,
+          runId
+        )
+    : getDb()
+        .prepare(
+          `UPDATE run_ledger
+           SET status = 'failed', completed_at = ?
+           WHERE run_id = ? AND status = 'running'`
+        )
+        .run(now, runId);
   if (result.changes === 0) {
     throw new Error(`failRun: no running row found for run_id=${runId}`);
   }

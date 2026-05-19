@@ -219,6 +219,74 @@ describe("failRun", () => {
   });
 });
 
+describe("failRun cost-preserving payload (PR #100 round 4 F13)", () => {
+  it("records token counts + totalCostUsd on the failed row when payload supplied", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(id, {
+      inputTokens: 1000,
+      outputTokens: 200,
+      cachedTokens: 50,
+      totalCostUsd: 0.0123,
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT * FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.status).toBe("failed");
+    expect(row.input_tokens).toBe(1000);
+    expect(row.output_tokens).toBe(200);
+    expect(row.cached_tokens).toBe(50);
+    expect(row.total_cost_usd).toBe(0.0123);
+    expect(row.completed_at).not.toBeNull();
+  });
+
+  it("preserves legacy no-payload behavior (NULL cost)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(id);
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT * FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.status).toBe("failed");
+    expect(row.total_cost_usd).toBeNull();
+    expect(row.input_tokens).toBeNull();
+  });
+
+  it("rejects negative totalCostUsd payload", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    expect(() => failRun(id, { totalCostUsd: -0.01 })).toThrow(
+      "must be a finite non-negative number",
+    );
+  });
+
+  it("rejects non-integer inputTokens payload", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    expect(() => failRun(id, { inputTokens: 1.5 })).toThrow(
+      "must be a non-negative integer",
+    );
+  });
+});
+
 describe("completeRun resolved-model rewrite (PR #100 P2)", () => {
   it("rewrites model_id when modelId option supplied (alias → dated snapshot)", () => {
     const id = startRun({
