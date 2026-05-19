@@ -94,13 +94,34 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 /**
- * Asserts the Tier 0 vendor role mapping locked by ADR-0023 INV-0023-2:
+ * Required Tier 0 effort levels (per ADR-0023 INV-0023-2 statement —
+ * "OpenAI frontier reasoning model with extended thinking" + "Anthropic
+ * frontier reasoning model with high effort"). The Anthropic side accepts
+ * both `high` (the literal ADR wording) and `xhigh` (the strictly stronger
+ * level used by the live operational catalog) — both satisfy the
+ * "high effort" lock; weaker levels (`standard`, `low`, etc.) do not.
+ */
+export const TIER0_OPENAI_REQUIRED_EFFORT = "extended_thinking";
+export const TIER0_ANTHROPIC_ALLOWED_EFFORTS: ReadonlySet<string> = new Set([
+  "high",
+  "xhigh",
+]);
+
+/**
+ * Asserts the Tier 0 vendor role + effort mapping locked by ADR-0023 INV-0023-2:
  *   - tier_0.openai.role    = "default"
+ *   - tier_0.openai.effort  = "extended_thinking"  (per ADR statement)
  *   - tier_0.anthropic.role = "cross_vendor_review_only"
+ *   - tier_0.anthropic.effort ∈ {"high", "xhigh"}  (per ADR "high effort")
  *   - tier_0.google.role    = "disabled" (or google omitted)
  *
  * Throws `LlmRoutingConfigError` on any deviation. Other tiers are out of
  * scope for this assertion (INV-0023-2 only locks Tier 0).
+ *
+ * Effort enforcement (PR #93 codex review P2 round 1) — without these,
+ * an operational catalog edit could silently downgrade Tier 0 from
+ * extended-thinking + high effort to a weaker reasoning level while
+ * still satisfying the role lock.
  */
 export function assertTier0VendorRoles(config: LlmRoutingConfig): void {
   const tier0 = config.tiers["tier_0"];
@@ -116,11 +137,23 @@ export function assertTier0VendorRoles(config: LlmRoutingConfig): void {
       `INV-0023-2: tier_0.openai.role must be 'default' (got: ${JSON.stringify(openaiRole)})`,
     );
   }
+  const openaiEffort = tier0.openai?.effort;
+  if (openaiEffort !== TIER0_OPENAI_REQUIRED_EFFORT) {
+    throw new LlmRoutingConfigError(
+      `INV-0023-2: tier_0.openai.effort must be '${TIER0_OPENAI_REQUIRED_EFFORT}' (got: ${JSON.stringify(openaiEffort)}); ADR statement locks Tier 0 to extended thinking`,
+    );
+  }
 
   const anthropicRole = tier0.anthropic?.role;
   if (anthropicRole !== "cross_vendor_review_only") {
     throw new LlmRoutingConfigError(
       `INV-0023-2: tier_0.anthropic.role must be 'cross_vendor_review_only' (got: ${JSON.stringify(anthropicRole)})`,
+    );
+  }
+  const anthropicEffort = tier0.anthropic?.effort;
+  if (typeof anthropicEffort !== "string" || !TIER0_ANTHROPIC_ALLOWED_EFFORTS.has(anthropicEffort)) {
+    throw new LlmRoutingConfigError(
+      `INV-0023-2: tier_0.anthropic.effort must be one of {${[...TIER0_ANTHROPIC_ALLOWED_EFFORTS].join(", ")}} (got: ${JSON.stringify(anthropicEffort)}); ADR statement locks Tier 0 to high effort`,
     );
   }
 
@@ -158,13 +191,38 @@ export const FORBIDDEN_TIER_PRICE_AXIS_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Forbidden price-axis tokens scanned as substrings of the tier-canonical
+ * `capability` VALUE (PR #93 codex review P2 round 1). Matched with
+ * snake_case-aware word boundaries: token must be preceded by start-of-
+ * string or non-letter, and followed by non-letter or end-of-string.
+ *
+ * - `low_cost_high_volume` → matches `cost` ✓
+ * - `cost_effective`        → matches `cost` ✓
+ * - `accost`                → does NOT match (preceded by letter)
+ * - `costume`               → does NOT match (followed by letter)
+ *
+ * Operator D3 spec (2026-05-18): "tier 설명/metadata 에서 price/cost/cheap
+ * 류 의 기준이 canonical tier definition 으로 쓰이지 않도록 방지". Vendor
+ * sub-blocks (tier.openai etc.) remain exempt — operational cost metadata
+ * MAY live there.
+ */
+export const FORBIDDEN_CAPABILITY_VALUE_TOKENS: readonly string[] = [
+  "price",
+  "cost",
+  "cheap",
+  "budget",
+];
+
+/**
  * Asserts each tier entry has a non-empty `capability` string field
- * (canonical tier criterion per INV-0023-3) and contains no top-level
- * key from FORBIDDEN_TIER_PRICE_AXIS_KEYS.
+ * (canonical tier criterion per INV-0023-3), contains no top-level
+ * key from FORBIDDEN_TIER_PRICE_AXIS_KEYS, AND whose capability VALUE
+ * does not include any FORBIDDEN_CAPABILITY_VALUE_TOKENS (with
+ * snake_case-aware word boundaries — see token list docstring).
  *
  * Vendor sub-blocks (tier.openai / tier.anthropic / tier.google) are
- * intentionally exempt from the forbidden-key scan — operational cost
- * metadata MAY live there, just not as a canonical tier criterion.
+ * intentionally exempt from both scans — operational cost metadata MAY
+ * live there, just not as a canonical tier criterion.
  */
 export function assertTiersCapabilityCanonical(config: LlmRoutingConfig): void {
   for (const [tierKey, tier] of Object.entries(config.tiers)) {
@@ -181,6 +239,16 @@ export function assertTiersCapabilityCanonical(config: LlmRoutingConfig): void {
         );
       }
     }
+
+    const capabilityLower = tier.capability.toLowerCase();
+    for (const token of FORBIDDEN_CAPABILITY_VALUE_TOKENS) {
+      const pattern = new RegExp(`(?:^|[^a-z])${token}(?![a-z])`);
+      if (pattern.test(capabilityLower)) {
+        throw new LlmRoutingConfigError(
+          `INV-0023-3: tier '${tierKey}' capability value contains forbidden price-axis token '${token}' (got: ${JSON.stringify(tier.capability)}); ADR-0023 INV-0023-3 locks the canonical capability descriptor to capability axis only — move cost language into vendor sub-block operational metadata`,
+        );
+      }
+    }
   }
 }
 
@@ -191,24 +259,45 @@ export function assertTiersCapabilityCanonical(config: LlmRoutingConfig): void {
 /**
  * Asserts Google vendor appears (with a non-disabled role) only at tier_3.
  *
- * - tier_0 / tier_1 / tier_2: `google.role` must be 'disabled' or google
- *   block omitted entirely.
- * - tier_3: `google.role` must be present and not 'disabled'.
+ * - EVERY tier other than tier_3 (including unknown future tiers like
+ *   tier_4 / tier_experimental) must have `google.role: disabled` or the
+ *   google block omitted entirely (PR #93 codex review P2 round 1 — was
+ *   previously restricted to tier_0/1/2 only).
+ * - tier_3 must exist and `tier_3.google.role` must be in
+ *   `ALLOWED_TIER3_GOOGLE_ROLES` (search grounding / cost-effective
+ *   fallback only; main-generator `default` and `cross_vendor_review_only`
+ *   are forbidden per INV-0023-5 / INV-0023-2 alignment — PR #93 codex
+ *   review P2 round 1).
  *
- * Unknown tiers (e.g. `tier_4` in a future config) are tolerated — only
- * the four documented tiers are checked.
+ * `NON_GOOGLE_TIERS` is retained as a documentation constant listing the
+ * three documented non-Google tiers; the actual scan is now over every
+ * non-tier_3 tier present in the config.
  */
 export const NON_GOOGLE_TIERS: readonly string[] = ["tier_0", "tier_1", "tier_2"];
 export const GOOGLE_REQUIRED_TIER = "tier_3";
 
+/**
+ * Roles allowed for Google at tier_3. Per ADR-0023 INV-0023-5, Google
+ * usage scope is "Tier 3 + 탐색 (Google Search grounding) 보조 + 동일 tier
+ * 비용효율 우위 시만"; "메인 generator 의 default 또는 reviewer 로 사용 금지".
+ *
+ * The live operational config uses the composite literal
+ * `search_grounding_or_cost_effective_fallback`; we also accept the
+ * sub-roles in case a future split.
+ */
+export const ALLOWED_TIER3_GOOGLE_ROLES: ReadonlySet<string> = new Set([
+  "search_grounding_or_cost_effective_fallback",
+  "search_grounding",
+  "cost_effective_fallback",
+]);
+
 export function assertGoogleScopeIsTier3Only(config: LlmRoutingConfig): void {
-  for (const tierKey of NON_GOOGLE_TIERS) {
-    const tier = config.tiers[tierKey];
-    if (!tier) continue; // tier may be omitted entirely; no Google to check
+  for (const [tierKey, tier] of Object.entries(config.tiers)) {
+    if (tierKey === GOOGLE_REQUIRED_TIER) continue;
     const role = tier.google?.role;
     if (tier.google !== undefined && role !== "disabled") {
       throw new LlmRoutingConfigError(
-        `INV-0023-5: ${tierKey}.google.role must be 'disabled' or google omitted (got: ${JSON.stringify(role)}); Google scope is Tier 3 only`,
+        `INV-0023-5: ${tierKey}.google.role must be 'disabled' or google omitted (got: ${JSON.stringify(role)}); Google scope is Tier 3 only — any non-tier_3 tier with Google enabled violates the lock`,
       );
     }
   }
@@ -220,9 +309,9 @@ export function assertGoogleScopeIsTier3Only(config: LlmRoutingConfig): void {
     );
   }
   const tier3Google = tier3.google?.role;
-  if (!tier3Google || tier3Google === "disabled") {
+  if (typeof tier3Google !== "string" || !ALLOWED_TIER3_GOOGLE_ROLES.has(tier3Google)) {
     throw new LlmRoutingConfigError(
-      `INV-0023-5: ${GOOGLE_REQUIRED_TIER}.google.role must be present and not 'disabled' (got: ${JSON.stringify(tier3Google)}); ADR-0023 INV-0023-5 locks Google as Tier 3 fallback`,
+      `INV-0023-5: ${GOOGLE_REQUIRED_TIER}.google.role must be one of {${[...ALLOWED_TIER3_GOOGLE_ROLES].join(", ")}} (got: ${JSON.stringify(tier3Google)}); ADR-0023 INV-0023-5 forbids Google as main generator default or reviewer — only search grounding / cost-effective fallback roles are allowed`,
     );
   }
 }

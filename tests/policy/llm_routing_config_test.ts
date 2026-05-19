@@ -19,8 +19,12 @@ import {
   assertGoogleScopeIsTier3Only,
   checkLlmRoutingConfig,
   FORBIDDEN_TIER_PRICE_AXIS_KEYS,
+  FORBIDDEN_CAPABILITY_VALUE_TOKENS,
   NON_GOOGLE_TIERS,
   GOOGLE_REQUIRED_TIER,
+  ALLOWED_TIER3_GOOGLE_ROLES,
+  TIER0_OPENAI_REQUIRED_EFFORT,
+  TIER0_ANTHROPIC_ALLOWED_EFFORTS,
   LlmRoutingConfigError,
   type LlmRoutingConfig,
 } from "../../scripts/check-llm-routing-config";
@@ -93,7 +97,7 @@ function baseConfig(): LlmRoutingConfig {
         google: { role: "disabled" },
       },
       tier_3: {
-        capability: "low_cost_high_volume_and_search_grounding",
+        capability: "high_volume_throughput_and_search_grounding",
         used_in: ["cite_check_overclaim_llm_judge_default"],
         openai: { model: "gpt-5-nano", effort: "standard", role: "default" },
         anthropic: { model: "claude-haiku-4-5", effort: "standard", role: "cross_vendor_review_only" },
@@ -156,6 +160,52 @@ describe("assertTier0VendorRoles — INV-0023-2", () => {
     const config = baseConfig();
     delete config.tiers.tier_0!.anthropic;
     expect(() => assertTier0VendorRoles(config)).toThrow(LlmRoutingConfigError);
+  });
+
+  // PR #93 codex review P2 round 1 — Tier 0 effort enforcement
+  it("throws when tier_0.openai.effort is not 'extended_thinking'", () => {
+    const config = baseConfig();
+    config.tiers.tier_0!.openai!.effort = "standard";
+    expect(() => assertTier0VendorRoles(config)).toThrow(LlmRoutingConfigError);
+    expect(() => assertTier0VendorRoles(config)).toThrow(/tier_0\.openai\.effort/);
+  });
+
+  it("throws when tier_0.openai.effort is missing", () => {
+    const config = baseConfig();
+    delete config.tiers.tier_0!.openai!.effort;
+    expect(() => assertTier0VendorRoles(config)).toThrow(LlmRoutingConfigError);
+  });
+
+  it("throws when tier_0.anthropic.effort is 'standard' (weaker than 'high')", () => {
+    const config = baseConfig();
+    config.tiers.tier_0!.anthropic!.effort = "standard";
+    expect(() => assertTier0VendorRoles(config)).toThrow(LlmRoutingConfigError);
+    expect(() => assertTier0VendorRoles(config)).toThrow(/tier_0\.anthropic\.effort/);
+  });
+
+  it("throws when tier_0.anthropic.effort is 'low'", () => {
+    const config = baseConfig();
+    config.tiers.tier_0!.anthropic!.effort = "low";
+    expect(() => assertTier0VendorRoles(config)).toThrow(LlmRoutingConfigError);
+  });
+
+  it("accepts tier_0.anthropic.effort = 'high' (literal ADR wording)", () => {
+    const config = baseConfig();
+    config.tiers.tier_0!.anthropic!.effort = "high";
+    expect(() => assertTier0VendorRoles(config)).not.toThrow();
+  });
+
+  it("accepts tier_0.anthropic.effort = 'xhigh' (live operational catalog)", () => {
+    const config = baseConfig();
+    config.tiers.tier_0!.anthropic!.effort = "xhigh";
+    expect(() => assertTier0VendorRoles(config)).not.toThrow();
+  });
+
+  it("TIER0_OPENAI_REQUIRED_EFFORT and TIER0_ANTHROPIC_ALLOWED_EFFORTS are exported", () => {
+    expect(TIER0_OPENAI_REQUIRED_EFFORT).toBe("extended_thinking");
+    expect(TIER0_ANTHROPIC_ALLOWED_EFFORTS.has("high")).toBe(true);
+    expect(TIER0_ANTHROPIC_ALLOWED_EFFORTS.has("xhigh")).toBe(true);
+    expect(TIER0_ANTHROPIC_ALLOWED_EFFORTS.has("standard")).toBe(false);
   });
 });
 
@@ -239,6 +289,67 @@ describe("assertTiersCapabilityCanonical — INV-0023-3", () => {
     expect(FORBIDDEN_TIER_PRICE_AXIS_KEYS.has("cheap")).toBe(true);
     expect(FORBIDDEN_TIER_PRICE_AXIS_KEYS.has("budget")).toBe(true);
   });
+
+  // PR #93 codex review P2 round 1 — capability VALUE scan for price-axis terms
+  it("throws when capability value contains 'cost' as snake_case token (low_cost_high_volume)", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.capability = "low_cost_high_volume_and_search_grounding";
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(/forbidden price-axis token 'cost'/);
+  });
+
+  it("throws when capability value starts with 'cost_'", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.capability = "cost_effective_search";
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+  });
+
+  it("throws when capability value contains 'cheap' token", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.capability = "cheap_high_volume";
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(/'cheap'/);
+  });
+
+  it("throws when capability value contains 'budget' token", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.capability = "budget_grounding";
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+  });
+
+  it("throws when capability value contains 'price' token", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.capability = "price_optimized";
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+  });
+
+  it("scan is case-insensitive ('Cost_Effective')", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.capability = "Cost_Effective_Grounding";
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+  });
+
+  it("does NOT match 'cost' embedded in non-token positions ('accost')", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.capability = "accost_grounding"; // hypothetical, no real word boundary
+    expect(() => assertTiersCapabilityCanonical(config)).not.toThrow();
+  });
+
+  it("does NOT match 'cost' embedded in non-token positions ('costume')", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.capability = "costume_recognition";
+    expect(() => assertTiersCapabilityCanonical(config)).not.toThrow();
+  });
+
+  it("accepts 'high_volume_throughput_and_search_grounding' (clean capability)", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.capability = "high_volume_throughput_and_search_grounding";
+    expect(() => assertTiersCapabilityCanonical(config)).not.toThrow();
+  });
+
+  it("FORBIDDEN_CAPABILITY_VALUE_TOKENS exports the documented set", () => {
+    expect(FORBIDDEN_CAPABILITY_VALUE_TOKENS).toEqual(["price", "cost", "cheap", "budget"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -299,19 +410,78 @@ describe("assertGoogleScopeIsTier3Only — INV-0023-5", () => {
     expect(() => assertGoogleScopeIsTier3Only(config)).toThrow(/tier_2\.google\.role/);
   });
 
-  it("tolerates unknown extra tiers (only tier_0..3 are checked)", () => {
+  // PR #93 codex review P2 round 1 — unknown future tiers must also reject Google
+  it("rejects Google enabled at an unknown future tier (tier_experimental with role=default)", () => {
     const config = baseConfig();
     (config.tiers as Record<string, unknown>).tier_experimental = {
       capability: "experimental",
       used_in: [],
       google: { role: "default" },
     };
-    // Extra tiers are ignored by INV-0023-5; the assertion only locks
-    // tier_0..3 mapping.
+    expect(() => assertGoogleScopeIsTier3Only(config)).toThrow(LlmRoutingConfigError);
+    expect(() => assertGoogleScopeIsTier3Only(config)).toThrow(/tier_experimental\.google\.role/);
+  });
+
+  it("tolerates unknown future tier when google is omitted or disabled", () => {
+    const config = baseConfig();
+    (config.tiers as Record<string, unknown>).tier_experimental = {
+      capability: "experimental",
+      used_in: [],
+      google: { role: "disabled" },
+    };
     expect(() => assertGoogleScopeIsTier3Only(config)).not.toThrow();
   });
 
-  it("NON_GOOGLE_TIERS lists tier_0/1/2", () => {
+  it("tolerates unknown future tier when google block is omitted entirely", () => {
+    const config = baseConfig();
+    (config.tiers as Record<string, unknown>).tier_4 = {
+      capability: "future_tier",
+      used_in: [],
+    };
+    expect(() => assertGoogleScopeIsTier3Only(config)).not.toThrow();
+  });
+
+  // PR #93 codex review P2 round 1 — Tier 3 Google role allowlist
+  it("throws when tier_3.google.role is 'default' (forbidden main generator role)", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.google = { role: "default" };
+    expect(() => assertGoogleScopeIsTier3Only(config)).toThrow(LlmRoutingConfigError);
+    expect(() => assertGoogleScopeIsTier3Only(config)).toThrow(/must be one of/);
+  });
+
+  it("throws when tier_3.google.role is 'cross_vendor_review_only' (forbidden reviewer role)", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.google = { role: "cross_vendor_review_only" };
+    expect(() => assertGoogleScopeIsTier3Only(config)).toThrow(LlmRoutingConfigError);
+  });
+
+  it("accepts tier_3.google.role = 'search_grounding'", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.google = { role: "search_grounding" };
+    expect(() => assertGoogleScopeIsTier3Only(config)).not.toThrow();
+  });
+
+  it("accepts tier_3.google.role = 'cost_effective_fallback'", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.google = { role: "cost_effective_fallback" };
+    expect(() => assertGoogleScopeIsTier3Only(config)).not.toThrow();
+  });
+
+  it("accepts tier_3.google.role = composite 'search_grounding_or_cost_effective_fallback' (live YAML)", () => {
+    const config = baseConfig();
+    config.tiers.tier_3!.google = { role: "search_grounding_or_cost_effective_fallback" };
+    expect(() => assertGoogleScopeIsTier3Only(config)).not.toThrow();
+  });
+
+  it("ALLOWED_TIER3_GOOGLE_ROLES exports the documented set", () => {
+    expect(ALLOWED_TIER3_GOOGLE_ROLES.has("search_grounding_or_cost_effective_fallback")).toBe(true);
+    expect(ALLOWED_TIER3_GOOGLE_ROLES.has("search_grounding")).toBe(true);
+    expect(ALLOWED_TIER3_GOOGLE_ROLES.has("cost_effective_fallback")).toBe(true);
+    expect(ALLOWED_TIER3_GOOGLE_ROLES.has("default")).toBe(false);
+    expect(ALLOWED_TIER3_GOOGLE_ROLES.has("cross_vendor_review_only")).toBe(false);
+  });
+
+  it("NON_GOOGLE_TIERS lists documented tier_0/1/2 (documentary)", () => {
     expect(NON_GOOGLE_TIERS).toEqual(["tier_0", "tier_1", "tier_2"]);
   });
 
