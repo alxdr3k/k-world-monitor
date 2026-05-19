@@ -102,6 +102,23 @@ export const OPENAI_RESPONSES_API_ONLY_MODELS = new Set<string>([
   "gpt-5.5-pro-extended-thinking",
 ]);
 
+/**
+ * Returns true when `model` is a documented Responses-API-only SKU
+ * (exact match) OR a dated snapshot of one (e.g.
+ * `gpt-5-pro-2026-01-01`). PR #100 codex round 7 F25 — without
+ * the prefix check, dated overrides bypassed the exact-match set
+ * and the broad `gpt-5-` pricing prefix accepted them, letting
+ * Tier 0/1 callers post Responses-only models to
+ * `/chat/completions` after the ledger row was opened.
+ */
+export function isResponsesApiOnlyModel(model: string): boolean {
+  if (OPENAI_RESPONSES_API_ONLY_MODELS.has(model)) return true;
+  for (const proAlias of OPENAI_RESPONSES_API_ONLY_MODELS) {
+    if (model.startsWith(`${proAlias}-`)) return true;
+  }
+  return false;
+}
+
 export class OpenAIResponsesApiOnlyError extends Error {
   constructor(public readonly model: string) {
     super(
@@ -368,12 +385,14 @@ export class OpenAIClient implements LlmClient {
     }
     this.model = opts.model ?? OPENAI_TIER_DEFAULT_MODEL[this.tier];
 
-    // PR #100 codex round 6 F20 — reject known Responses-API-only
-    // SKUs at construction. Without this, Tier 0/1 callers passing
-    // `gpt-5-pro` / `gpt-5.2-pro` etc. would open a run_ledger row
-    // and only fail at the provider request, leaving the ledger
-    // entry to drift to the failure path of a known-broken config.
-    if (OPENAI_RESPONSES_API_ONLY_MODELS.has(this.model)) {
+    // PR #100 codex round 6 F20 + round 7 F25 — reject known
+    // Responses-API-only SKUs at construction, including dated
+    // snapshot prefixes (e.g. `gpt-5-pro-2026-01-01`). Without the
+    // prefix check, a dated override would bypass the exact-match
+    // set and the broad `gpt-5-` pricing prefix would accept it,
+    // routing a Responses-API-only model to /chat/completions
+    // after the ledger row was opened.
+    if (isResponsesApiOnlyModel(this.model)) {
       throw new OpenAIResponsesApiOnlyError(this.model);
     }
 
@@ -430,40 +449,59 @@ export class OpenAIClient implements LlmClient {
     }
     const body = JSON.stringify(requestBody);
 
-    // PR #100 codex round 6 F18 — bounded request via AbortSignal so
-    // network stalls cannot leave run_ledger rows in `running`
-    // forever. We use a dedicated controller (instead of the
-    // simpler `AbortSignal.timeout` static) so the timeout reason
-    // is preserved in our typed error rather than the generic
-    // AbortError.
+    // PR #100 codex round 6 F18 + round 7 F26 — bounded request via
+    // AbortSignal so network stalls cannot leave run_ledger rows in
+    // `running` forever. Keep the timer alive through the BODY read:
+    // `fetch()` can resolve as soon as response headers arrive while
+    // the body is still streaming, so a stall in `response.json()`
+    // or `response.text()` after a fast header phase could still
+    // wedge the extractor indefinitely. Clear only after the body
+    // has been consumed (or on early throw).
     const abortController = new AbortController();
     const timer = setTimeout(() => abortController.abort(), this.timeoutMs);
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body,
-        signal: abortController.signal,
-      });
-    } catch (err) {
+    const onAbortThrow = (err: unknown): never => {
       if (abortController.signal.aborted) {
         throw new OpenAIRequestTimeoutError(this.timeoutMs, this.model);
       }
       throw err;
+    };
+    let response: Response;
+    let data: OpenAIChatResponseShape;
+    try {
+      try {
+        response = await this.fetchImpl(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body,
+          signal: abortController.signal,
+        });
+      } catch (err) {
+        onAbortThrow(err);
+        throw err; // unreachable but appeases TS narrowing
+      }
+
+      if (!response.ok) {
+        let errBody = "";
+        try {
+          errBody = await response.text();
+        } catch (err) {
+          onAbortThrow(err);
+        }
+        throw new OpenAIApiError(response.status, errBody);
+      }
+
+      try {
+        data = (await response.json()) as OpenAIChatResponseShape;
+      } catch (err) {
+        onAbortThrow(err);
+        throw err;
+      }
     } finally {
       clearTimeout(timer);
     }
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new OpenAIApiError(response.status, text);
-    }
-
-    const data = (await response.json()) as OpenAIChatResponseShape;
 
     // Prefer resolved snapshot from response.model (e.g. dated
     // `gpt-5-mini-2025-08-07`) over the request-time alias
@@ -537,8 +575,17 @@ export class OpenAIClient implements LlmClient {
         buildBillableUsage(),
       );
     }
+    // PR #100 codex round 7 F27 — strict-string validation. Round 3
+    // F8 rejected only `undefined`/`null`. A malformed
+    // OpenAI-compatible response with `content` as an array (the
+    // newer multi-part shape) or an object would have surfaced as
+    // a successful `LlmInvokeResult.text` of the wrong type,
+    // letting `ArticleExtractor` mark the row `completed` while
+    // downstream consumers received a non-string. Treat any
+    // non-string shape as an incomplete provider response so the
+    // ledger goes to failRun.
     const rawContent = firstChoice.message?.content;
-    if (rawContent === undefined || rawContent === null) {
+    if (typeof rawContent !== "string") {
       throw new OpenAIIncompleteCompletionError(
         "missing_content",
         "",

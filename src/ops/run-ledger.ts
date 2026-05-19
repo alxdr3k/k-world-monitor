@@ -82,6 +82,22 @@ export function startRun(input: StartRunInput): string {
     throw new Error(
       `startRun: domainOverrideReason is required for non-openai vendor '${input.vendor}'`
     );
+  // PR #100 codex round 7 F24 — writer-boundary validation for the
+  // research_session FK column. ArticleExtractor (round 4 F14)
+  // already validates its dep, but other future callers
+  // (dossier / scenario / cite_check) write through this same
+  // function. Without a guard here, any direct caller could write
+  // a blank string or a `src_*` typo and permanently corrupt the
+  // per-session cost / audit grouping for the column documented
+  // (v1_schema.sql) as the research_session FK. Reject at the
+  // writer boundary so the FK invariant holds regardless of caller.
+  if (input.sessionId !== undefined) {
+    const trimmed = input.sessionId.trim();
+    if (trimmed === "" || !trimmed.startsWith("sess_"))
+      throw new Error(
+        `startRun: sessionId must be a non-blank \`sess_<ULID>\` (research_session FK), got '${input.sessionId}'`
+      );
+  }
 
   const runId = `run_${ulid()}`;
   const now = new Date().toISOString();

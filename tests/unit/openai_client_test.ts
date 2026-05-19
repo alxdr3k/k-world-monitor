@@ -16,6 +16,7 @@ import { describe, it, expect } from "bun:test";
 
 import {
   computeTotalCostUsd,
+  isResponsesApiOnlyModel,
   OPENAI_PRICING_USD_PER_1M_TOKENS,
   OPENAI_RESPONSES_API_ONLY_MODELS,
   OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS,
@@ -533,6 +534,46 @@ describe("OpenAIClient — Responses-API-only model rejection (PR #100 round 6 F
     expect(OPENAI_RESPONSES_API_ONLY_MODELS.has("gpt-5-pro")).toBe(true);
     expect(OPENAI_RESPONSES_API_ONLY_MODELS.has("gpt-5.2-pro")).toBe(true);
   });
+
+  it("rejects dated pro snapshot via prefix (round 7 F25)", () => {
+    expect(
+      () =>
+        new OpenAIClient({
+          apiKey: "sk",
+          tier: 0,
+          model: "gpt-5-pro-2026-01-01",
+        }),
+    ).toThrow(OpenAIResponsesApiOnlyError);
+    expect(
+      () =>
+        new OpenAIClient({
+          apiKey: "sk",
+          tier: 0,
+          model: "gpt-5.2-pro-2026-01-01",
+        }),
+    ).toThrow(OpenAIResponsesApiOnlyError);
+    expect(
+      () =>
+        new OpenAIClient({
+          apiKey: "sk",
+          tier: 0,
+          model: "gpt-5-pro-extended-thinking-2026-05-19",
+        }),
+    ).toThrow(OpenAIResponsesApiOnlyError);
+  });
+
+  it("isResponsesApiOnlyModel exact + prefix matching (round 7 F25)", () => {
+    expect(isResponsesApiOnlyModel("gpt-5-pro")).toBe(true);
+    expect(isResponsesApiOnlyModel("gpt-5-pro-2026-01-01")).toBe(true);
+    expect(isResponsesApiOnlyModel("gpt-5.2-pro")).toBe(true);
+    expect(isResponsesApiOnlyModel("gpt-5.5-pro-extended-thinking-2026-01-01")).toBe(true);
+    // Non-pro models / dated snapshots stay false.
+    expect(isResponsesApiOnlyModel("gpt-5-mini")).toBe(false);
+    expect(isResponsesApiOnlyModel("gpt-5-mini-2025-08-07")).toBe(false);
+    expect(isResponsesApiOnlyModel("gpt-5")).toBe(false);
+    expect(isResponsesApiOnlyModel("gpt-5-2025-09-15")).toBe(false);
+    expect(isResponsesApiOnlyModel("gpt-5-nano")).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------
@@ -619,6 +660,47 @@ describe("OpenAIClient — request timeout (PR #100 round 6 F18)", () => {
     expect(
       () => new OpenAIClient({ apiKey: "sk", timeoutMs: Number.NaN }),
     ).toThrow(/timeoutMs/);
+  });
+
+  it("timeout covers the body read after headers arrive (round 7 F26)", async () => {
+    // Fetch resolves with a Response whose `json()` stalls until
+    // the signal aborts. This exercises the case where fetch()
+    // returns quickly (headers received) but the body read hangs —
+    // round 6 cleared the timer immediately after fetch resolved,
+    // so the body stall was unbounded. Round 7 keeps the timer
+    // alive through json().
+    const slowJsonFetch = ((
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      // Construct a Response whose body promises never settle
+      // until the signal aborts.
+      const stallingBody = new Blob(["{"], {
+        type: "application/json",
+      });
+      const response = new Response(stallingBody, {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+      // Override json() to stall until the controller aborts.
+      Object.defineProperty(response, "json", {
+        value: () =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+          }),
+      });
+      return Promise.resolve(response);
+    }) as unknown as typeof globalThis.fetch;
+    const client = new OpenAIClient({
+      apiKey: "sk",
+      fetch: slowJsonFetch,
+      timeoutMs: 25,
+    });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIRequestTimeoutError);
   });
 });
 
@@ -808,6 +890,38 @@ describe("OpenAIClient.invoke — empty/malformed response rejection (PR #100 ro
   it("throws when message.content is null", async () => {
     const { fetch } = makeFetchMock(200, {
       choices: [{ message: { content: null }, finish_reason: "stop" }],
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIIncompleteCompletionError);
+  });
+
+  it("throws when message.content is an array (non-string shape) — PR #100 round 7 F27", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [
+        {
+          message: { content: [{ type: "text", text: "ok" }] },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIIncompleteCompletionError);
+  });
+
+  it("throws when message.content is an object (round 7 F27)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [
+        {
+          message: { content: { text: "ok" } },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
     });
     const client = new OpenAIClient({ apiKey: "sk", fetch });
     await expect(

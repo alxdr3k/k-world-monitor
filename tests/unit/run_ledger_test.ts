@@ -67,6 +67,70 @@ afterEach(() => {
   }
 });
 
+describe("startRun sessionId writer-boundary validation (PR #100 round 7 F24)", () => {
+  it("accepts well-formed sess_<ULID>", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+      sessionId: "sess_01HXYZ",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT session_id FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.session_id).toBe("sess_01HXYZ");
+  });
+
+  it("rejects sessionId without sess_ prefix", () => {
+    expect(() =>
+      startRun({
+        stage: "extract",
+        vendor: "openai",
+        tier: 2,
+        modelId: "gpt-5-mini",
+        sessionId: "src_typo",
+      }),
+    ).toThrow(/sessionId must be a non-blank `sess_<ULID>`/);
+  });
+
+  it("rejects blank/whitespace sessionId", () => {
+    expect(() =>
+      startRun({
+        stage: "extract",
+        vendor: "openai",
+        tier: 2,
+        modelId: "gpt-5-mini",
+        sessionId: "   ",
+      }),
+    ).toThrow(/sessionId must be a non-blank `sess_<ULID>`/);
+    expect(() =>
+      startRun({
+        stage: "extract",
+        vendor: "openai",
+        tier: 2,
+        modelId: "gpt-5-mini",
+        sessionId: "",
+      }),
+    ).toThrow(/sessionId must be a non-blank `sess_<ULID>`/);
+  });
+
+  it("accepts omitted sessionId (column stays NULL)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT session_id FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.session_id).toBeNull();
+  });
+});
+
 describe("startRun", () => {
   it("returns a run_ prefixed ID", () => {
     const id = startRun({ stage: "extract", vendor: "openai", tier: 2, modelId: "gpt-5-mini" });
