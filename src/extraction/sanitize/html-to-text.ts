@@ -60,15 +60,56 @@ function decodeBasicEntities(text: string): string {
 }
 
 /**
+ * Run a single DANGEROUS_TAGS removal pass. Removes (a) full elements
+ * (open + content + close), (b) self-closing forms (`<iframe ... />`),
+ * and (c) orphan unclosed opening tags — for orphan, the opener AND
+ * everything from that opener to EOF is dropped fail-closed (PR #97
+ * codex round 1 P2 — earlier behavior left the body text in place,
+ * leaking payload to the LLM).
+ */
+function removeDangerousTags(input: string): string {
+  let out = input;
+  for (const tag of DANGEROUS_TAGS) {
+    // Full element with content (closed).
+    const closed = new RegExp(
+      `<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`,
+      "gi",
+    );
+    out = out.replace(closed, "");
+    // Self-closing dangerous tags.
+    const selfClosing = new RegExp(`<${tag}\\b[^>]*\\/>`, "gi");
+    out = out.replace(selfClosing, "");
+    // Orphan opening with no matching closer — drop opener AND
+    // remainder of the input fail-closed (PR #97 codex P2 —
+    // INV-0029-5 requires these tags AND their contents to be removed).
+    const orphan = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*`, "i");
+    out = out.replace(orphan, "");
+  }
+  return out;
+}
+
+/**
  * Convert HTML to LLM-safe plain text per INV-0029-5.
  *
- * Pipeline:
+ * Pipeline (PR #97 codex review round 1 — re-ordered for entity defense):
  *   1. Strip HTML comments (`<!-- ... -->`).
- *   2. Remove every `DANGEROUS_TAGS` element (opening + content + closing).
- *   3. Strip every remaining HTML tag (`<...>`).
- *   4. Decode basic HTML entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`,
- *      `&apos;`, `&#39;`, `&nbsp;` + numeric `&#NN;` / `&#xNN;`).
- *   5. Collapse whitespace to a single space; trim ends.
+ *   2. **First DANGEROUS_TAGS removal pass** — catches raw `<script>` /
+ *      `<style>` / etc. in the source.
+ *   3. Strip every remaining HTML tag (`<...>`) — done BEFORE entity
+ *      decode so that decoded user-content `<` / `>` characters
+ *      (e.g. `1 &lt; 2`) are not later stripped as "fake tags".
+ *   4. **Decode HTML entities** (`&amp;`, `&lt;`, `&gt;`, `&quot;`,
+ *      `&apos;`, `&#39;`, `&nbsp;` + numeric `&#NN;` / `&#xNN;`) —
+ *      surfaces entity-encoded dangerous tags like
+ *      `&lt;script&gt;payload&lt;/script&gt;` as literal `<script>...`.
+ *   5. **Second DANGEROUS_TAGS removal pass** — catches the now-decoded
+ *      entity-encoded dangerous tags (PR #97 codex round 1 P2). Does
+ *      NOT do generic tag-stripping (would consume legitimate decoded
+ *      `<` characters in user content).
+ *   6. Collapse whitespace to a single space; trim ends.
+ *
+ * Orphan unclosed dangerous tags drop the remainder of the input
+ * fail-closed at steps 2 / 5 — no payload leak.
  *
  * The output is suitable for `wrapUntrusted()` consumption.
  */
@@ -80,29 +121,24 @@ export function htmlToText(html: string): string {
   // 1. Strip HTML comments (may contain `<script>` etc. as text).
   out = out.replace(/<!--[\s\S]*?-->/g, "");
 
-  // 2. Remove dangerous-tag elements (case-insensitive, with attributes).
-  for (const tag of DANGEROUS_TAGS) {
-    const pattern = new RegExp(
-      `<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`,
-      "gi",
-    );
-    out = out.replace(pattern, "");
-    // Self-closing dangerous tags: <iframe ... /> etc.
-    const selfClosing = new RegExp(`<${tag}\\b[^>]*\\/>`, "gi");
-    out = out.replace(selfClosing, "");
-    // Orphan opening tags with no closing (defensive — leftover): <script ...>
-    const orphan = new RegExp(`<${tag}\\b[^>]*>`, "gi");
-    out = out.replace(orphan, "");
-  }
+  // 2. First DANGEROUS_TAGS removal pass (raw source).
+  out = removeDangerousTags(out);
 
-  // 3. Strip remaining HTML tags.
+  // 3. Strip remaining real HTML tags BEFORE entity decode — decoded
+  //    user-content `<` / `>` (e.g. `1 < 2`) must not be eaten by the
+  //    tag stripper.
   out = out.replace(/<[^>]+>/g, " ");
 
-  // 4. Decode entities.
+  // 4. Decode entities — may surface entity-encoded dangerous tags.
   out = decodeBasicEntities(out);
 
-  // 5. Collapse whitespace; trim.
-  out = out.replace(/[\s ]+/g, " ").trim();
+  // 5. Second DANGEROUS_TAGS pass — catches now-decoded entity
+  //    payloads. NO generic tag stripping after this point (would
+  //    consume legitimate decoded `<` / `>` user content).
+  out = removeDangerousTags(out);
+
+  // 6. Collapse whitespace; trim.
+  out = out.replace(/[\s ]+/g, " ").trim();
 
   return out;
 }
