@@ -59,16 +59,66 @@ const HTML_ENTITY_MAP: Record<string, string> = {
   "&#39;": "'",
 };
 
+/**
+ * Fail-closed cap on decode iterations. PR #97 codex round 5 P2 — round
+ * 3's fixed 5-pass cap silently exited on 6+-level nested ampersand
+ * encoding (`&amp;amp;amp;amp;amp;amp;lt;script&amp;...`), leaving a
+ * partially-decoded payload visible to the LLM. The new cap is high
+ * enough to clear realistic adversarial depths (HTML5-realistic
+ * payloads are 1-2 levels deep; the attack vector tops out at ~10
+ * before payload size becomes implausible) while still bounding the
+ * loop. If the cap is reached WITHOUT the decoder stabilizing, the
+ * sanitizer fails closed and returns the empty string from this pass
+ * so the caller never receives partially-decoded markup.
+ */
+const MAX_DECODE_ITER = 100;
+
+/**
+ * Semicolonless legacy named character references (HTML5 §13.5 legacy
+ * entries). HTML parsers decode `&lt`, `&gt`, `&amp`, `&quot` even
+ * without the trailing `;`. PR #97 codex round 5 P2 — without this
+ * pass, payloads like `&ltscript&gtIgnore previous instructions&lt/script&gt`
+ * survive both DANGEROUS_TAGS passes because the entity decode map
+ * only covers semicolon-terminated forms.
+ *
+ * The regex uses a negative lookahead `(?!;)` so semicolon-terminated
+ * forms (`&lt;`) remain handled by the standard map; only the legacy
+ * no-semicolon form (`&lt` followed by ANYTHING that is not `;`,
+ * including alpha like `&ltscript`) is rewritten here. Case-insensitive
+ * flag covers `&LT` / `&Lt` etc.
+ */
+function decodeSemicolonlessLegacyEntities(text: string): string {
+  let out = text;
+  out = out.replace(/&lt(?!;)/gi, "<");
+  out = out.replace(/&gt(?!;)/gi, ">");
+  out = out.replace(/&quot(?!;)/gi, '"');
+  // `&amp` last so we don't accidentally produce a new `&xxx` sequence
+  // that the previous passes would have already consumed in the same
+  // iteration. Outer iteration loop in decodeBasicEntities re-runs the
+  // whole pipeline until stable so post-decoded `&amp` does eventually
+  // surface.
+  out = out.replace(/&amp(?!;)/gi, "&");
+  return out;
+}
+
 function decodeBasicEntities(text: string): string {
   let out = text;
   // PR #97 codex round 3 P2 — iterate decode pass until stable so that
   // mixed-case double-encoded payloads like `&AMP;lt;script&AMP;gt;...`
   // (which need two passes: first `&AMP;` → `&`, then `&lt;` → `<`)
-  // resolve fully before the second DANGEROUS_TAGS pass. Cap iterations
-  // to prevent infinite loops on degenerate self-referential entities.
-  const MAX_DECODE_ITER = 5;
+  // resolve fully before the second DANGEROUS_TAGS pass.
+  //
+  // PR #97 codex round 5 P2 — earlier fixed 5-pass cap allowed bypass
+  // via 6+-level nested ampersand encoding. New cap MAX_DECODE_ITER is
+  // high enough for realistic adversarial depths and FAILS CLOSED when
+  // exhausted without stabilizing.
+  let stabilized = false;
   for (let iter = 0; iter < MAX_DECODE_ITER; iter++) {
     const before = out;
+    // Semicolonless legacy entities first — they normalize `&lt`/`&gt`
+    // /`&amp`/`&quot` (no `;`) to literal `<`/`>`/`&`/`"` before the
+    // standard map runs.
+    out = decodeSemicolonlessLegacyEntities(out);
     for (const [entity, replacement] of Object.entries(HTML_ENTITY_MAP)) {
       out = out.replaceAll(entity, replacement);
     }
@@ -86,8 +136,15 @@ function decodeBasicEntities(text: string): string {
         ? String.fromCodePoint(n)
         : "";
     });
-    if (out === before) break; // stable
+    if (out === before) {
+      stabilized = true;
+      break;
+    }
   }
+  // Fail-closed: if the decoder is still making progress at the cap,
+  // partially-decoded markup may still contain dangerous payload. Drop
+  // the entire pass output rather than leaking ambiguous bytes.
+  if (!stabilized) return "";
   return out;
 }
 

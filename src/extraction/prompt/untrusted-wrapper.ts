@@ -73,12 +73,37 @@ function escapeForRegex(s: string): string {
 }
 
 /**
- * Neutralize any literal occurrence of `openSentinel` or `closeSentinel`
- * inside `content` so an adversarial payload cannot close the wrapper
- * early and leak text outside the untrusted block (PR #97 codex review
- * round 1 P2 — INV-0029-1 isolation contract repair).
+ * Extract the bare tag name from a tag-form sentinel, e.g.
+ * `<untrusted>` → `"untrusted"`, `</untrusted>` → `"untrusted"`.
  *
- * Matching is case-insensitive (e.g. `<UNTRUSTED>` is also escaped).
+ * Returns `null` for sentinels that are not in single-tag form (e.g.
+ * `<<MARK>>`, `===INPUT===`). In that case the caller falls back to
+ * literal escape only.
+ *
+ * PR #97 codex round 5 P2 — needed so the whitespace/case-tolerant
+ * tag-form escape can match `</untrusted >` etc. without affecting
+ * non-tag custom sentinels.
+ */
+function tagNameFromSentinel(sentinel: string): string | null {
+  const m = sentinel.match(/^<\s*\/?\s*([A-Za-z][A-Za-z0-9_-]*)\s*>$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Neutralize any occurrence of `openSentinel` or `closeSentinel` inside
+ * `content` so an adversarial payload cannot close the wrapper early
+ * and leak text outside the untrusted block (PR #97 codex review round
+ * 1 P2 — INV-0029-1 isolation contract repair).
+ *
+ * Pipeline (PR #97 codex round 5 P2 — tag-form whitespace tolerance):
+ *   1. **Tag-form whitespace-tolerant escape** — for sentinels in the
+ *      `<NAME>` / `</NAME>` shape, match any whitespace/case variant
+ *      that an HTML/XML parser or LLM would still treat as the
+ *      closing tag (`</untrusted >`, `< /untrusted>`, `</UNTRUSTED >`,
+ *      etc.). Non-tag custom sentinels skip this step.
+ *   2. **Literal escape** — case-insensitive exact-string match for
+ *      both tag-form and non-tag custom sentinels.
+ *
  * Replacement form is a visibly distinct marker so prompt-engineering
  * inspection makes the substitution evident.
  */
@@ -87,14 +112,35 @@ export function escapeSentinelLiterals(
   openSentinel: string,
   closeSentinel: string,
 ): string {
+  let out = content;
+
+  // 1. Tag-form whitespace-tolerant escape (PR #97 codex round 5 P2).
+  //    Replace closing first so a pair `<X>...</X>` becomes
+  //    `[ESCAPED-OPEN]...[ESCAPED-CLOSE]` symmetrically.
+  const closeTagName = tagNameFromSentinel(closeSentinel);
+  if (closeTagName) {
+    const closeTagRe = new RegExp(
+      `<\\s*\\/\\s*${escapeForRegex(closeTagName)}\\s*>`,
+      "gi",
+    );
+    out = out.replace(closeTagRe, "[ESCAPED-UNTRUSTED-CLOSE]");
+  }
+  const openTagName = tagNameFromSentinel(openSentinel);
+  if (openTagName) {
+    const openTagRe = new RegExp(
+      `<\\s*${escapeForRegex(openTagName)}\\s*>`,
+      "gi",
+    );
+    out = out.replace(openTagRe, "[ESCAPED-UNTRUSTED-OPEN]");
+  }
+
+  // 2. Literal exact-string escape (catches non-tag custom sentinels
+  //    and any exact-form variant not already covered by step 1).
   const openRe = new RegExp(escapeForRegex(openSentinel), "gi");
   const closeRe = new RegExp(escapeForRegex(closeSentinel), "gi");
-  return content
-    // Replace closing first so an open-then-close pair becomes
-    // `[ESCAPED-OPEN]...[ESCAPED-CLOSE]` symmetrically rather than
-    // the open's replacement masking the close.
-    .replace(closeRe, "[ESCAPED-UNTRUSTED-CLOSE]")
-    .replace(openRe, "[ESCAPED-UNTRUSTED-OPEN]");
+  out = out.replace(closeRe, "[ESCAPED-UNTRUSTED-CLOSE]");
+  out = out.replace(openRe, "[ESCAPED-UNTRUSTED-OPEN]");
+  return out;
 }
 
 /**
