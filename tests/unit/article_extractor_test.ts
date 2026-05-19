@@ -22,8 +22,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 
 import {
+  ARTICLE_EXTRACTION_JSON_SCHEMA,
   ARTICLE_EXTRACTION_SYSTEM_PROMPT,
+  ArticleExtractionSchemaError,
   ArticleExtractor,
+  parseExtractedArticle,
 } from "../../src/extraction/article/article-extractor";
 import {
   LlmIncompleteResultError,
@@ -140,9 +143,24 @@ class MockLlmClient implements LlmClient {
   }
 }
 
+/**
+ * Default mock LLM raw text — valid JSON matching
+ * `ARTICLE_EXTRACTION_JSON_SCHEMA` (Cycle 42 follow-up #2). Tests
+ * that need to exercise schema-error paths construct their own
+ * `LlmInvokeResult` with intentionally bad text.
+ */
+const DEFAULT_MOCK_ARTICLE_JSON = JSON.stringify({
+  title: "Sample headline",
+  summary: "A short factual summary of the article body.",
+  key_claims: [
+    { claim: "claim one", evidence_quote: "quote one" },
+    { claim: "claim two", evidence_quote: "quote two" },
+  ],
+});
+
 function defaultMockResponse(tier: LlmTier = 2): LlmInvokeResult {
   return {
-    text: "extracted body",
+    text: DEFAULT_MOCK_ARTICLE_JSON,
     vendor: "mock",
     model: "mock-llm-tier-2",
     tier,
@@ -203,8 +221,16 @@ describe("ArticleExtractor — sourceType + envelope", () => {
 
   it("forwards LLM response fields into envelope.result", async () => {
     insertSource("src_abc", "allowed");
+    const validJson = JSON.stringify({
+      title: "T",
+      summary: "S",
+      key_claims: [
+        { claim: "claim 1", evidence_quote: "q1" },
+        { claim: "claim 2", evidence_quote: "q2" },
+      ],
+    });
     const response: LlmInvokeResult = {
-      text: "claim 1; claim 2",
+      text: validJson,
       vendor: "mock",
       model: "mock-tier-2",
       tier: 2,
@@ -222,7 +248,7 @@ describe("ArticleExtractor — sourceType + envelope", () => {
       rawContent: "<p>Body</p>",
     });
     expect(out.result).toMatchObject({
-      text: "claim 1; claim 2",
+      text: validJson,
       vendor: "mock",
       model: "mock-tier-2",
       tier: 2,
@@ -514,7 +540,12 @@ describe("ArticleExtractor — registry wiring + routeAndExtract integration", (
       rawContent: "<p>Hello</p>",
     });
     expect(out.sourceType).toBe("article");
-    expect((out.result as { text: string }).text).toBe("extracted body");
+    expect((out.result as { text: string }).text).toBe(
+      DEFAULT_MOCK_ARTICLE_JSON,
+    );
+    expect(
+      (out.result as { parsed: { title: string } }).parsed.title,
+    ).toBe("Sample headline");
   });
 
   it("policy gate failure propagates through routeAndExtract", async () => {
@@ -596,7 +627,7 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
 
   it("writes startRun → completeRun for real-vendor clients (openai) — no fake session_id from sourceId", async () => {
     const response: LlmInvokeResult = {
-      text: "extracted",
+      text: DEFAULT_MOCK_ARTICLE_JSON,
       vendor: "openai",
       model: "gpt-5-mini",
       tier: 2,
@@ -831,7 +862,7 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
     // rejects it. ArticleExtractor's try/catch around completeRun
     // converts the throw to failRun + rethrow.
     const response: LlmInvokeResult = {
-      text: "extracted",
+      text: DEFAULT_MOCK_ARTICLE_JSON,
       vendor: "openai",
       model: "gpt-5-mini",
       tier: 2,
@@ -858,7 +889,7 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
 
   it("rewrites model_id to resolved snapshot from LlmInvokeResult.model (alias → dated)", async () => {
     const response: LlmInvokeResult = {
-      text: "extracted",
+      text: DEFAULT_MOCK_ARTICLE_JSON,
       vendor: "openai",
       // Resolved snapshot differs from the client's request-time alias.
       model: "gpt-5-mini-2025-08-07",
@@ -885,7 +916,7 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
 
   it("keeps model_id at alias when LlmInvokeResult.model matches client.model (no-op rewrite)", async () => {
     const response: LlmInvokeResult = {
-      text: "extracted",
+      text: DEFAULT_MOCK_ARTICLE_JSON,
       vendor: "openai",
       model: "gpt-5-mini",
       tier: 2,
@@ -934,7 +965,7 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
 
   it("writes domain_override_reason when caller supplies it (Anthropic Sonnet override path)", async () => {
     const response: LlmInvokeResult = {
-      text: "extracted",
+      text: DEFAULT_MOCK_ARTICLE_JSON,
       vendor: "anthropic",
       model: "claude-sonnet-4-6",
       tier: 1,
@@ -985,7 +1016,7 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
     // from AC-019 daily aggregation. New behavior: fail the run
     // and surface the misbehaving vendor client.
     const response: LlmInvokeResult = {
-      text: "extracted",
+      text: DEFAULT_MOCK_ARTICLE_JSON,
       vendor: "openai",
       model: "gpt-5-mini",
       tier: 2,
@@ -1012,5 +1043,190 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
     expect(rows.length).toBe(1);
     expect(rows[0]!.status).toBe("failed");
     expect(rows[0]!.total_cost_usd).toBeNull();
+  });
+});
+
+describe("ArticleExtractor — DEC-010 §8 strict JSON schema (Cycle 42 follow-up #2)", () => {
+  beforeEach(() => {
+    insertSource("src_ok", "allowed");
+  });
+
+  it("ARTICLE_EXTRACTION_JSON_SCHEMA is the OpenAI strict json_schema shape", () => {
+    expect(ARTICLE_EXTRACTION_JSON_SCHEMA.type).toBe("json_schema");
+    expect(ARTICLE_EXTRACTION_JSON_SCHEMA.json_schema.name).toBe(
+      "article_extraction",
+    );
+    expect(ARTICLE_EXTRACTION_JSON_SCHEMA.json_schema.strict).toBe(true);
+    const schema = ARTICLE_EXTRACTION_JSON_SCHEMA.json_schema.schema;
+    expect((schema as { required: string[] }).required).toEqual([
+      "title",
+      "summary",
+      "key_claims",
+    ]);
+    expect((schema as { additionalProperties: boolean }).additionalProperties).toBe(false);
+  });
+
+  it("forwards ARTICLE_EXTRACTION_JSON_SCHEMA to LlmClient.invoke as responseFormat (AC-010 (c) wiring)", async () => {
+    const llm = new MockLlmClient(defaultMockResponse());
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await ext.extract({
+      sourceType: "article",
+      sourceId: "src_ok",
+      rawContent: "<p>Body</p>",
+    });
+    expect(llm.calls.length).toBe(1);
+    expect(llm.calls[0]!.responseFormat).toBe(ARTICLE_EXTRACTION_JSON_SCHEMA);
+  });
+
+  it("exposes parsed structured payload on envelope.result.parsed", async () => {
+    const llm = new MockLlmClient(defaultMockResponse());
+    const ext = new ArticleExtractor({ llmClient: llm });
+    const out = await ext.extract({
+      sourceType: "article",
+      sourceId: "src_ok",
+      rawContent: "<p>Body</p>",
+    });
+    const parsed = (
+      out.result as {
+        parsed: {
+          title: string;
+          summary: string;
+          keyClaims: ReadonlyArray<{ claim: string; evidenceQuote: string }>;
+        };
+      }
+    ).parsed;
+    expect(parsed.title).toBe("Sample headline");
+    expect(parsed.summary).toBe(
+      "A short factual summary of the article body.",
+    );
+    expect(parsed.keyClaims.length).toBe(2);
+    expect(parsed.keyClaims[0]!.claim).toBe("claim one");
+    expect(parsed.keyClaims[0]!.evidenceQuote).toBe("quote one");
+    expect(parsed.keyClaims[1]!.evidenceQuote).toBe("quote two");
+  });
+
+  it("retains raw text alongside parsed for audit / regression diffing", async () => {
+    const llm = new MockLlmClient(defaultMockResponse());
+    const ext = new ArticleExtractor({ llmClient: llm });
+    const out = await ext.extract({
+      sourceType: "article",
+      sourceId: "src_ok",
+      rawContent: "<p>Body</p>",
+    });
+    expect((out.result as { text: string }).text).toBe(
+      DEFAULT_MOCK_ARTICLE_JSON,
+    );
+  });
+
+  it("throws ArticleExtractionSchemaError when LLM text is not valid JSON", async () => {
+    const response: LlmInvokeResult = {
+      text: "not json at all",
+      vendor: "mock",
+      model: "mock-tier-2",
+      tier: 2,
+      inputTokens: 100,
+      outputTokens: 50,
+      cachedTokens: 0,
+      totalCostUsd: 0,
+    };
+    const llm = new MockLlmClient(response);
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(ArticleExtractionSchemaError);
+  });
+
+  it("throws when JSON parses but root is not an object (e.g. array)", () => {
+    expect(() => parseExtractedArticle(JSON.stringify([]))).toThrow(
+      /root must be an object/,
+    );
+  });
+
+  it("throws when 'title' is missing or not a string", () => {
+    expect(() =>
+      parseExtractedArticle(
+        JSON.stringify({ summary: "x", key_claims: [] }),
+      ),
+    ).toThrow(/missing or non-string 'title'/);
+  });
+
+  it("throws when 'summary' is missing or not a string", () => {
+    expect(() =>
+      parseExtractedArticle(JSON.stringify({ title: "t", key_claims: [] })),
+    ).toThrow(/missing or non-string 'summary'/);
+  });
+
+  it("throws when 'key_claims' is missing or not an array", () => {
+    expect(() =>
+      parseExtractedArticle(
+        JSON.stringify({ title: "t", summary: "s", key_claims: "oops" }),
+      ),
+    ).toThrow(/'key_claims' must be an array/);
+  });
+
+  it("throws when a key_claims entry is missing 'evidence_quote'", () => {
+    expect(() =>
+      parseExtractedArticle(
+        JSON.stringify({
+          title: "t",
+          summary: "s",
+          key_claims: [{ claim: "ok", evidence_quote: "q" }, { claim: "x" }],
+        }),
+      ),
+    ).toThrow(/'key_claims\[1\]\.evidence_quote' must be string/);
+  });
+
+  it("accepts an empty key_claims array (no claims is a valid extraction)", () => {
+    const result = parseExtractedArticle(
+      JSON.stringify({ title: "t", summary: "s", key_claims: [] }),
+    );
+    expect(result.keyClaims.length).toBe(0);
+  });
+
+  it("real-vendor + malformed JSON → failRun with billable usage payload preserved (AC-019 integrity)", async () => {
+    const response: LlmInvokeResult = {
+      text: "{garbage",
+      vendor: "openai",
+      model: "gpt-5-mini",
+      tier: 2,
+      inputTokens: 1500,
+      outputTokens: 800,
+      cachedTokens: 200,
+      totalCostUsd: 0.012,
+    };
+    const llm = new MockLlmClient(response, {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+    });
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(ArticleExtractionSchemaError);
+    const rows = ledgerRows();
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.status).toBe("failed");
+    // Round 4 F13 invariant — billable tokens + cost preserved
+    // on the failed row so AC-019 daily aggregation still sees
+    // the spend.
+    expect(rows[0]!.input_tokens).toBe(1500);
+    expect(rows[0]!.output_tokens).toBe(800);
+    expect(rows[0]!.cached_tokens).toBe(200);
+    expect(rows[0]!.total_cost_usd).toBe(0.012);
+  });
+
+  it("system prompt instructs the LLM to emit verbatim evidence_quote (faithfulness anchor)", () => {
+    expect(ARTICLE_EXTRACTION_SYSTEM_PROMPT).toContain("structured JSON");
+    expect(ARTICLE_EXTRACTION_SYSTEM_PROMPT).toContain("evidence_quote");
+    expect(ARTICLE_EXTRACTION_SYSTEM_PROMPT).toContain("EXACT substring");
+    expect(ARTICLE_EXTRACTION_SYSTEM_PROMPT).toContain("verbatim");
   });
 });
