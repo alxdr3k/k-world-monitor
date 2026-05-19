@@ -21,9 +21,9 @@ retention: long_term
 ai_include: true
 
 applies_to_planes:
-  - pipeline.aggregation_layer.dataset_processing
-  - pipeline.scenario_layer.dataset_input
-  - pipeline.thesis_layer.dataset_input
+  - pipeline.extraction_layer.dataset
+  - pipeline.extraction_layer.derived_metric_computer
+  - pipeline.dossier_composer.dataset_input
 forbidden_paths:
   - pipeline.llm_routing.raw_dataset_to_llm  # 1000+ rows / 50KB+ dataset 의 LLM raw 입력 금지
 ---
