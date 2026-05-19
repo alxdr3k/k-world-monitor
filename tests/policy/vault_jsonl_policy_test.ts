@@ -18,14 +18,29 @@ import {
   findVaultFiles,
   findJsonlFiles,
   assertVaultContentKinds,
+  assertPromotedClaimsAreCited,
   assertJsonlIsNotCanonical,
   checkVaultJsonlPolicy,
   VAULT_ROOTS,
+  VAULT_FILE_EXTENSIONS,
   PERMITTED_VAULT_KINDS,
   ALLOWED_JSONL_PATH_PREFIXES,
   VaultJsonlPolicyError,
   type VaultFileEntry,
 } from "../../scripts/check-vault-jsonl-policy";
+
+function makeEntry(
+  path: string,
+  type: string | null,
+  extras: { frontmatter?: Record<string, unknown>; body?: string } = {},
+): VaultFileEntry {
+  return {
+    path,
+    type,
+    frontmatter: extras.frontmatter ?? (type === null ? null : { type }),
+    body: extras.body ?? "",
+  };
+}
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 
@@ -137,6 +152,142 @@ describe("assertVaultContentKinds — INV-0012-5", () => {
     expect(PERMITTED_VAULT_KINDS.has("promotedclaim")).toBe(true);
     expect(PERMITTED_VAULT_KINDS.has("candidateclaim")).toBe(false);
     expect(PERMITTED_VAULT_KINDS.has("note")).toBe(false);
+  });
+
+  // PR #94 codex review round 1 P2 — EditorialIntent kind (ADR-0025 accepted roadmap)
+  it("accepts 'editorial_intent' type (ADR-0025 EditorialIntent kind)", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/editorial_intents/eit_abc.md", "editorial_intent"),
+    ];
+    expect(() => assertVaultContentKinds(files)).not.toThrow();
+  });
+
+  it("accepts 'EditorialIntent' / 'Editorial Intent' (normalized)", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/editorial_intents/a.md", "EditorialIntent"),
+      makeEntry("vault/editorial_intents/b.md", "Editorial Intent"),
+    ];
+    expect(() => assertVaultContentKinds(files)).not.toThrow();
+  });
+
+  it("PERMITTED_VAULT_KINDS includes 'editorialintent' (ADR-0025 added)", () => {
+    expect(PERMITTED_VAULT_KINDS.has("editorialintent")).toBe(true);
+  });
+
+  // PR #94 codex review round 1 P2 — MDX vault file support
+  it("VAULT_FILE_EXTENSIONS includes both .md and .mdx (Astro Content Collection)", () => {
+    expect(VAULT_FILE_EXTENSIONS).toContain(".md");
+    expect(VAULT_FILE_EXTENSIONS).toContain(".mdx");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assertPromotedClaimsAreCited — INV-0012-5 scenario citation enforcement
+// (PR #94 codex review round 1 P2)
+// ---------------------------------------------------------------------------
+
+describe("assertPromotedClaimsAreCited — INV-0012-5 scenario citation", () => {
+  it("passes vacuously when no promoted_claim files exist", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/sc.md", "scenario"),
+      makeEntry("vault/d.md", "dossier"),
+    ];
+    expect(() => assertPromotedClaimsAreCited(files)).not.toThrow();
+  });
+
+  it("passes when promoted_claim is cited via scenario frontmatter cited_claims[]", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/scenarios/s1.md", "scenario", {
+        frontmatter: { type: "scenario", cited_claims: ["c_abc"] },
+      }),
+      makeEntry("vault/promoted_claims/c_abc.md", "promoted_claim"),
+    ];
+    expect(() => assertPromotedClaimsAreCited(files)).not.toThrow();
+  });
+
+  it("passes when promoted_claim is cited via scenario body markdown text", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/scenarios/s1.md", "scenario", {
+        frontmatter: { type: "scenario" },
+        body: "This scenario discusses claim c_abc in detail.",
+      }),
+      makeEntry("vault/promoted_claims/c_abc.md", "promoted_claim"),
+    ];
+    expect(() => assertPromotedClaimsAreCited(files)).not.toThrow();
+  });
+
+  it("passes when promoted_claim uses frontmatter claim_id (overrides filename)", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/scenarios/s1.md", "scenario", {
+        frontmatter: { type: "scenario", cited_claims: ["c_real"] },
+      }),
+      makeEntry("vault/promoted_claims/random_slug.md", "promoted_claim", {
+        frontmatter: { type: "promoted_claim", claim_id: "c_real" },
+      }),
+    ];
+    expect(() => assertPromotedClaimsAreCited(files)).not.toThrow();
+  });
+
+  it("throws when a promoted_claim is orphaned (no scenario citation)", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/scenarios/s1.md", "scenario", {
+        frontmatter: { type: "scenario", cited_claims: ["c_other"] },
+      }),
+      makeEntry("vault/promoted_claims/c_orphan.md", "promoted_claim"),
+    ];
+    expect(() => assertPromotedClaimsAreCited(files)).toThrow(VaultJsonlPolicyError);
+    expect(() => assertPromotedClaimsAreCited(files)).toThrow(/c_orphan.*not cited/);
+  });
+
+  it("throws when promoted_claim exists but NO scenarios at all", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/promoted_claims/c_first.md", "promoted_claim"),
+    ];
+    expect(() => assertPromotedClaimsAreCited(files)).toThrow(VaultJsonlPolicyError);
+  });
+
+  it("reports every orphaned promoted_claim in one error", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/scenarios/s.md", "scenario", {
+        frontmatter: { type: "scenario", cited_claims: ["c_kept"] },
+      }),
+      makeEntry("vault/promoted_claims/c_kept.md", "promoted_claim"),
+      makeEntry("vault/promoted_claims/c_drop1.md", "promoted_claim"),
+      makeEntry("vault/promoted_claims/c_drop2.md", "promoted_claim"),
+    ];
+    let thrown: Error | null = null;
+    try {
+      assertPromotedClaimsAreCited(files);
+    } catch (e) {
+      thrown = e as Error;
+    }
+    expect(thrown).not.toBeNull();
+    expect(thrown!.message).toContain("c_drop1");
+    expect(thrown!.message).toContain("c_drop2");
+    expect(thrown!.message).not.toContain("c_kept");
+  });
+
+  it("does NOT false-match prefix substrings in scenario body (whole-word check)", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/scenarios/s.md", "scenario", {
+        frontmatter: { type: "scenario" },
+        // 'c_abcd' contains 'c_abc' as a prefix but is NOT a whole-word match.
+        body: "Reference to c_abcd here.",
+      }),
+      makeEntry("vault/promoted_claims/c_abc.md", "promoted_claim"),
+    ];
+    expect(() => assertPromotedClaimsAreCited(files)).toThrow(VaultJsonlPolicyError);
+  });
+
+  it("recognizes citation in scenario MDX body as well", () => {
+    const files: VaultFileEntry[] = [
+      makeEntry("vault/scenarios/s.mdx", "scenario", {
+        frontmatter: { type: "scenario" },
+        body: "We cite c_mdx in this MDX scenario.",
+      }),
+      makeEntry("vault/promoted_claims/c_mdx.mdx", "promoted_claim"),
+    ];
+    expect(() => assertPromotedClaimsAreCited(files)).not.toThrow();
   });
 });
 
@@ -291,5 +442,71 @@ describe("vault-jsonl policy — filesystem round-trip via tmpdir", () => {
     mkdirSync(join(tmp, "src"));
     writeFileSync(join(tmp, "src", "canonical.jsonl"), "");
     expect(() => checkVaultJsonlPolicy(tmp)).toThrow(VaultJsonlPolicyError);
+  });
+
+  // PR #94 codex review round 1 P2 — MDX vault file scan
+  it("findVaultFiles enumerates .mdx vault files (Astro publications)", () => {
+    mkdirSync(join(tmp, "vault", "publications", "blog_long"), { recursive: true });
+    writeFileSync(
+      join(tmp, "vault", "publications", "blog_long", "post-a.mdx"),
+      "---\ntype: publication\neditorial_intent_id: eit_a\n---\n\nBody.",
+    );
+    writeFileSync(
+      join(tmp, "vault", "publications", "blog_long", "draft-b.md"),
+      "---\ntype: content_draft\n---\n",
+    );
+    const files = findVaultFiles(tmp);
+    expect(files).toHaveLength(2);
+    const byPath = new Map(files.map((f) => [f.path, f.type]));
+    expect(byPath.get("vault/publications/blog_long/post-a.mdx")).toBe("publication");
+    expect(byPath.get("vault/publications/blog_long/draft-b.md")).toBe("content_draft");
+  });
+
+  it("MDX file with forbidden type fails assertVaultContentKinds (codex P2 regression)", () => {
+    mkdirSync(join(tmp, "vault"), { recursive: true });
+    writeFileSync(
+      join(tmp, "vault", "fake.mdx"),
+      "---\ntype: candidate_claim\n---\n",
+    );
+    expect(() => checkVaultJsonlPolicy(tmp)).toThrow(VaultJsonlPolicyError);
+    expect(() => checkVaultJsonlPolicy(tmp)).toThrow(/candidate_claim/);
+  });
+
+  // PR #94 codex review round 1 P2 — scenario citation enforcement via tmpdir
+  it("checkVaultJsonlPolicy throws when promoted_claim file is orphaned (no scenario citation)", () => {
+    mkdirSync(join(tmp, "vault", "scenarios"), { recursive: true });
+    mkdirSync(join(tmp, "vault", "promoted_claims"), { recursive: true });
+    writeFileSync(
+      join(tmp, "vault", "scenarios", "s.md"),
+      "---\ntype: scenario\ncited_claims:\n  - c_kept\n---\n",
+    );
+    writeFileSync(
+      join(tmp, "vault", "promoted_claims", "c_kept.md"),
+      "---\ntype: promoted_claim\n---\n",
+    );
+    writeFileSync(
+      join(tmp, "vault", "promoted_claims", "c_orphan.md"),
+      "---\ntype: promoted_claim\n---\n",
+    );
+    expect(() => checkVaultJsonlPolicy(tmp)).toThrow(VaultJsonlPolicyError);
+    expect(() => checkVaultJsonlPolicy(tmp)).toThrow(/c_orphan/);
+  });
+
+  it("checkVaultJsonlPolicy passes when all promoted_claims are cited (round-trip)", () => {
+    mkdirSync(join(tmp, "vault", "scenarios"), { recursive: true });
+    mkdirSync(join(tmp, "vault", "promoted_claims"), { recursive: true });
+    writeFileSync(
+      join(tmp, "vault", "scenarios", "s1.md"),
+      "---\ntype: scenario\ncited_claims:\n  - c_a\n  - c_b\n---\n",
+    );
+    writeFileSync(
+      join(tmp, "vault", "promoted_claims", "c_a.md"),
+      "---\ntype: promoted_claim\n---\n",
+    );
+    writeFileSync(
+      join(tmp, "vault", "promoted_claims", "c_b.md"),
+      "---\ntype: promoted_claim\n---\n",
+    );
+    expect(() => checkVaultJsonlPolicy(tmp)).not.toThrow();
   });
 });

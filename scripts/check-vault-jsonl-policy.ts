@@ -39,14 +39,17 @@ import { load as yamlLoad } from "js-yaml";
 export const VAULT_ROOTS: readonly string[] = ["vault", "docs/vault"];
 
 /**
- * Permitted `type` frontmatter values for Markdown files inside any
- * `VAULT_ROOTS` directory. Mirrors ADR-0012 INV-0012-5 statement:
- *   Document hub / Dossier / Scenario / Thesis / ContentDraft /
- *   Publication / promoted claim (scenario에 인용된).
+ * Permitted `type` frontmatter values for vault files. Mirrors ADR-0012
+ * INV-0012-5 statement (Document hub / Dossier / Scenario / Thesis /
+ * ContentDraft / Publication / promoted claim) plus ADR-0025
+ * (EditorialIntent — `vault/editorial_intents/<eit_id>.md`, added per
+ * PR #94 codex review round 1 P2; ADR-0025 IS accepted roadmap so the
+ * vault guard must allow this kind).
  *
  * Matched case-insensitively after stripping non-alphanumeric separators
  * (so `Content Draft`, `content_draft`, `content-draft` all map to
- * `contentdraft`).
+ * `contentdraft`; `Editorial Intent` / `editorial_intent` /
+ * `EditorialIntent` all map to `editorialintent`).
  */
 export const PERMITTED_VAULT_KINDS: ReadonlySet<string> = new Set([
   "documenthub",
@@ -56,7 +59,26 @@ export const PERMITTED_VAULT_KINDS: ReadonlySet<string> = new Set([
   "contentdraft",
   "publication",
   "promotedclaim",
+  "editorialintent",
 ]);
+
+/**
+ * File extensions scanned inside `VAULT_ROOTS`. ADR-0022 INV-0022-* +
+ * IMPL_PLAN PUB-1A.1 emit ContentDraft / Publication as `.mdx`
+ * (`vault/publications/blog_long/<slug>.mdx`); Astro Content Collection
+ * uses `glob("vault/publications/**\/*.{md,mdx}")`. Both extensions must
+ * be scanned (PR #94 codex review round 1 P2 — earlier `.md`-only walk
+ * let MDX vault files bypass INV-0012-5 entirely).
+ */
+export const VAULT_FILE_EXTENSIONS: readonly string[] = [".md", ".mdx"];
+
+/**
+ * Vault `type` value (normalized form) treated as a promoted-claim entry.
+ * Promoted claims have the additional INV-0012-5 obligation that they be
+ * cited by at least one scenario in the same vault.
+ */
+const PROMOTED_CLAIM_KIND = "promotedclaim";
+const SCENARIO_KIND = "scenario";
 
 /**
  * Allowlist of paths where JSONL files MAY live (INV-0012-6 — JSONL is
@@ -102,7 +124,11 @@ export class VaultJsonlPolicyError extends Error {
 // Filesystem helpers
 // ---------------------------------------------------------------------------
 
-function walk(root: string, repoRoot: string, extension: string): string[] {
+function walk(
+  root: string,
+  repoRoot: string,
+  extensions: readonly string[],
+): string[] {
   if (!existsSync(root)) return [];
   const out: string[] = [];
   const visit = (dir: string) => {
@@ -123,7 +149,7 @@ function walk(root: string, repoRoot: string, extension: string): string[] {
       }
       if (s.isDirectory()) {
         visit(full);
-      } else if (s.isFile() && name.endsWith(extension)) {
+      } else if (s.isFile() && extensions.some((ext) => name.endsWith(ext))) {
         out.push(relative(repoRoot, full));
       }
     }
@@ -136,18 +162,25 @@ function normalizeKind(raw: string): string {
   return raw.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function parseFrontmatterType(content: string): string | null {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return null;
+function parseFrontmatter(content: string): {
+  frontmatter: Record<string, unknown> | null;
+  body: string;
+} {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) return { frontmatter: null, body: content };
   let parsed: unknown;
   try {
     parsed = yamlLoad(match[1]!);
   } catch {
-    return null;
+    return { frontmatter: null, body: match[2] ?? "" };
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const typeRaw = (parsed as Record<string, unknown>).type;
-  return typeof typeRaw === "string" ? typeRaw : null;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { frontmatter: null, body: match[2] ?? "" };
+  }
+  return {
+    frontmatter: parsed as Record<string, unknown>,
+    body: match[2] ?? "",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -157,29 +190,48 @@ function parseFrontmatterType(content: string): string | null {
 export interface VaultFileEntry {
   path: string;
   type: string | null;
+  /** Parsed YAML frontmatter (production callers via findVaultFiles always
+   *  populate this; tests may omit). Used by assertPromotedClaimsAreCited
+   *  to read scenario `cited_claims:` and promoted-claim `claim_id:`. */
+  frontmatter?: Record<string, unknown> | null;
+  /** Markdown/MDX body (production callers via findVaultFiles always
+   *  populate this; tests may omit). Used by assertPromotedClaimsAreCited
+   *  for fallback whole-word scenario-body citation search. */
+  body?: string;
 }
 
 /**
- * Enumerate all `.md` files under every `VAULT_ROOTS` directory that
- * exists, parsing the YAML frontmatter `type` field for each. Returns
- * an empty array if no vault root exists (the vault has not been
- * implemented yet).
+ * Enumerate all vault files (extensions in `VAULT_FILE_EXTENSIONS` —
+ * `.md` + `.mdx`) under every `VAULT_ROOTS` directory that exists,
+ * parsing the YAML frontmatter for each. Returns an empty array if no
+ * vault root exists (the vault has not been implemented yet).
+ *
+ * MDX support (PR #94 codex round 1 P2): ADR-0022 + IMPL_PLAN PUB-1A.1
+ * emit ContentDraft / Publication as `.mdx`; both extensions must be
+ * scanned so MDX vault files cannot bypass INV-0012-5.
  */
 export function findVaultFiles(repoRoot: string): VaultFileEntry[] {
   const out: VaultFileEntry[] = [];
   for (const root of VAULT_ROOTS) {
     const full = join(repoRoot, root);
-    const files = walk(full, repoRoot, ".md");
+    const files = walk(full, repoRoot, VAULT_FILE_EXTENSIONS);
     for (const path of files) {
       const content = readFileSync(join(repoRoot, path), "utf8");
-      out.push({ path, type: parseFrontmatterType(content) });
+      const { frontmatter, body } = parseFrontmatter(content);
+      const typeRaw = frontmatter?.type;
+      out.push({
+        path,
+        type: typeof typeRaw === "string" ? typeRaw : null,
+        frontmatter,
+        body,
+      });
     }
   }
   return out;
 }
 
 /**
- * Asserts every vault Markdown file declares a `type` in
+ * Asserts every vault file (Markdown or MDX) declares a `type` in
  * `PERMITTED_VAULT_KINDS` (case-insensitive, separator-insensitive).
  *
  * Throws `VaultJsonlPolicyError` listing every offending file at once.
@@ -204,6 +256,107 @@ export function assertVaultContentKinds(files: readonly VaultFileEntry[]): void 
   }
 }
 
+/**
+ * Extract the claim ID for a `promoted_claim` vault file. Preference
+ * order: explicit `claim_id` frontmatter field (when string) → filename
+ * basename without extension (e.g., `vault/promoted_claims/c_abc123.md`
+ * → `c_abc123`). Returns null only when neither source yields a non-empty
+ * string (should not happen for well-formed promoted-claim files).
+ */
+function extractClaimId(file: VaultFileEntry): string | null {
+  const fmId = file.frontmatter?.claim_id;
+  if (typeof fmId === "string" && fmId.trim() !== "") return fmId.trim();
+  const base = file.path.split("/").pop() ?? "";
+  for (const ext of VAULT_FILE_EXTENSIONS) {
+    if (base.endsWith(ext)) return base.slice(0, -ext.length) || null;
+  }
+  return base || null;
+}
+
+/**
+ * Extract the set of claim IDs cited by a scenario file. Two sources are
+ * considered (gradual rollout — vault frontmatter format is not yet
+ * locked):
+ *   1. Frontmatter `cited_claims:` field — array of string claim IDs.
+ *      Preferred canonical form.
+ *   2. Markdown body text — any whole-word occurrence of a string
+ *      matching the claim_id pattern serves as a citation. Permits
+ *      narrative-style citations.
+ */
+function extractScenarioCitations(scenario: VaultFileEntry): Set<string> {
+  const out = new Set<string>();
+  const fmList = scenario.frontmatter?.cited_claims;
+  if (Array.isArray(fmList)) {
+    for (const item of fmList) {
+      if (typeof item === "string" && item.trim() !== "") out.add(item.trim());
+    }
+  }
+  return out;
+}
+
+/**
+ * Asserts every vault file with `type: promoted_claim` is cited by at
+ * least one vault scenario (INV-0012-5 — "scenario에 인용된 promoted
+ * claim만 둔다"). Citation is detected when the promoted claim's ID
+ * appears in either:
+ *   - any scenario's frontmatter `cited_claims:` list, OR
+ *   - any scenario's body markdown text (as a whole-word occurrence).
+ *
+ * Vacuously true when no `promoted_claim` files exist (no obligation to
+ * cite something that does not exist). Throws `VaultJsonlPolicyError`
+ * listing every orphaned promoted claim at once.
+ *
+ * PR #94 codex review round 1 P2 follow-up — earlier
+ * `assertVaultContentKinds` allowed every `promoted_claim` file
+ * unconditionally; the INV-0012-5 statement also requires that they be
+ * cited by a scenario.
+ */
+export function assertPromotedClaimsAreCited(
+  files: readonly VaultFileEntry[],
+): void {
+  const scenarios = files.filter(
+    (f) => f.type !== null && normalizeKind(f.type) === SCENARIO_KIND,
+  );
+  const promotedClaims = files.filter(
+    (f) => f.type !== null && normalizeKind(f.type) === PROMOTED_CLAIM_KIND,
+  );
+  if (promotedClaims.length === 0) return;
+
+  // Aggregate cited claim IDs from every scenario.
+  const cited = new Set<string>();
+  const scenarioBodies: { path: string; body: string }[] = [];
+  for (const sc of scenarios) {
+    for (const id of extractScenarioCitations(sc)) cited.add(id);
+    scenarioBodies.push({ path: sc.path, body: sc.body ?? "" });
+  }
+
+  const violations: string[] = [];
+  for (const claim of promotedClaims) {
+    const claimId = extractClaimId(claim);
+    if (claimId === null) {
+      violations.push(
+        `  - ${claim.path}: cannot derive claim_id (frontmatter 'claim_id' missing and filename basename empty)`,
+      );
+      continue;
+    }
+    if (cited.has(claimId)) continue;
+    // Fallback: look for whole-word occurrence in any scenario body.
+    const escaped = claimId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?:^|[^A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`);
+    const found = scenarioBodies.some(({ body }) => pattern.test(body));
+    if (!found) {
+      violations.push(
+        `  - ${claim.path}: claim_id '${claimId}' is not cited by any vault scenario (frontmatter cited_claims[] or body text)`,
+      );
+    }
+  }
+  if (violations.length > 0) {
+    throw new VaultJsonlPolicyError(
+      `INV-0012-5: promoted claim file(s) not cited by any scenario (ADR-0012 INV-0012-5 — "scenario에 인용된 promoted claim만 둔다"). Add the claim_id to a scenario's frontmatter cited_claims[] list, or reference it in the scenario body, or remove the promoted-claim vault file:\n${violations.join("\n")}`,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // INV-0012-6 — JSONL not canonical store
 // ---------------------------------------------------------------------------
@@ -213,7 +366,7 @@ export function assertVaultContentKinds(files: readonly VaultFileEntry[]): void 
  * `.git` / build dirs). Returns paths relative to `repoRoot`.
  */
 export function findJsonlFiles(repoRoot: string): string[] {
-  return walk(repoRoot, repoRoot, ".jsonl");
+  return walk(repoRoot, repoRoot, [".jsonl"]);
 }
 
 function isUnderAllowedPrefix(path: string): boolean {
@@ -254,6 +407,7 @@ export function assertJsonlIsNotCanonical(files: readonly string[]): void {
 export function checkVaultJsonlPolicy(repoRoot: string): void {
   const vaultFiles = findVaultFiles(repoRoot);
   assertVaultContentKinds(vaultFiles);
+  assertPromotedClaimsAreCited(vaultFiles);
   const jsonlFiles = findJsonlFiles(repoRoot);
   assertJsonlIsNotCanonical(jsonlFiles);
 }

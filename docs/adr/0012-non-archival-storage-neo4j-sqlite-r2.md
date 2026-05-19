@@ -64,10 +64,11 @@ invariants:
       - src/storage/r2/policy.ts:checkPermittedPrefix
       - src/storage/source-registry/seed.ts:seedSources
   - id: INV-0012-5
-    statement: Markdown vault에는 Document hub, Dossier, Scenario, Thesis, ContentDraft, Publication, scenario에 인용된 promoted claim만 둔다. candidate claim 자동 markdown 생성은 금지 (ADR-0004 INV-0004-3 보존)
+    statement: Markdown vault에는 Document hub, Dossier, Scenario, Thesis, ContentDraft, Publication, scenario에 인용된 promoted claim만 둔다. candidate claim 자동 markdown 생성은 금지 (ADR-0004 INV-0004-3 보존). EditorialIntent는 ADR-0025에서 추가된 vault kind (10-stage model)이며 본 invariant의 permitted kinds에 포함된다.
     status: active
     cross_ref_code:
       - scripts/check-vault-jsonl-policy.ts:assertVaultContentKinds
+      - scripts/check-vault-jsonl-policy.ts:assertPromotedClaimsAreCited
   - id: INV-0012-6
     statement: JSONL은 (a) import/export 포맷, (b) human-readable audit export(월별 또는 발행 시점) 용도만 사용한다. canonical 저장소 아님
     status: active
