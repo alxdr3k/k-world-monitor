@@ -61,23 +61,33 @@ const HTML_ENTITY_MAP: Record<string, string> = {
 
 function decodeBasicEntities(text: string): string {
   let out = text;
-  for (const [entity, replacement] of Object.entries(HTML_ENTITY_MAP)) {
-    out = out.replaceAll(entity, replacement);
+  // PR #97 codex round 3 P2 — iterate decode pass until stable so that
+  // mixed-case double-encoded payloads like `&AMP;lt;script&AMP;gt;...`
+  // (which need two passes: first `&AMP;` → `&`, then `&lt;` → `<`)
+  // resolve fully before the second DANGEROUS_TAGS pass. Cap iterations
+  // to prevent infinite loops on degenerate self-referential entities.
+  const MAX_DECODE_ITER = 5;
+  for (let iter = 0; iter < MAX_DECODE_ITER; iter++) {
+    const before = out;
+    for (const [entity, replacement] of Object.entries(HTML_ENTITY_MAP)) {
+      out = out.replaceAll(entity, replacement);
+    }
+    // Numeric entities: &#NN; (decimal). Case-insensitive on `x` prefix
+    // (HTML allows `&#x` or `&#X`).
+    out = out.replace(/&#(\d+);/g, (_, code: string) => {
+      const n = Number(code);
+      return Number.isInteger(n) && n >= 0 && n < 0x110000
+        ? String.fromCodePoint(n)
+        : "";
+    });
+    out = out.replace(/&#[xX]([0-9a-fA-F]+);/g, (_, code: string) => {
+      const n = parseInt(code, 16);
+      return Number.isInteger(n) && n >= 0 && n < 0x110000
+        ? String.fromCodePoint(n)
+        : "";
+    });
+    if (out === before) break; // stable
   }
-  // Numeric entities: &#NN; (decimal). Case-insensitive on `x` prefix
-  // (HTML allows `&#x` or `&#X`).
-  out = out.replace(/&#(\d+);/g, (_, code: string) => {
-    const n = Number(code);
-    return Number.isInteger(n) && n >= 0 && n < 0x110000
-      ? String.fromCodePoint(n)
-      : "";
-  });
-  out = out.replace(/&#[xX]([0-9a-fA-F]+);/g, (_, code: string) => {
-    const n = parseInt(code, 16);
-    return Number.isInteger(n) && n >= 0 && n < 0x110000
-      ? String.fromCodePoint(n)
-      : "";
-  });
   return out;
 }
 
@@ -127,6 +137,20 @@ const QUOTE_AWARE_TAG_STRIP =
   /<\/?[a-zA-Z][^"'>]*(?:(?:"[^"]*"|'[^']*')[^"'>]*)*>/g;
 
 /**
+ * Fail-closed fallback regex for malformed tag openers that the
+ * quote-aware regex fails to match — typically unclosed attribute
+ * quotes like `<img alt="Inj>Caption` where the `"` opens but never
+ * closes (PR #97 codex round 3 P2 — earlier balanced-quote regex left
+ * the attribute payload visible to the LLM).
+ *
+ * Matches `<` + optional `/` + alpha + greedy non-`>` body up to the
+ * next `>` OR end-of-input (fail-closed drop). Apply AFTER the quote-
+ * aware pass so well-formed quoted attributes are not preemptively
+ * truncated at quoted `>` characters.
+ */
+const MALFORMED_TAG_FALLBACK = /<\/?[a-zA-Z][\s\S]*?(?:>|$)/g;
+
+/**
  * Convert HTML to LLM-safe plain text per INV-0029-5.
  *
  * Pipeline (PR #97 codex review round 2 — entity decode + dual generic
@@ -160,19 +184,29 @@ export function htmlToText(html: string): string {
 
   let out = html;
 
-  // 1. Strip HTML comments (may contain `<script>` etc. as text),
-  //    DOCTYPE / CDATA declarations, and XML processing instructions.
+  // 1. Strip HTML comments / CDATA / DOCTYPE / processing instructions.
   //    These all start with `<!` or `<?` which the quote-aware tag
   //    stripper does NOT match (it requires alpha after `<`).
-  out = out.replace(/<!--[\s\S]*?-->/g, "");  // comments
-  out = out.replace(/<![^>]*>/g, "");          // DOCTYPE / CDATA
-  out = out.replace(/<\?[\s\S]*?\?>/g, "");    // processing instructions (XML / PHP-style)
+  //    Order matters: dedicated CDATA pattern BEFORE generic decl
+  //    strip so that CDATA-internal `>` characters don't truncate
+  //    the block at the first `>` (PR #97 codex round 3 P2).
+  out = out.replace(/<!--[\s\S]*?-->/g, "");                  // closed comments
+  out = out.replace(/<!--[\s\S]*$/g, "");                     // orphan unclosed comment — fail-closed drop to EOF (PR #97 codex round 3 P2)
+  out = out.replace(/<!\[CDATA\[[\s\S]*?\]\]>/gi, "");        // closed CDATA (PR #97 codex round 3 P2)
+  out = out.replace(/<!\[CDATA\[[\s\S]*$/gi, "");             // orphan unclosed CDATA — fail-closed drop to EOF
+  out = out.replace(/<![^>]*>/g, "");                          // remaining DOCTYPE / declarations
+  out = out.replace(/<\?[\s\S]*?\?>/g, "");                    // closed processing instructions (XML / PHP-style)
+  out = out.replace(/<\?[\s\S]*$/g, "");                       // orphan unclosed processing instruction — fail-closed
 
   // 2. First DANGEROUS_TAGS removal pass (raw source).
   out = removeDangerousTags(out);
 
   // 3. First quote-aware generic tag strip — real HTML markup.
   out = out.replace(QUOTE_AWARE_TAG_STRIP, " ");
+  // 3a. Fail-closed fallback for malformed quoted tags (PR #97 codex
+  //     round 3 P2 — e.g. `<img alt="Inj>Caption` where the unbalanced
+  //     `"` makes the quote-aware regex fail).
+  out = out.replace(MALFORMED_TAG_FALLBACK, " ");
 
   // 4. Decode entities — may surface entity-encoded HTML tags.
   out = decodeBasicEntities(out);
@@ -185,6 +219,10 @@ export function htmlToText(html: string): string {
   //    aware regex requires `<` + alpha/`/alpha` so legitimate decoded
   //    user content like `1 < 2 > 0` is preserved.
   out = out.replace(QUOTE_AWARE_TAG_STRIP, " ");
+  // 6a. Fail-closed fallback for malformed decoded tags (PR #97 codex
+  //     round 3 P2 — entity-decoded payload like `<img alt="Inj>...`
+  //     where unbalanced quote leaves the quote-aware regex stuck).
+  out = out.replace(MALFORMED_TAG_FALLBACK, " ");
 
   // 7. Collapse whitespace; trim.
   out = out.replace(/[\s ]+/g, " ").trim();
