@@ -371,21 +371,23 @@ export class OpenAIClient implements LlmClient {
     const resolvedModel =
       data.model && data.model.trim().length > 0 ? data.model : this.model;
 
-    // PR #100 codex round 4 F12 — `usage` MUST be present with at
-    // least one of prompt_tokens / completion_tokens. Previous
-    // wiring coalesced everything to 0 → finite `totalCostUsd = 0`
-    // → ArticleExtractor's `totalCostUsd === undefined` guard
-    // bypassed → billable call recorded as free. Now: missing usage
-    // is treated as an incomplete response so the ledger row goes
-    // through failRun (no cost recorded — we genuinely don't know
-    // the cost). Operator decides retry / manual review path.
+    // PR #100 codex round 4 F12 + round 5 F16 — `usage` MUST be
+    // present with BOTH `prompt_tokens` AND `completion_tokens`.
+    // Round 4's OR check let `prompt_tokens`-only responses
+    // through, which combined with `?? 0` undercounted output cost
+    // whenever a real completion was generated. Round 5 enforces
+    // AND: any missing usage counter on the success or
+    // billable-failure path is treated as incomplete so the row
+    // goes through failRun (no cost coalescing). Operator decides
+    // retry / manual review path.
     const usageBlock = data.usage;
     const inputTokens = usageBlock?.prompt_tokens;
     const outputTokens = usageBlock?.completion_tokens;
     const cachedTokens = usageBlock?.prompt_tokens_details?.cached_tokens;
     const usagePresent =
       usageBlock !== undefined &&
-      (inputTokens !== undefined || outputTokens !== undefined);
+      inputTokens !== undefined &&
+      outputTokens !== undefined;
 
     // PR #100 codex round 3 P2 — reject malformed responses where
     // `choices` is empty or the first choice lacks `message.content`.
@@ -393,23 +395,34 @@ export class OpenAIClient implements LlmClient {
     // truncated / filtered completions), carry it through to the
     // incomplete-error payload so the extractor can record the
     // billable cost on the failed ledger row instead of NULLing it.
+    // PR #100 codex round 5 F15 — every incomplete-error usage
+    // payload includes the resolved snapshot so the failRun path
+    // can rewrite `run_ledger.model_id` from the request-time
+    // alias to the actual snapshot that produced the billable
+    // call. Without this, failed billable rows would keep the
+    // alias and lose the reproducibility anchor that completed
+    // rows already preserve via completeRun.modelId.
+    const buildBillableUsage = () =>
+      usagePresent
+        ? {
+            inputTokens,
+            outputTokens,
+            cachedTokens,
+            totalCostUsd: computeTotalCostUsd(resolvedModel, {
+              inputTokens,
+              outputTokens,
+              cachedTokens,
+            }),
+            modelId: resolvedModel,
+          }
+        : undefined;
+
     const firstChoice = data.choices?.[0];
     if (firstChoice === undefined) {
       throw new OpenAIIncompleteCompletionError(
         "missing_choice",
         "",
-        usagePresent
-          ? {
-              inputTokens,
-              outputTokens,
-              cachedTokens,
-              totalCostUsd: computeTotalCostUsd(resolvedModel, {
-                inputTokens,
-                outputTokens,
-                cachedTokens,
-              }),
-            }
-          : undefined,
+        buildBillableUsage(),
       );
     }
     const rawContent = firstChoice.message?.content;
@@ -417,18 +430,7 @@ export class OpenAIClient implements LlmClient {
       throw new OpenAIIncompleteCompletionError(
         "missing_content",
         "",
-        usagePresent
-          ? {
-              inputTokens,
-              outputTokens,
-              cachedTokens,
-              totalCostUsd: computeTotalCostUsd(resolvedModel, {
-                inputTokens,
-                outputTokens,
-                cachedTokens,
-              }),
-            }
-          : undefined,
+        buildBillableUsage(),
       );
     }
     const text = rawContent;
@@ -445,22 +447,11 @@ export class OpenAIClient implements LlmClient {
       "function_call",
     ]);
     if (finishReason && incompleteReasons.has(finishReason)) {
-      // F13: preserve billable usage on the failed run.
+      // F13 + F15: preserve billable usage + resolved snapshot.
       throw new OpenAIIncompleteCompletionError(
         finishReason,
         text,
-        usagePresent
-          ? {
-              inputTokens,
-              outputTokens,
-              cachedTokens,
-              totalCostUsd: computeTotalCostUsd(resolvedModel, {
-                inputTokens,
-                outputTokens,
-                cachedTokens,
-              }),
-            }
-          : undefined,
+        buildBillableUsage(),
       );
     }
 

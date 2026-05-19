@@ -285,6 +285,40 @@ describe("failRun cost-preserving payload (PR #100 round 4 F13)", () => {
       "must be a non-negative integer",
     );
   });
+
+  it("rewrites model_id when modelId option supplied (PR #100 round 5 F15)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(id, {
+      totalCostUsd: 0.005,
+      inputTokens: 100,
+      outputTokens: 50,
+      modelId: "gpt-5-mini-2025-08-07",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT * FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    expect(row.status).toBe("failed");
+    expect(row.model_id).toBe("gpt-5-mini-2025-08-07");
+    expect(row.total_cost_usd).toBe(0.005);
+  });
+
+  it("rejects blank modelId in failRun payload", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    expect(() => failRun(id, { modelId: "   " })).toThrow(
+      "modelId, when supplied, must be a non-empty string",
+    );
+  });
 });
 
 describe("completeRun resolved-model rewrite (PR #100 P2)", () => {
@@ -452,6 +486,64 @@ describe("getDailyCostUsd", () => {
     completeRun(id, { totalCostUsd: 0.10 });
     expect(getDailyCostUsd("2020-01-01")).toBe(0);
     expect(getDailyCostUsd(today)).toBeCloseTo(0.10, 6);
+  });
+});
+
+describe("getDailyCostUsd includes billable failed rows (PR #100 round 5 F17)", () => {
+  function startAndFailWithCost(cost: number, completedDate: string): void {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(id, { totalCostUsd: cost });
+    // Backdate completed_at so the test isolates the bucket.
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    getDb()
+      .prepare("UPDATE run_ledger SET completed_at = ? WHERE run_id = ?")
+      .run(`${completedDate}T12:00:00.000Z`, id);
+  }
+
+  function startAndCompleteWithCost(cost: number, completedDate: string): void {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    completeRun(id, { totalCostUsd: cost });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    getDb()
+      .prepare("UPDATE run_ledger SET completed_at = ? WHERE run_id = ?")
+      .run(`${completedDate}T12:00:00.000Z`, id);
+  }
+
+  it("getDailyCostUsd sums BOTH completed and billable-failed (status-agnostic)", () => {
+    startAndCompleteWithCost(0.01, "2026-05-19");
+    startAndFailWithCost(0.005, "2026-05-19");
+    // Failed row with NULL cost (legacy) must NOT contribute.
+    const noCostId = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+    });
+    failRun(noCostId);
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    getDb()
+      .prepare("UPDATE run_ledger SET completed_at = ? WHERE run_id = ?")
+      .run("2026-05-19T12:00:00.000Z", noCostId);
+    expect(getDailyCostUsd("2026-05-19")).toBeCloseTo(0.015, 6);
+  });
+
+  it("getDailyCostBreakdown counts billable failed rows in runCount", () => {
+    startAndCompleteWithCost(0.01, "2026-05-19");
+    startAndFailWithCost(0.005, "2026-05-19");
+    const rows = getDailyCostBreakdown("2026-05-19");
+    const openai = rows.find((r) => r.vendor === "openai")!;
+    expect(openai.totalCostUsd).toBeCloseTo(0.015, 6);
+    expect(openai.runCount).toBe(2);
   });
 });
 

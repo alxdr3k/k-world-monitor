@@ -608,10 +608,25 @@ describe("OpenAIClient.invoke — missing usage rejection (PR #100 round 4 F12)"
     ).rejects.toThrow(OpenAIIncompleteCompletionError);
   });
 
-  it("accepts usage with prompt_tokens only (completion may be 0)", async () => {
+  it("rejects usage with prompt_tokens only — completion_tokens REQUIRED (PR #100 round 5 F16)", async () => {
+    // Round 5 F16 — round 4 accepted prompt-only (OR check) which
+    // undercounted output cost when the response text proved
+    // completion tokens were generated. Round 5 requires AND:
+    // both counters must be present.
     const { fetch } = makeFetchMock(200, {
       choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
       usage: { prompt_tokens: 100 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIIncompleteCompletionError);
+  });
+
+  it("accepts usage with prompt_tokens=N + completion_tokens=0 (valid empty stop)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 100, completion_tokens: 0 },
     });
     const client = new OpenAIClient({ apiKey: "sk", fetch });
     const result = await client.invoke({
@@ -619,8 +634,9 @@ describe("OpenAIClient.invoke — missing usage rejection (PR #100 round 4 F12)"
       userPrompt: "u",
       tier: 2,
     });
-    expect(result.text).toBe("ok");
+    expect(result.text).toBe("");
     expect(result.inputTokens).toBe(100);
+    expect(result.outputTokens).toBe(0);
   });
 });
 
@@ -687,6 +703,31 @@ describe("OpenAIClient.invoke — incomplete completions preserve billable usage
       const incomplete = err as OpenAIIncompleteCompletionError;
       expect(incomplete.finishReason).toBe("missing_content");
       expect(incomplete.usage).toBeUndefined();
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
+  });
+
+  it("incomplete-error usage carries resolved-model snapshot (PR #100 round 5 F15)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      model: "gpt-5-mini-2025-08-07",
+      choices: [
+        { message: { content: "truncated" }, finish_reason: "length" },
+      ],
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
+    });
+    const client = new OpenAIClient({
+      apiKey: "sk",
+      tier: 2,
+      model: "gpt-5-mini",
+      fetch,
+    });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      const incomplete = err as OpenAIIncompleteCompletionError;
+      expect(incomplete.usage).toBeDefined();
+      expect(incomplete.usage!.modelId).toBe("gpt-5-mini-2025-08-07");
       return;
     }
     throw new Error("expected OpenAIIncompleteCompletionError");

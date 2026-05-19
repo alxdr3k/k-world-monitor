@@ -190,6 +190,11 @@ export class ArticleExtractor implements Extractor {
     } catch (err) {
       if (runId !== undefined) {
         if (err instanceof LlmIncompleteResultError && err.usage) {
+          // PR #100 codex round 5 F15 — also forward the resolved
+          // model snapshot so the failed billable row keeps the
+          // reproducibility anchor (matches completeRun.modelId
+          // rewrite for successful rows).
+          const startedModelId = this.deps.llmClient.model;
           failRun(runId, {
             ...(err.usage.inputTokens !== undefined
               ? { inputTokens: err.usage.inputTokens }
@@ -202,6 +207,9 @@ export class ArticleExtractor implements Extractor {
               : {}),
             ...(err.usage.totalCostUsd !== undefined
               ? { totalCostUsd: err.usage.totalCostUsd }
+              : {}),
+            ...(err.usage.modelId && err.usage.modelId !== startedModelId
+              ? { modelId: err.usage.modelId }
               : {}),
           });
         } else {

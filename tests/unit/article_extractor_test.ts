@@ -730,6 +730,38 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
     expect(row.cached_tokens).toBe(50);
   });
 
+  it("LlmIncompleteResultError with resolved-model snapshot → failRun rewrites model_id (PR #100 round 5 F15)", async () => {
+    const incompleteErr = new LlmIncompleteResultError(
+      "length",
+      "truncated",
+      {
+        inputTokens: 1000,
+        outputTokens: 2000,
+        totalCostUsd: 0.005,
+        modelId: "gpt-5-mini-2025-08-07",
+      },
+    );
+    const llm = new MockLlmClient(defaultMockResponse(), {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+      throwOnInvoke: incompleteErr,
+    });
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(LlmIncompleteResultError);
+    const row = ledgerRows()[0]!;
+    expect(row.status).toBe("failed");
+    // model_id rewritten from request-time alias to dated snapshot.
+    expect(row.model_id).toBe("gpt-5-mini-2025-08-07");
+    expect(row.total_cost_usd).toBe(0.005);
+  });
+
   it("LlmIncompleteResultError without usage → failRun with NULL cost (defensive)", async () => {
     const incompleteErr = new LlmIncompleteResultError(
       "missing_content",

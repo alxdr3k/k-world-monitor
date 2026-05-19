@@ -206,6 +206,17 @@ export interface FailRunInput {
   cachedTokens?: number;
   /** Optional billable cost. Must be a finite non-negative number when supplied. */
   totalCostUsd?: number;
+  /**
+   * Optional resolved-model snapshot. Same rewrite semantics as
+   * `CompleteRunInput.modelId` — when the request was issued with
+   * an alias (e.g. `gpt-5-mini`) and the vendor response carried a
+   * dated snapshot (e.g. `gpt-5-mini-2025-08-07`) before the
+   * incomplete-completion error fired, the failed row's `model_id`
+   * is rewritten to the resolved value so failed billable rows
+   * retain the reproducibility anchor (PR #100 codex round 5 F15).
+   * Must be non-empty when supplied.
+   */
+  modelId?: string;
 }
 
 export function failRun(runId: string, output?: FailRunInput): void {
@@ -236,33 +247,56 @@ export function failRun(runId: string, output?: FailRunInput): void {
           `failRun: cachedTokens must be a non-negative integer, got ${output.cachedTokens}`
         );
     }
+    if (output.modelId !== undefined && !output.modelId.trim())
+      throw new Error("failRun: modelId, when supplied, must be a non-empty string");
   }
 
   const now = new Date().toISOString();
-  const result = output !== undefined
-    ? getDb()
-        .prepare(
-          `UPDATE run_ledger
-           SET status = 'failed', completed_at = ?,
-               input_tokens = ?, output_tokens = ?, cached_tokens = ?,
-               total_cost_usd = ?
-           WHERE run_id = ? AND status = 'running'`
-        )
-        .run(
-          now,
-          output.inputTokens ?? null,
-          output.outputTokens ?? null,
-          output.cachedTokens ?? null,
-          output.totalCostUsd ?? null,
-          runId
-        )
-    : getDb()
-        .prepare(
-          `UPDATE run_ledger
-           SET status = 'failed', completed_at = ?
-           WHERE run_id = ? AND status = 'running'`
-        )
-        .run(now, runId);
+  let result;
+  if (output === undefined) {
+    result = getDb()
+      .prepare(
+        `UPDATE run_ledger
+         SET status = 'failed', completed_at = ?
+         WHERE run_id = ? AND status = 'running'`
+      )
+      .run(now, runId);
+  } else if (output.modelId !== undefined) {
+    result = getDb()
+      .prepare(
+        `UPDATE run_ledger
+         SET status = 'failed', completed_at = ?,
+             input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+             total_cost_usd = ?, model_id = ?
+         WHERE run_id = ? AND status = 'running'`
+      )
+      .run(
+        now,
+        output.inputTokens ?? null,
+        output.outputTokens ?? null,
+        output.cachedTokens ?? null,
+        output.totalCostUsd ?? null,
+        output.modelId,
+        runId
+      );
+  } else {
+    result = getDb()
+      .prepare(
+        `UPDATE run_ledger
+         SET status = 'failed', completed_at = ?,
+             input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+             total_cost_usd = ?
+         WHERE run_id = ? AND status = 'running'`
+      )
+      .run(
+        now,
+        output.inputTokens ?? null,
+        output.outputTokens ?? null,
+        output.cachedTokens ?? null,
+        output.totalCostUsd ?? null,
+        runId
+      );
+  }
   if (result.changes === 0) {
     throw new Error(`failRun: no running row found for run_id=${runId}`);
   }
@@ -283,11 +317,12 @@ function validateDate(date: string, caller: string): void {
     throw new Error(`${caller}: date '${date}' is not a valid calendar date`);
 }
 
-// Returns total cost in USD for all completed runs on a UTC calendar date (YYYY-MM-DD).
-// Filters by completed_at so cross-midnight runs are attributed to the day they billed.
-// Uses a half-open range (>= date AND < next-day) to allow the composite index on
-// (completed_at, vendor) to be used efficiently — LIKE does not reliably use B-tree indexes.
-// Optional vendor filter.
+// Returns total cost in USD for all billable runs on a UTC calendar date (YYYY-MM-DD).
+// PR #100 codex round 5 F17 — filter `total_cost_usd IS NOT NULL` instead of
+// `status = 'completed'` so billable-but-failed rows (truncated/filtered LLM
+// completions where failRun preserved the cost via F13) are included in the
+// AC-019 daily total. Running rows are still excluded because their cost is
+// always NULL until startRun → completeRun/failRun finalize.
 export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
   validateDate(date, "getDailyCostUsd");
   if (vendor !== undefined && !VALID_VENDORS.has(vendor))
@@ -298,20 +333,25 @@ export function getDailyCostUsd(date: string, vendor?: RunVendor): number {
         .prepare(
           `SELECT COALESCE(SUM(total_cost_usd), 0) AS total
            FROM run_ledger
-           WHERE completed_at >= ? AND completed_at < ? AND vendor = ? AND status = 'completed'`
+           WHERE completed_at >= ? AND completed_at < ? AND vendor = ?
+             AND total_cost_usd IS NOT NULL`
         )
         .get(date, nextDay, vendor) as { total: number })
     : (getDb()
         .prepare(
           `SELECT COALESCE(SUM(total_cost_usd), 0) AS total
            FROM run_ledger
-           WHERE completed_at >= ? AND completed_at < ? AND status = 'completed'`
+           WHERE completed_at >= ? AND completed_at < ?
+             AND total_cost_usd IS NOT NULL`
         )
         .get(date, nextDay) as { total: number });
   return row.total;
 }
 
 // Returns per-vendor daily cost breakdown for a UTC calendar date.
+// PR #100 codex round 5 F17 — same `total_cost_usd IS NOT NULL` filter as
+// getDailyCostUsd; runCount counts billable rows (completed + billable
+// failed), not just completed.
 export function getDailyCostBreakdown(date: string): DailyCostRow[] {
   validateDate(date, "getDailyCostBreakdown");
   const nextDay = nextDateString(date);
@@ -322,7 +362,8 @@ export function getDailyCostBreakdown(date: string): DailyCostRow[] {
               COALESCE(SUM(total_cost_usd), 0) AS totalCostUsd,
               COUNT(*) AS runCount
        FROM run_ledger
-       WHERE completed_at >= ? AND completed_at < ? AND status = 'completed'
+       WHERE completed_at >= ? AND completed_at < ?
+         AND total_cost_usd IS NOT NULL
        GROUP BY vendor`
     )
     .all(date, nextDay) as DailyCostRow[];

@@ -113,6 +113,15 @@ export class LlmIncompleteResultError extends Error {
       readonly outputTokens?: number;
       readonly cachedTokens?: number;
       readonly totalCostUsd?: number;
+      /**
+       * Resolved model snapshot (e.g. `gpt-5-mini-2025-08-07`) for
+       * the failed billable call. When provided, the extractor's
+       * failRun path rewrites `run_ledger.model_id` from the
+       * request-time alias to this snapshot so failed billable rows
+       * retain the same reproducibility anchor as completed rows
+       * (PR #100 codex round 5 F15).
+       */
+      readonly modelId?: string;
     },
   ) {
     super(
