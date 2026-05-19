@@ -50,6 +50,24 @@ export interface LlmInvokeParams {
    * its own per-tier default.
    */
   readonly maxOutputTokens?: number;
+  /**
+   * Sampling temperature override (DEC-010 §8 + PR #100 codex
+   * round 6 F19). Concrete clients default to `0` for extract /
+   * cite_check / thesis stages; scenario branch passes `0.3`. Mock
+   * clients ignore it.
+   */
+  readonly temperature?: number;
+  /**
+   * Structured-output schema (DEC-010 §8 strict schema invariant).
+   * When supplied, concrete clients map it to the vendor's native
+   * structured-output API (OpenAI `response_format: json_schema`,
+   * Anthropic `tool_choice` with strict input schema, Google
+   * `responseSchema`). PR #100 codex round 6 F19 — surface added
+   * so future ArticleExtractor schema can flow through without
+   * client changes. Caller owns the schema definition. Free-form
+   * text remains the default when omitted.
+   */
+  readonly responseFormat?: Record<string, unknown>;
 }
 
 export interface LlmInvokeResult {

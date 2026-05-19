@@ -17,12 +17,15 @@ import { describe, it, expect } from "bun:test";
 import {
   computeTotalCostUsd,
   OPENAI_PRICING_USD_PER_1M_TOKENS,
+  OPENAI_RESPONSES_API_ONLY_MODELS,
   OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS,
   OPENAI_TIER_DEFAULT_MODEL,
   OpenAIApiError,
   OpenAIClient,
   OpenAIIncompleteCompletionError,
   OpenAIPricingUnknownError,
+  OpenAIRequestTimeoutError,
+  OpenAIResponsesApiOnlyError,
   resolveOpenAIPricingKey,
 } from "../../src/extraction/llm/openai-client";
 import type { LlmClient } from "../../src/extraction/llm/client";
@@ -244,21 +247,19 @@ describe("OpenAIClient.invoke — request shape", () => {
   });
 
   it("per-tier default max_completion_tokens varies by tier", async () => {
-    // Tier 0/1 require explicit `model` (round 3 P1) — pass a
-    // placeholder so the cap default behavior is still exercised.
-    const tierCases: Array<{ tier: 0 | 1 | 2 | 3; model?: string }> = [
-      { tier: 0, model: "gpt-5.5-pro-extended-thinking" },
-      { tier: 1, model: "gpt-5.5-pro" },
-      { tier: 2 },
-      { tier: 3 },
-    ];
+    // PR #100 codex round 6 — Tier 0/1 default placeholders are
+    // responses-API-only and can no longer be constructed. Only
+    // exercise Tier 2/3 here; Tier 0/1 cap values are still
+    // asserted via the constant.
+    expect(OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS[0]).toBeGreaterThan(0);
+    expect(OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS[1]).toBeGreaterThan(0);
+    const tierCases: Array<{ tier: 2 | 3 }> = [{ tier: 2 }, { tier: 3 }];
     for (const tc of tierCases) {
       const { fetch, calls } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
       const client = new OpenAIClient({
         apiKey: "sk",
         tier: tc.tier,
         fetch,
-        ...(tc.model ? { model: tc.model } : {}),
       });
       await client.invoke({
         systemPrompt: "s",
@@ -439,12 +440,17 @@ describe("computeTotalCostUsd — pricing math", () => {
     ).toThrow(OpenAIPricingUnknownError);
   });
 
-  it("pricing table contains all 4 default tier models (DEC-010 routing)", () => {
-    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.5-pro-extended-thinking"]).toBeDefined();
-    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.5-pro"]).toBeDefined();
+  it("pricing table contains only callable Chat-Completions defaults (PR #100 round 6 F22 — pro placeholders dropped)", () => {
+    // Round 6 F22 removed gpt-5.5-pro* / gpt-5-pro* placeholder
+    // entries because the placeholders were 6-8x below documented
+    // OpenAI list prices. Pro-tier callers now hit
+    // OpenAIResponsesApiOnlyError (known set) or
+    // OpenAIPricingUnknownError at construction.
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5"]).toBeDefined();
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-mini"]).toBeDefined();
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-nano"]).toBeDefined();
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]).toBeUndefined();
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.5-pro"]).toBeUndefined();
   });
 });
 
@@ -455,25 +461,14 @@ describe("computeTotalCostUsd — pricing math", () => {
 describe("OpenAIClient — Tier 0/1 default routing (PR #100 P2)", () => {
   it("Tier 0 default = gpt-5.5-pro-extended-thinking placeholder (DEC-010 routing)", () => {
     expect(OPENAI_TIER_DEFAULT_MODEL[0]).toBe("gpt-5.5-pro-extended-thinking");
-    // Construction with explicit override (round 3 P1 — Tier 0
-    // requires explicit `model` because default placeholder is not
-    // a callable Chat Completions ID).
-    const client = new OpenAIClient({
-      apiKey: "sk",
-      tier: 0,
-      model: "gpt-5.5-pro-extended-thinking",
-    });
-    expect(client.model).toBe("gpt-5.5-pro-extended-thinking");
+    // PR #100 codex round 6 — passing this placeholder ID now
+    // rejects at construction (responses-API-only set). Tier 0
+    // callers must wait for the Responses API client.
   });
 
   it("Tier 1 default = gpt-5.5-pro placeholder (DEC-010 routing)", () => {
     expect(OPENAI_TIER_DEFAULT_MODEL[1]).toBe("gpt-5.5-pro");
-    const client = new OpenAIClient({
-      apiKey: "sk",
-      tier: 1,
-      model: "gpt-5.5-pro",
-    });
-    expect(client.model).toBe("gpt-5.5-pro");
+    // Same as above — placeholder + responses-API-only reject.
   });
 
   it("Tier 0 and Tier 1 placeholders are DIFFERENT (no collapse to gpt-5)", () => {
@@ -497,6 +492,266 @@ describe("OpenAIClient — Tier 0/1 default routing (PR #100 P2)", () => {
   it("Tier 2 / Tier 3 construct without model (defaults remain callable)", () => {
     expect(() => new OpenAIClient({ apiKey: "sk", tier: 2 })).not.toThrow();
     expect(() => new OpenAIClient({ apiKey: "sk", tier: 3 })).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 6 — Responses-API-only model rejection (F20)
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient — Responses-API-only model rejection (PR #100 round 6 F20)", () => {
+  it("rejects gpt-5-pro at construction (Responses-API only)", () => {
+    expect(
+      () =>
+        new OpenAIClient({ apiKey: "sk", tier: 0, model: "gpt-5-pro" }),
+    ).toThrow(OpenAIResponsesApiOnlyError);
+  });
+
+  it("rejects gpt-5.2-pro at construction", () => {
+    expect(
+      () =>
+        new OpenAIClient({ apiKey: "sk", tier: 0, model: "gpt-5.2-pro" }),
+    ).toThrow(OpenAIResponsesApiOnlyError);
+  });
+
+  it("rejects gpt-5.5-pro and gpt-5.5-pro-extended-thinking", () => {
+    expect(
+      () =>
+        new OpenAIClient({ apiKey: "sk", tier: 0, model: "gpt-5.5-pro" }),
+    ).toThrow(OpenAIResponsesApiOnlyError);
+    expect(
+      () =>
+        new OpenAIClient({
+          apiKey: "sk",
+          tier: 0,
+          model: "gpt-5.5-pro-extended-thinking",
+        }),
+    ).toThrow(OpenAIResponsesApiOnlyError);
+  });
+
+  it("known set covers documented OpenAI pro SKUs", () => {
+    expect(OPENAI_RESPONSES_API_ONLY_MODELS.has("gpt-5-pro")).toBe(true);
+    expect(OPENAI_RESPONSES_API_ONLY_MODELS.has("gpt-5.2-pro")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 6 — pre-API pricing validation (F23)
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient — constructor pricing validation (PR #100 round 6 F23)", () => {
+  it("rejects construction when model has no pricing entry (pre-API fail-fast)", () => {
+    expect(
+      () =>
+        new OpenAIClient({
+          apiKey: "sk",
+          tier: 2,
+          model: "gpt-5.1-2026-01-01",
+        }),
+    ).toThrow(OpenAIPricingUnknownError);
+  });
+
+  it("accepts construction for priced default tiers (gpt-5-mini, gpt-5-nano)", () => {
+    expect(() => new OpenAIClient({ apiKey: "sk", tier: 2 })).not.toThrow();
+    expect(() => new OpenAIClient({ apiKey: "sk", tier: 3 })).not.toThrow();
+  });
+
+  it("accepts dated snapshot whose alias prefix is priced", () => {
+    expect(
+      () =>
+        new OpenAIClient({
+          apiKey: "sk",
+          tier: 2,
+          model: "gpt-5-mini-2025-08-07",
+        }),
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 6 — request timeout (F18)
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient — request timeout (PR #100 round 6 F18)", () => {
+  it("throws OpenAIRequestTimeoutError when fetch stalls past timeoutMs", async () => {
+    // Fetch never resolves naturally — only the abort signal can end it.
+    const stallingFetch = ((
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      })) as unknown as typeof globalThis.fetch;
+    const client = new OpenAIClient({
+      apiKey: "sk",
+      fetch: stallingFetch,
+      timeoutMs: 25,
+    });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIRequestTimeoutError);
+  });
+
+  it("does not fire timeout when response arrives in time", async () => {
+    const { fetch } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
+    const client = new OpenAIClient({
+      apiKey: "sk",
+      fetch,
+      timeoutMs: 5_000,
+    });
+    const result = await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    expect(result.text).toBe("extracted body content");
+  });
+
+  it("rejects non-positive timeoutMs at construction", () => {
+    expect(
+      () => new OpenAIClient({ apiKey: "sk", timeoutMs: 0 }),
+    ).toThrow(/timeoutMs/);
+    expect(
+      () => new OpenAIClient({ apiKey: "sk", timeoutMs: -5 }),
+    ).toThrow(/timeoutMs/);
+    expect(
+      () => new OpenAIClient({ apiKey: "sk", timeoutMs: Number.NaN }),
+    ).toThrow(/timeoutMs/);
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 6 — DEC-010 §8 extract controls (F19)
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient.invoke — DEC-010 §8 extract controls (PR #100 round 6 F19)", () => {
+  it("body includes temperature=0 by default (DEC-010 extract determinism)", async () => {
+    const { fetch, calls } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    const body = JSON.parse((calls[0]!.init?.body as string) ?? "{}") as {
+      temperature?: number;
+    };
+    expect(body.temperature).toBe(0);
+  });
+
+  it("respects explicit temperature override (e.g. scenario branch 0.3)", async () => {
+    const { fetch, calls } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+      temperature: 0.3,
+    });
+    const body = JSON.parse((calls[0]!.init?.body as string) ?? "{}") as {
+      temperature?: number;
+    };
+    expect(body.temperature).toBe(0.3);
+  });
+
+  it("forwards responseFormat to body when caller supplies schema", async () => {
+    const { fetch, calls } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    const schema = {
+      type: "json_schema",
+      json_schema: {
+        name: "ArticleExtraction",
+        schema: { type: "object", properties: { headline: { type: "string" } } },
+        strict: true,
+      },
+    };
+    await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+      responseFormat: schema,
+    });
+    const body = JSON.parse((calls[0]!.init?.body as string) ?? "{}") as {
+      response_format?: unknown;
+    };
+    expect(body.response_format).toEqual(schema);
+  });
+
+  it("omits response_format from body when caller does not supply schema", async () => {
+    const { fetch, calls } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    const body = JSON.parse((calls[0]!.init?.body as string) ?? "{}") as {
+      response_format?: unknown;
+    };
+    expect(body.response_format).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 6 — null/malformed usage counters (F21)
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient.invoke — null/malformed usage counters (PR #100 round 6 F21)", () => {
+  it("treats completion_tokens=null as missing_usage (not as 0)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 100, completion_tokens: null },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      expect(err).toBeInstanceOf(OpenAIIncompleteCompletionError);
+      expect((err as OpenAIIncompleteCompletionError).finishReason).toBe(
+        "missing_usage",
+      );
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
+  });
+
+  it("treats non-integer completion_tokens as missing_usage", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 100, completion_tokens: 50.5 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIIncompleteCompletionError);
+  });
+
+  it("incomplete completion with null counter → error.usage is undefined (no failRun validation throw)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [
+        { message: { content: "truncated" }, finish_reason: "length" },
+      ],
+      usage: { prompt_tokens: 100, completion_tokens: null },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      // finish_reason check fires first (after choice/content
+      // validation); the malformed completion_tokens just makes
+      // `usagePresent` false so the error's usage payload is
+      // undefined — failRun gets called without integer-validation
+      // input that would otherwise throw and leave the ledger row
+      // stuck in `running`.
+      expect((err as OpenAIIncompleteCompletionError).finishReason).toBe(
+        "length",
+      );
+      expect((err as OpenAIIncompleteCompletionError).usage).toBeUndefined();
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
   });
 });
 
@@ -739,14 +994,13 @@ describe("OpenAIClient.invoke — incomplete completions preserve billable usage
 // ---------------------------------------------------------------------
 
 describe("resolveOpenAIPricingKey — dated-snapshot prefix lookup (PR #100 P2)", () => {
-  it("exact alias hit returns the alias", () => {
+  it("exact alias hit returns the alias (Chat-Completions defaults only after round 6 F22)", () => {
     expect(resolveOpenAIPricingKey("gpt-5-mini")).toBe("gpt-5-mini");
     expect(resolveOpenAIPricingKey("gpt-5")).toBe("gpt-5");
     expect(resolveOpenAIPricingKey("gpt-5-nano")).toBe("gpt-5-nano");
-    expect(resolveOpenAIPricingKey("gpt-5.5-pro")).toBe("gpt-5.5-pro");
-    expect(resolveOpenAIPricingKey("gpt-5.5-pro-extended-thinking")).toBe(
-      "gpt-5.5-pro-extended-thinking",
-    );
+    // Pro entries dropped (F22) — resolution returns null.
+    expect(resolveOpenAIPricingKey("gpt-5.5-pro")).toBeNull();
+    expect(resolveOpenAIPricingKey("gpt-5.5-pro-extended-thinking")).toBeNull();
   });
 
   it("dated snapshot for gpt-5-mini resolves to gpt-5-mini (not gpt-5 prefix-eat)", () => {
@@ -761,14 +1015,11 @@ describe("resolveOpenAIPricingKey — dated-snapshot prefix lookup (PR #100 P2)"
     expect(resolveOpenAIPricingKey("gpt-5-2025-09-15")).toBe("gpt-5");
   });
 
-  it("dated snapshot for gpt-5.5-pro-extended-thinking does not collapse to gpt-5.5-pro", () => {
+  it("dated snapshot for dropped pro alias returns null after F22", () => {
     expect(
       resolveOpenAIPricingKey("gpt-5.5-pro-extended-thinking-2026-01-01"),
-    ).toBe("gpt-5.5-pro-extended-thinking");
-  });
-
-  it("dated snapshot for gpt-5.5-pro resolves to gpt-5.5-pro", () => {
-    expect(resolveOpenAIPricingKey("gpt-5.5-pro-2026-01-01")).toBe("gpt-5.5-pro");
+    ).toBeNull();
+    expect(resolveOpenAIPricingKey("gpt-5.5-pro-2026-01-01")).toBeNull();
   });
 
   it("truly unknown model returns null (caller decides fallback)", () => {
@@ -825,16 +1076,13 @@ describe("computeTotalCostUsd — dated snapshot pricing (PR #100 P2)", () => {
     expect(datedCost).toBeLessThan(miniCost);
   });
 
-  it("Tier 0 (gpt-5.5-pro-extended-thinking) prices at premium rate", () => {
-    const t0 = computeTotalCostUsd("gpt-5.5-pro-extended-thinking", {
-      inputTokens: 1_000_000,
-      outputTokens: 1_000_000,
-    });
-    const t2 = computeTotalCostUsd("gpt-5-mini", {
-      inputTokens: 1_000_000,
-      outputTokens: 1_000_000,
-    });
-    expect(t0).toBeGreaterThan(t2);
+  it("dropped pro placeholders now throw OpenAIPricingUnknownError (round 6 F22)", () => {
+    expect(() =>
+      computeTotalCostUsd("gpt-5.5-pro-extended-thinking", {
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      }),
+    ).toThrow(OpenAIPricingUnknownError);
   });
 });
 

@@ -72,20 +72,44 @@ export const OPENAI_PRICING_USD_PER_1M_TOKENS: Record<
   string,
   { input: number; output: number; cachedInput?: number }
 > = {
-  // PR #100 codex round 4 P2 (F10) — pro-tier IDs added so callers
-  // who satisfy the Tier 0/1 explicit-model requirement with the
-  // actual OpenAI pro SKUs do not silently fall through to a
-  // wrong-tier pricing fallback. Placeholders pending ADR-0023
-  // ratification — operator may overwrite with verified list prices.
-  "gpt-5-pro-extended-thinking": { input: 5.0, output: 40.0, cachedInput: 0.5 },
-  "gpt-5-pro": { input: 2.5, output: 20.0, cachedInput: 0.25 },
-  "gpt-5.2-pro": { input: 2.5, output: 20.0, cachedInput: 0.25 },
-  "gpt-5.5-pro-extended-thinking": { input: 5.0, output: 40.0, cachedInput: 0.5 },
-  "gpt-5.5-pro": { input: 2.5, output: 20.0, cachedInput: 0.25 },
+  // PR #100 codex round 6 F22 — pro-tier placeholder pricing was
+  // 6-8x below documented OpenAI list prices (round 4 added
+  // $2.5/$20 for gpt-5-pro but the actual rate is $15/$120 per 1M).
+  // Silent undercount of Tier 0/1 cost broke AC-019 throttling.
+  // Remove the placeholders entirely: callers using pro SKUs now
+  // get a clear constructor-time error (F23) until the operator
+  // ratifies the verified list prices.
   "gpt-5": { input: 1.25, output: 10.0, cachedInput: 0.125 },
   "gpt-5-mini": { input: 0.25, output: 2.0, cachedInput: 0.025 },
   "gpt-5-nano": { input: 0.05, output: 0.4, cachedInput: 0.005 },
 };
+
+/**
+ * OpenAI SKUs that route through the Responses API (not Chat
+ * Completions). PR #100 codex round 6 F20 — `OpenAIClient` posts to
+ * `/chat/completions`, so accepting these model IDs would fail at
+ * the provider after `ArticleExtractor` had already opened a
+ * run_ledger row. Reject them at construction with a clear
+ * endpoint-mismatch error so the operator hits the failure before
+ * the ledger is touched. Extend this set when adopting Responses
+ * API support in a follow-up slice.
+ */
+export const OPENAI_RESPONSES_API_ONLY_MODELS = new Set<string>([
+  "gpt-5-pro",
+  "gpt-5-pro-extended-thinking",
+  "gpt-5.2-pro",
+  "gpt-5.5-pro",
+  "gpt-5.5-pro-extended-thinking",
+]);
+
+export class OpenAIResponsesApiOnlyError extends Error {
+  constructor(public readonly model: string) {
+    super(
+      `OpenAI model '${model}' uses the Responses API; OpenAIClient targets /chat/completions only. Pick a Chat-Completions-supported model or wait for the Responses API client (planned post EXTR-1A.2c).`,
+    );
+    this.name = "OpenAIResponsesApiOnlyError";
+  }
+}
 
 /**
  * Thrown when `computeTotalCostUsd` is asked to price a model that
@@ -182,7 +206,11 @@ export interface OpenAIClientOptions {
   readonly tier?: LlmTier;
   /**
    * Explicit model identifier override. Defaults to
-   * `OPENAI_TIER_DEFAULT_MODEL[tier]`.
+   * `OPENAI_TIER_DEFAULT_MODEL[tier]`. PR #100 codex round 6 F23 —
+   * constructor validates that the resolved model has a pricing
+   * entry; unknown SKUs throw `OpenAIPricingUnknownError` BEFORE
+   * any billable API call so failed-but-billable rows do not slip
+   * into the ledger without cost.
    */
   readonly model?: string;
   /**
@@ -197,9 +225,27 @@ export interface OpenAIClientOptions {
    * a local mock if needed.
    */
   readonly baseUrl?: string;
+  /**
+   * Request timeout in milliseconds (PR #100 codex round 6 F18 —
+   * unbounded `fetch` could leave run_ledger rows in `running`
+   * forever on network stalls). Defaults to 60_000 (60s) — enough
+   * for Tier 2/3 extraction; raise for slower reasoning tiers.
+   * Tests override to a small value to exercise timeout paths.
+   */
+  readonly timeoutMs?: number;
+}
+
+export class OpenAIRequestTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number, public readonly model: string) {
+    super(
+      `OpenAI request timed out after ${timeoutMs}ms (model='${model}'). The run_ledger row will be marked failed.`,
+    );
+    this.name = "OpenAIRequestTimeoutError";
+  }
 }
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 interface OpenAIChatResponseShape {
   /**
@@ -300,6 +346,7 @@ export class OpenAIClient implements LlmClient {
   private readonly apiKey: string;
   private readonly fetchImpl: typeof globalThis.fetch;
   private readonly baseUrl: string;
+  private readonly timeoutMs: number;
 
   constructor(opts: OpenAIClientOptions = {}) {
     const apiKey = opts.apiKey ?? process.env["OPENAI_API_KEY"];
@@ -312,48 +359,104 @@ export class OpenAIClient implements LlmClient {
     this.tier = opts.tier ?? 2;
     // PR #100 codex round 3 P1 — Tier 0/1 default IDs in
     // OPENAI_TIER_DEFAULT_MODEL are placeholders pending DEC-010 /
-    // ADR-0023 ratification and the actual OpenAI pro SKUs
-    // (`gpt-5-pro` / `gpt-5.2-pro` per OpenAI catalog) are
-    // Responses-API-only — this client posts to `/chat/completions`,
-    // so silently shipping a default for those tiers would
-    // unconditionally fail at runtime. Require callers to supply
-    // `model` explicitly when picking Tier 0/1 until the routing +
-    // endpoint pairing is ratified.
+    // ADR-0023 ratification. Require explicit `model` for those
+    // tiers so the operator owns the routing decision.
     if ((this.tier === 0 || this.tier === 1) && opts.model === undefined) {
       throw new Error(
-        `OpenAIClient: tier=${this.tier} (DEC-010 pro tier) requires an explicit \`model\` option — defaults are placeholders pending ADR-0023 ratification, and OpenAI pro SKUs use the Responses API which this client does not yet target. Pass \`model\` explicitly or use a Tier 2/3 default.`,
+        `OpenAIClient: tier=${this.tier} (DEC-010 pro tier) requires an explicit \`model\` option — defaults are placeholders pending ADR-0023 ratification. Pass \`model\` explicitly or use a Tier 2/3 default.`,
       );
     }
     this.model = opts.model ?? OPENAI_TIER_DEFAULT_MODEL[this.tier];
+
+    // PR #100 codex round 6 F20 — reject known Responses-API-only
+    // SKUs at construction. Without this, Tier 0/1 callers passing
+    // `gpt-5-pro` / `gpt-5.2-pro` etc. would open a run_ledger row
+    // and only fail at the provider request, leaving the ledger
+    // entry to drift to the failure path of a known-broken config.
+    if (OPENAI_RESPONSES_API_ONLY_MODELS.has(this.model)) {
+      throw new OpenAIResponsesApiOnlyError(this.model);
+    }
+
+    // PR #100 codex round 6 F23 — pre-API pricing validation.
+    // `computeTotalCostUsd` already throws OpenAIPricingUnknownError
+    // post-response, but that fires AFTER the API call has been
+    // billed. Validate at construction so the failure happens
+    // before `ArticleExtractor` opens any ledger row.
+    if (resolveOpenAIPricingKey(this.model) === null) {
+      throw new OpenAIPricingUnknownError(this.model);
+    }
+
     this.fetchImpl = opts.fetch ?? globalThis.fetch;
     this.baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new Error(
+        `OpenAIClient: timeoutMs must be a positive finite number, got ${timeoutMs}`,
+      );
+    }
+    this.timeoutMs = timeoutMs;
   }
 
   async invoke(params: LlmInvokeParams): Promise<LlmInvokeResult> {
     const url = `${this.baseUrl}/chat/completions`;
     // Apply per-tier default output cap when caller omits an
     // explicit `maxOutputTokens` (PR #100 codex P2). Caller's
-    // explicit value wins (including `0` is rejected by OpenAI as
-    // invalid — left to the API).
+    // explicit value wins.
     const maxCompletionTokens =
       params.maxOutputTokens ?? OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS[this.tier];
-    const body = JSON.stringify({
+    // PR #100 codex round 6 F19 — DEC-010 §8 requires temperature=0
+    // for extract / cite_check / thesis. Default to 0 here so the
+    // extract path is deterministic by default; scenario callers
+    // override via LlmInvokeParams.temperature=0.3.
+    const temperature = params.temperature ?? 0;
+
+    const requestBody: Record<string, unknown> = {
       model: this.model,
       messages: [
         { role: "system", content: params.systemPrompt },
         { role: "user", content: params.userPrompt },
       ],
       max_completion_tokens: maxCompletionTokens,
-    });
+      temperature,
+    };
+    // PR #100 codex round 6 F19 — when caller supplies a structured
+    // response schema (e.g. ArticleExtractor's future strict JSON
+    // schema per DEC-010 §8), pass it through as
+    // `response_format: { type: "json_schema", json_schema: {...} }`.
+    // Until callers wire schemas, requests fall back to free-form
+    // text (current behavior).
+    if (params.responseFormat !== undefined) {
+      requestBody["response_format"] = params.responseFormat;
+    }
+    const body = JSON.stringify(requestBody);
 
-    const response = await this.fetchImpl(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body,
-    });
+    // PR #100 codex round 6 F18 — bounded request via AbortSignal so
+    // network stalls cannot leave run_ledger rows in `running`
+    // forever. We use a dedicated controller (instead of the
+    // simpler `AbortSignal.timeout` static) so the timeout reason
+    // is preserved in our typed error rather than the generic
+    // AbortError.
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body,
+        signal: abortController.signal,
+      });
+    } catch (err) {
+      if (abortController.signal.aborted) {
+        throw new OpenAIRequestTimeoutError(this.timeoutMs, this.model);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!response.ok) {
       const text = await response.text();
@@ -371,19 +474,28 @@ export class OpenAIClient implements LlmClient {
     const resolvedModel =
       data.model && data.model.trim().length > 0 ? data.model : this.model;
 
-    // PR #100 codex round 4 F12 + round 5 F16 — `usage` MUST be
-    // present with BOTH `prompt_tokens` AND `completion_tokens`.
-    // Round 4's OR check let `prompt_tokens`-only responses
-    // through, which combined with `?? 0` undercounted output cost
-    // whenever a real completion was generated. Round 5 enforces
-    // AND: any missing usage counter on the success or
-    // billable-failure path is treated as incomplete so the row
-    // goes through failRun (no cost coalescing). Operator decides
-    // retry / manual review path.
+    // PR #100 codex round 4 F12 + round 5 F16 + round 6 F21 —
+    // `usage` MUST be present with BOTH `prompt_tokens` AND
+    // `completion_tokens`, and both must be non-negative integers.
+    // Round 6 F21 tightens the check from `!== undefined` to
+    // `Number.isInteger(...) >= 0`: a malformed response with
+    // `completion_tokens: null` previously passed the existence
+    // check, then `buildBillableUsage` carried `null` to failRun
+    // whose validation threw, leaving the ledger row stuck in
+    // `running` (no terminal state). Strict-integer check at the
+    // source means `buildBillableUsage` only emits payloads
+    // failRun accepts.
     const usageBlock = data.usage;
-    const inputTokens = usageBlock?.prompt_tokens;
-    const outputTokens = usageBlock?.completion_tokens;
-    const cachedTokens = usageBlock?.prompt_tokens_details?.cached_tokens;
+    const inputTokensRaw = usageBlock?.prompt_tokens;
+    const outputTokensRaw = usageBlock?.completion_tokens;
+    const cachedTokensRaw = usageBlock?.prompt_tokens_details?.cached_tokens;
+    const isCounter = (n: unknown): n is number =>
+      typeof n === "number" && Number.isInteger(n) && n >= 0;
+    const inputTokens = isCounter(inputTokensRaw) ? inputTokensRaw : undefined;
+    const outputTokens = isCounter(outputTokensRaw)
+      ? outputTokensRaw
+      : undefined;
+    const cachedTokens = isCounter(cachedTokensRaw) ? cachedTokensRaw : undefined;
     const usagePresent =
       usageBlock !== undefined &&
       inputTokens !== undefined &&
