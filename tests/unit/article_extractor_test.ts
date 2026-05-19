@@ -1223,6 +1223,47 @@ describe("ArticleExtractor — DEC-010 §8 strict JSON schema (Cycle 42 follow-u
     expect(rows[0]!.total_cost_usd).toBe(0.012);
   });
 
+  it("real-vendor + malformed JSON + missing totalCostUsd → missing-cost error wins, schema parse never runs (PR #102 codex round 1 P2)", async () => {
+    // P2 codex finding: when a vendor returns BOTH malformed JSON
+    // AND omits totalCostUsd, the previous ordering (parse → cost
+    // guard) had the schema-parse failRun path record a row whose
+    // totalCostUsd was omitted via the undefined-spread, then throw
+    // ArticleExtractionSchemaError — the missing-cost guard never
+    // ran, hiding a billable API call from AC-019 daily aggregation.
+    // The fix moves the missing-cost guard BEFORE the schema parse
+    // so the more critical vendor bug surfaces first and the failed
+    // row is recorded with NULL cost (the actual missing field),
+    // not a spurious schema-failure row.
+    const response: LlmInvokeResult = {
+      text: "{garbage",
+      vendor: "openai",
+      model: "gpt-5-mini",
+      tier: 2,
+      inputTokens: 1500,
+      outputTokens: 800,
+      // totalCostUsd intentionally omitted (vendor bug #2).
+    };
+    const llm = new MockLlmClient(response, {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+    });
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(
+      /totalCostUsd missing for vendor='openai'.*refusing to record a free run/,
+    );
+    const rows = ledgerRows();
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.status).toBe("failed");
+    expect(rows[0]!.total_cost_usd).toBeNull();
+  });
+
   it("system prompt instructs the LLM to emit verbatim evidence_quote (faithfulness anchor)", () => {
     expect(ARTICLE_EXTRACTION_SYSTEM_PROMPT).toContain("structured JSON");
     expect(ARTICLE_EXTRACTION_SYSTEM_PROMPT).toContain("evidence_quote");

@@ -414,12 +414,35 @@ export class ArticleExtractor implements Extractor {
       }
       throw err;
     }
+    // PR #100 codex round 3 P2 — when a real-vendor client
+    // returns `LlmInvokeResult.totalCostUsd === undefined` the
+    // previous wiring coalesced to `0`, bypassing completeRun's
+    // required-cost guard and making the billable API call vanish
+    // from AC-019 daily cost / throttling aggregation. Treat
+    // missing cost as a failed run instead.
+    //
+    // PR #102 codex round 1 P2 — the missing-cost guard MUST run
+    // BEFORE the schema parse. Otherwise, when a vendor returns
+    // BOTH malformed JSON AND omits totalCostUsd, the schema-parse
+    // failure path records a failed row whose totalCostUsd is
+    // omitted (undefined-spread), and the missing-cost guard never
+    // fires. The billable API call then vanishes from AC-019
+    // aggregation in exactly the dual-vendor-bug case the guard
+    // was meant to surface.
+    if (runId !== undefined && llmResult.totalCostUsd === undefined) {
+      failRun(runId);
+      throw new Error(
+        `ArticleExtractor: LlmInvokeResult.totalCostUsd missing for vendor='${llmResult.vendor}' model='${llmResult.model}' — refusing to record a free run for a billable API call (AC-019). Fix the LlmClient implementation to compute totalCostUsd.`,
+      );
+    }
+
     // Cycle 42 follow-up #2 — DEC-010 §8 strict schema parse.
     // Parse BEFORE completeRun so a malformed response still marks
     // the row failed with the billable token + cost payload
     // (preserves AC-019 aggregation, matches the round-4 F13
     // incomplete-result invariant for "we paid for tokens, ledger
-    // must reflect that").
+    // must reflect that"). Cost is guaranteed defined here for
+    // ledger-enabled runs thanks to the upstream guard.
     let parsedArticle: ExtractedArticle;
     try {
       parsedArticle = parseExtractedArticle(llmResult.text);
@@ -452,30 +475,23 @@ export class ArticleExtractor implements Extractor {
     }
 
     if (runId !== undefined) {
-      // PR #100 codex round 3 P2 — when a real-vendor client
-      // returns `LlmInvokeResult.totalCostUsd === undefined` the
-      // previous wiring coalesced to `0`, bypassing completeRun's
-      // required-cost guard and making the billable API call vanish
-      // from AC-019 daily cost / throttling aggregation. Treat
-      // missing cost as a failed run instead.
-      if (llmResult.totalCostUsd === undefined) {
-        failRun(runId);
-        throw new Error(
-          `ArticleExtractor: LlmInvokeResult.totalCostUsd missing for vendor='${llmResult.vendor}' model='${llmResult.model}' — refusing to record a free run for a billable API call (AC-019). Fix the LlmClient implementation to compute totalCostUsd.`,
-        );
-      }
       // PR #100 codex round 4 F11 — wrap completeRun in try/catch so
       // its numeric validation throws (NaN cost, non-integer tokens)
       // do not leave the row stuck in `running`. Rewrap as failRun
       // (no usage payload — the validation itself failed, so the
       // input is untrusted) and rethrow.
+      //
+      // totalCostUsd is guaranteed defined here for ledger-enabled
+      // runs by the upstream missing-cost guard (PR #102 round 1 P2).
+      // TS narrowing is lost across the schema-parse try/catch, so we
+      // re-assert at the call site rather than re-checking.
       const startedModelId = this.deps.llmClient.model;
       try {
         completeRun(runId, {
           inputTokens: llmResult.inputTokens,
           outputTokens: llmResult.outputTokens,
           cachedTokens: llmResult.cachedTokens,
-          totalCostUsd: llmResult.totalCostUsd,
+          totalCostUsd: llmResult.totalCostUsd!,
           ...(llmResult.model && llmResult.model !== startedModelId
             ? { modelId: llmResult.model }
             : {}),
