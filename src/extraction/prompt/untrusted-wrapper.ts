@@ -86,7 +86,7 @@ function escapeForRegex(s: string): string {
  */
 function tagNameFromSentinel(sentinel: string): string | null {
   const m = sentinel.match(/^<\s*\/?\s*([A-Za-z][A-Za-z0-9_-]*)\s*>$/);
-  return m ? m[1] : null;
+  return m?.[1] ?? null;
 }
 
 /**
