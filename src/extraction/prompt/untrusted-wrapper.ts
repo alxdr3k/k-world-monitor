@@ -29,25 +29,25 @@ export const TIER_TOKEN_CAPS: Record<0 | 1 | 2 | 3, number> = {
 };
 
 /**
- * CJK-safe chars-per-token ratio used when caller passes `maxTokens`
- * without pre-truncating (PR #97 codex review round 1 P2 — earlier
- * value of 4 (English-typical) under-truncated Korean / CJK content,
- * letting a Tier 3 caller pass ~10,000 Korean tokens via 16,000 chars
- * against the 4,000-token cap).
+ * Universally-safe chars-per-token ratio (PR #97 codex round 2 P2 —
+ * 1.5 still allowed Chinese content (~1 char/token) to bypass the
+ * INV-0029-3 cap at the canonical `wrapUntrustedForTier(..., 3)` path).
  *
  * Reference vendor tokenizer ratios:
- *   - English: ~4 chars/token
- *   - Korean / Japanese: ~1.5-2 chars/token
- *   - Chinese: ~1-1.5 chars/token
+ *   - English:               ~4 chars/token
+ *   - Korean / Japanese:     ~1.5-2 chars/token
+ *   - Chinese:               ~1-1.5 chars/token
+ *   - Worst-case multi-byte: 1 char/token
  *
- * Using 1.5 over-trims English by ~2.7x but is the smallest value that
- * still safely caps every supported language under the INV-0029-3 cap.
- * Since the cap exists for prompt-injection payload dilution + cost
- * ceiling enforcement, over-trim is acceptable and under-trim is a
- * violation. Callers that need precise English-tokenization may
- * pre-truncate with a vendor tokenizer and pass a large `maxTokens`.
+ * Using **1** is the smallest universal value that strictly caps every
+ * supported language under INV-0029-3. The cap exists for prompt-
+ * injection payload dilution + cost-ceiling enforcement; over-trim is
+ * acceptable (any language) but under-trim is a violation. Callers
+ * that need precise English tokenization (where 1 char/token over-trims
+ * by ~4x) MAY pre-truncate with a vendor tokenizer and pass a large
+ * `maxTokens` cap that does not bind here.
  */
-export const CHARS_PER_TOKEN_HEURISTIC = 1.5;
+export const CHARS_PER_TOKEN_HEURISTIC = 1;
 
 const DEFAULT_OPEN_SENTINEL = "<untrusted>";
 const DEFAULT_CLOSE_SENTINEL = "</untrusted>";
@@ -55,7 +55,8 @@ const DEFAULT_CLOSE_SENTINEL = "</untrusted>";
 export interface WrapUntrustedOptions {
   /**
    * Token cap for the wrapped content. Content is truncated (via
-   * `CHARS_PER_TOKEN_HEURISTIC`) to roughly `maxTokens * 1.5` characters.
+   * `CHARS_PER_TOKEN_HEURISTIC = 1`) to exactly `maxTokens` characters
+   * — universally-safe across English / CJK / multi-byte scripts.
    * Pass one of `TIER_TOKEN_CAPS[tier]` for canonical caps.
    */
   maxTokens: number;

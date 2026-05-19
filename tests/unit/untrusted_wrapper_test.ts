@@ -45,7 +45,7 @@ describe("wrapUntrusted — basic INV-0029-1 sentinel", () => {
 describe("wrapUntrusted — INV-0029-3 token cap enforcement", () => {
   it("truncates content exceeding maxTokens * CHARS_PER_TOKEN_HEURISTIC", () => {
     const content = "X".repeat(100);
-    // maxTokens=10 → maxChars=15 (with CJK-safe 1.5 chars/token)
+    // maxTokens=10 → maxChars=10 (with universally-safe 1 chars/token)
     const result = wrapUntrusted(content, { maxTokens: 10 });
     const inner = result.slice("<untrusted>\n".length, -"\n</untrusted>".length);
     expect(inner.length).toBe(Math.floor(10 * CHARS_PER_TOKEN_HEURISTIC));
@@ -58,18 +58,27 @@ describe("wrapUntrusted — INV-0029-3 token cap enforcement", () => {
     expect(inner).toBe("short");
   });
 
-  it("CHARS_PER_TOKEN_HEURISTIC is 1.5 (CJK-safe universal — PR #97 codex round 1 P2)", () => {
-    expect(CHARS_PER_TOKEN_HEURISTIC).toBe(1.5);
+  it("CHARS_PER_TOKEN_HEURISTIC is 1 (universally-safe across all languages — PR #97 codex round 2 P2)", () => {
+    expect(CHARS_PER_TOKEN_HEURISTIC).toBe(1);
   });
 
-  it("Korean content respects Tier 3 cap (CJK-safe 1.5 ratio holds 4000-token cap)", () => {
-    // PR #97 codex round 1 P2 — Korean ~1.5-2 chars/token, so 6000 chars
-    // ≈ 3000-4000 tokens. Under-truncation regression check.
+  it("Korean content respects Tier 3 cap (1 char/token holds 4000-token cap)", () => {
+    // PR #97 codex round 2 P2 — using 1 char/token caps even worst-case
+    // multi-byte scripts (Chinese ~1 char/token) at the documented INV-0029-3 cap.
     const korean = "한".repeat(10_000);
     const result = wrapUntrustedForTier(korean, 3);
     const inner = result.slice("<untrusted>\n".length, -"\n</untrusted>".length);
-    // 4000 tokens * 1.5 chars/token = 6000 chars
-    expect(inner.length).toBe(6000);
+    // 4000 tokens * 1 char/token = 4000 chars
+    expect(inner.length).toBe(4_000);
+  });
+
+  it("Chinese content respects Tier 3 cap (worst-case ~1 char/token boundary)", () => {
+    // PR #97 codex round 2 P2 — Chinese content at the documented 1
+    // char/token boundary cannot exceed the 4000-token Tier 3 cap.
+    const chinese = "中".repeat(8_000);
+    const result = wrapUntrustedForTier(chinese, 3);
+    const inner = result.slice("<untrusted>\n".length, -"\n</untrusted>".length);
+    expect(inner.length).toBe(4_000);
   });
 
   it("throws on non-string content", () => {
@@ -111,14 +120,14 @@ describe("TIER_TOKEN_CAPS — INV-0029-3 per-tier caps", () => {
 });
 
 describe("wrapUntrustedForTier — convenience helper", () => {
-  it("Tier 3 caps at 4,000 tokens (6,000 chars under CJK-safe 1.5 ratio)", () => {
+  it("Tier 3 caps at 4,000 tokens (4,000 chars under universally-safe 1 ratio)", () => {
     const content = "Y".repeat(20_000);
     const result = wrapUntrustedForTier(content, 3);
     const inner = result.slice("<untrusted>\n".length, -"\n</untrusted>".length);
     expect(inner.length).toBe(Math.floor(4_000 * CHARS_PER_TOKEN_HEURISTIC));
   });
 
-  it("Tier 2 caps at 8,000 tokens (12,000 chars under CJK-safe 1.5 ratio)", () => {
+  it("Tier 2 caps at 8,000 tokens (8,000 chars under universally-safe 1 ratio)", () => {
     const content = "Y".repeat(40_000);
     const result = wrapUntrustedForTier(content, 2);
     const inner = result.slice("<untrusted>\n".length, -"\n</untrusted>".length);

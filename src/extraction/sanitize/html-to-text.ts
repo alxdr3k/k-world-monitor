@@ -28,14 +28,35 @@ export const DANGEROUS_TAGS: readonly string[] = [
   "embed",
 ];
 
+/**
+ * HTML named character reference replacements. Per HTML5 spec, named
+ * references are case-SENSITIVE (`&lt;` and `&LT;` are different
+ * entities), but BOTH lowercase and uppercase forms exist for the
+ * basic entities. PR #97 codex round 2 P2 — earlier lowercase-only
+ * map let `&LT;script&GT;...` bypass entity decode → bypass DANGEROUS
+ * pass → reach LLM as encoded payload.
+ *
+ * Coverage: lowercase + uppercase + selected camelCase (`&NewLine;` /
+ * `&Tab;` etc. exist but are unlikely in adversarial payloads). Stick
+ * to the documented HTML5 case variants for the basic entities.
+ */
 const HTML_ENTITY_MAP: Record<string, string> = {
+  // Lowercase form (most common in real-world HTML).
   "&amp;": "&",
   "&lt;": "<",
   "&gt;": ">",
   "&quot;": '"',
   "&apos;": "'",
-  "&#39;": "'",
   "&nbsp;": " ",
+  // Uppercase form (HTML5 spec).
+  "&AMP;": "&",
+  "&LT;": "<",
+  "&GT;": ">",
+  "&QUOT;": '"',
+  "&NBSP;": " ",
+  // Numeric apostrophe (apostrophe is `&apos;` since HTML5; pre-HTML5
+  // used `&#39;` exclusively).
+  "&#39;": "'",
 };
 
 function decodeBasicEntities(text: string): string {
@@ -43,14 +64,15 @@ function decodeBasicEntities(text: string): string {
   for (const [entity, replacement] of Object.entries(HTML_ENTITY_MAP)) {
     out = out.replaceAll(entity, replacement);
   }
-  // Numeric entities: &#NN; (decimal) and &#xNN; (hex)
+  // Numeric entities: &#NN; (decimal). Case-insensitive on `x` prefix
+  // (HTML allows `&#x` or `&#X`).
   out = out.replace(/&#(\d+);/g, (_, code: string) => {
     const n = Number(code);
     return Number.isInteger(n) && n >= 0 && n < 0x110000
       ? String.fromCodePoint(n)
       : "";
   });
-  out = out.replace(/&#x([0-9a-fA-F]+);/g, (_, code: string) => {
+  out = out.replace(/&#[xX]([0-9a-fA-F]+);/g, (_, code: string) => {
     const n = parseInt(code, 16);
     return Number.isInteger(n) && n >= 0 && n < 0x110000
       ? String.fromCodePoint(n)
@@ -89,24 +111,44 @@ function removeDangerousTags(input: string): string {
 }
 
 /**
+ * Quote-aware HTML tag stripper regex (PR #97 codex round 2 P2 —
+ * earlier `<[^>]+>` regex stopped at the first `>` inside attribute
+ * values, leaking the rest of the attribute + following content to
+ * the LLM).
+ *
+ * Matches: `<` + optional `/` + alpha char (HTML tag name) + tag body
+ * where double / single quoted attribute values are treated as opaque
+ * blocks that may contain `>` chars without ending the tag.
+ *
+ * Does NOT match `<` followed by non-alpha (e.g. `1 < 2`) so decoded
+ * user-content arithmetic / comparison expressions are preserved.
+ */
+const QUOTE_AWARE_TAG_STRIP =
+  /<\/?[a-zA-Z][^"'>]*(?:(?:"[^"]*"|'[^']*')[^"'>]*)*>/g;
+
+/**
  * Convert HTML to LLM-safe plain text per INV-0029-5.
  *
- * Pipeline (PR #97 codex review round 1 — re-ordered for entity defense):
+ * Pipeline (PR #97 codex review round 2 — entity decode + dual generic
+ * strip + dual DANGEROUS pass for full coverage):
  *   1. Strip HTML comments (`<!-- ... -->`).
  *   2. **First DANGEROUS_TAGS removal pass** — catches raw `<script>` /
- *      `<style>` / etc. in the source.
- *   3. Strip every remaining HTML tag (`<...>`) — done BEFORE entity
- *      decode so that decoded user-content `<` / `>` characters
- *      (e.g. `1 &lt; 2`) are not later stripped as "fake tags".
- *   4. **Decode HTML entities** (`&amp;`, `&lt;`, `&gt;`, `&quot;`,
- *      `&apos;`, `&#39;`, `&nbsp;` + numeric `&#NN;` / `&#xNN;`) —
- *      surfaces entity-encoded dangerous tags like
- *      `&lt;script&gt;payload&lt;/script&gt;` as literal `<script>...`.
- *   5. **Second DANGEROUS_TAGS removal pass** — catches the now-decoded
- *      entity-encoded dangerous tags (PR #97 codex round 1 P2). Does
- *      NOT do generic tag-stripping (would consume legitimate decoded
- *      `<` characters in user content).
- *   6. Collapse whitespace to a single space; trim ends.
+ *      `<style>` / etc. in the source (closed / self-closing / orphan).
+ *   3. **First generic tag strip** — quote-aware regex removes
+ *      remaining real HTML tags (incl. tags with `>` inside quoted
+ *      attribute values).
+ *   4. **Decode HTML entities** (lowercase + uppercase named refs +
+ *      numeric decimal / hex; PR #97 codex round 2 P2 — uppercase
+ *      `&LT;` `&GT;` etc.) — surfaces entity-encoded HTML tags like
+ *      `&lt;script&gt;...` as literal `<script>...`.
+ *   5. **Second DANGEROUS_TAGS removal pass** — catches now-decoded
+ *      entity-encoded dangerous tags.
+ *   6. **Second generic tag strip** (quote-aware) — catches now-decoded
+ *      entity-encoded ordinary tags like decoded `<p>Hello</p>` or
+ *      `<img alt="...">Caption` (PR #97 codex round 2 P2). The regex
+ *      requires `<` to be followed by alpha / `/alpha`, so legitimate
+ *      decoded user text like `1 < 2 > 0` is preserved.
+ *   7. Collapse whitespace to a single space; trim ends.
  *
  * Orphan unclosed dangerous tags drop the remainder of the input
  * fail-closed at steps 2 / 5 — no payload leak.
@@ -118,26 +160,33 @@ export function htmlToText(html: string): string {
 
   let out = html;
 
-  // 1. Strip HTML comments (may contain `<script>` etc. as text).
-  out = out.replace(/<!--[\s\S]*?-->/g, "");
+  // 1. Strip HTML comments (may contain `<script>` etc. as text),
+  //    DOCTYPE / CDATA declarations, and XML processing instructions.
+  //    These all start with `<!` or `<?` which the quote-aware tag
+  //    stripper does NOT match (it requires alpha after `<`).
+  out = out.replace(/<!--[\s\S]*?-->/g, "");  // comments
+  out = out.replace(/<![^>]*>/g, "");          // DOCTYPE / CDATA
+  out = out.replace(/<\?[\s\S]*?\?>/g, "");    // processing instructions (XML / PHP-style)
 
   // 2. First DANGEROUS_TAGS removal pass (raw source).
   out = removeDangerousTags(out);
 
-  // 3. Strip remaining real HTML tags BEFORE entity decode — decoded
-  //    user-content `<` / `>` (e.g. `1 < 2`) must not be eaten by the
-  //    tag stripper.
-  out = out.replace(/<[^>]+>/g, " ");
+  // 3. First quote-aware generic tag strip — real HTML markup.
+  out = out.replace(QUOTE_AWARE_TAG_STRIP, " ");
 
-  // 4. Decode entities — may surface entity-encoded dangerous tags.
+  // 4. Decode entities — may surface entity-encoded HTML tags.
   out = decodeBasicEntities(out);
 
-  // 5. Second DANGEROUS_TAGS pass — catches now-decoded entity
-  //    payloads. NO generic tag stripping after this point (would
-  //    consume legitimate decoded `<` / `>` user content).
+  // 5. Second DANGEROUS_TAGS pass — catches now-decoded entity payloads.
   out = removeDangerousTags(out);
 
-  // 6. Collapse whitespace; trim.
+  // 6. Second quote-aware generic tag strip — catches now-decoded
+  //    ordinary tags (e.g. `<p>` / `<img onerror=...>`). The quote-
+  //    aware regex requires `<` + alpha/`/alpha` so legitimate decoded
+  //    user content like `1 < 2 > 0` is preserved.
+  out = out.replace(QUOTE_AWARE_TAG_STRIP, " ");
+
+  // 7. Collapse whitespace; trim.
   out = out.replace(/[\s ]+/g, " ").trim();
 
   return out;
