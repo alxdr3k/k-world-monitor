@@ -441,17 +441,65 @@ describe("computeTotalCostUsd — pricing math", () => {
     ).toThrow(OpenAIPricingUnknownError);
   });
 
-  it("pricing table contains only callable Chat-Completions defaults (PR #100 round 6 F22 — pro placeholders dropped)", () => {
-    // Round 6 F22 removed gpt-5.5-pro* / gpt-5-pro* placeholder
-    // entries because the placeholders were 6-8x below documented
-    // OpenAI list prices. Pro-tier callers now hit
-    // OpenAIResponsesApiOnlyError (known set) or
-    // OpenAIPricingUnknownError at construction.
+  it("pricing table contains Chat-Completions defaults + verified pro SKUs (Cycle 42 ratification)", () => {
+    // Cycle 42 follow-up: verified OpenAI catalog pricing for pro
+    // SKUs added (codex F22 citation). Pro entries are kept here
+    // so a future Responses API client can price them; the current
+    // /chat/completions client still rejects them at construction
+    // via OPENAI_RESPONSES_API_ONLY_MODELS.
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5"]).toBeDefined();
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-mini"]).toBeDefined();
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-nano"]).toBeDefined();
-    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]).toBeUndefined();
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]).toBeDefined();
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.2-pro"]).toBeDefined();
+    // gpt-5.5-pro placeholders remain absent (operator-pending
+    // ratification per ADR-0023 INV-0023-3).
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.5-pro"]).toBeUndefined();
+  });
+
+  it("pro SKU pricing matches documented OpenAI rates with no cached discount (codex F22 + PR #101 F31)", () => {
+    // gpt-5-pro: $15.0 input / $120.0 output per 1M tokens. OpenAI
+    // docs list cached input as "-" (no discount) — cachedInput
+    // intentionally omitted so computeTotalCostUsd falls back to
+    // the standard input rate for cached tokens.
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]!.input).toBe(15.0);
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]!.output).toBe(120.0);
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]!.cachedInput).toBeUndefined();
+    // gpt-5.2-pro: $21.0 input / $168.0 output per 1M tokens.
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.2-pro"]!.input).toBe(21.0);
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.2-pro"]!.output).toBe(168.0);
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.2-pro"]!.cachedInput).toBeUndefined();
+  });
+
+  it("pro tier cached tokens bill at standard input rate (no discount, PR #101 F31)", () => {
+    // Confirm the fall-back path: 1M cached tokens for gpt-5-pro
+    // costs the same as 1M non-cached input tokens, not a
+    // discounted 10%-style rate.
+    const allCached = computeTotalCostUsd("gpt-5-pro", {
+      inputTokens: 1_000_000,
+      cachedTokens: 1_000_000,
+    });
+    const nonCached = computeTotalCostUsd("gpt-5-pro", {
+      inputTokens: 1_000_000,
+      cachedTokens: 0,
+    });
+    expect(allCached).toBeCloseTo(nonCached, 6);
+    expect(allCached).toBeCloseTo(15.0, 6);
+  });
+
+  it("Responses-API-only set drops bogus extended-thinking SKU (Cycle 42 ratification)", () => {
+    // Extended thinking is an effort parameter (reasoning_effort),
+    // not a separate SKU. The previous OPENAI_RESPONSES_API_ONLY_MODELS
+    // entry `gpt-5-pro-extended-thinking` was incorrect and is now
+    // dropped. The placeholder gpt-5.5-* entries remain because
+    // they match data/llm_routing.yaml pending operator
+    // ratification.
+    expect(
+      OPENAI_RESPONSES_API_ONLY_MODELS.has("gpt-5-pro-extended-thinking"),
+    ).toBe(false);
+    expect(OPENAI_RESPONSES_API_ONLY_MODELS.has("gpt-5-pro")).toBe(true);
+    expect(OPENAI_RESPONSES_API_ONLY_MODELS.has("gpt-5.2-pro")).toBe(true);
+    expect(OPENAI_RESPONSES_API_ONLY_MODELS.has("gpt-5.5-pro")).toBe(true);
   });
 });
 
