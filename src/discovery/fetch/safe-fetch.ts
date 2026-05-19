@@ -603,6 +603,79 @@ export class ContentTypeMismatchError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// Declared `Content-Type` semantic classification (INV-0028-6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Semantic group for a declared `Content-Type` header.
+ *
+ * Per ADR-0028 INV-0028-6, only declared types within a known semantic family
+ * (`xml` / `json` / `html`) are checked against the sniffed body. Missing or
+ * unrecognized types resolve to `unknown` and never trigger a mismatch error
+ * (operator decision D1 2026-05-18: missing Content-Type 은 hard fail X —
+ * downstream parser failure 로 처리).
+ */
+export type DeclaredContentGroup = "xml" | "json" | "html" | "unknown";
+
+/**
+ * Map a raw `Content-Type` header value to its semantic group.
+ *
+ * Handles the common `type/subtype; charset=...; boundary=...` form by
+ * splitting on `;` and lowercasing the MIME atom before comparison. Returns
+ * `"unknown"` for null / empty / unrecognized MIME atoms — these will not
+ * trigger `ContentTypeMismatchError` in `safeFetch` Step 8.
+ */
+export function classifyDeclaredContentType(
+  contentType: string | null | undefined,
+): DeclaredContentGroup {
+  if (!contentType) return "unknown";
+  const mime = contentType.split(";")[0]?.trim().toLowerCase();
+  if (!mime) return "unknown";
+
+  // RSS / Atom / generic XML family
+  if (
+    mime === "application/rss+xml" ||
+    mime === "application/atom+xml" ||
+    mime === "application/xml" ||
+    mime === "text/xml"
+  ) {
+    return "xml";
+  }
+
+  // JSON / Feed JSON family
+  if (mime === "application/feed+json" || mime === "application/json") {
+    return "json";
+  }
+
+  // HTML
+  if (mime === "text/html") return "html";
+
+  return "unknown";
+}
+
+/**
+ * Returns true iff the declared semantic group and the sniffed `ContentKind`
+ * resolve to incompatible families. Used by `safeFetch` Step 8 to throw
+ * `ContentTypeMismatchError` before downstream persistence / parsing.
+ *
+ * - `unknown` on either side is never a mismatch (operator decision D1
+ *   2026-05-18) — the body parser will surface its own error if the actual
+ *   format is broken.
+ * - `executable` on the sniffed side is normally handled by the
+ *   `SsrfBlockedError` branch in `safeFetch` BEFORE this check fires;
+ *   we still treat it as a mismatch as defense in depth in case the call
+ *   site changes.
+ */
+export function isContentTypeMismatch(
+  declared: DeclaredContentGroup,
+  sniffed: ContentKind,
+): boolean {
+  if (declared === "unknown" || sniffed === "unknown") return false;
+  if (sniffed === "executable") return true; // defense in depth
+  return declared !== sniffed;
+}
+
+// ---------------------------------------------------------------------------
 // Dependency injection types (for testing)
 // ---------------------------------------------------------------------------
 
@@ -842,6 +915,20 @@ export async function safeFetch(
   const contentKind = sniffMagic(sniff512);
   if (contentKind === "executable") {
     throw new SsrfBlockedError(finalUrl, "response body is an executable binary");
+  }
+
+  // Declared-vs-sniffed Content-Type mismatch (INV-0028-6 — operator D1 2026-05-18).
+  // Block when declared family and sniffed kind are both known and disagree
+  // (e.g. declared=application/json but body sniffs as HTML — common error-page
+  // disguise). Missing / unrecognized declared types pass through so that
+  // common server header sloppiness does not cause false rejections.
+  const declaredContentType = response.headers.get("Content-Type");
+  const declaredGroup = classifyDeclaredContentType(declaredContentType);
+  if (isContentTypeMismatch(declaredGroup, contentKind)) {
+    throw new ContentTypeMismatchError(
+      declaredContentType ?? "(missing)",
+      contentKind,
+    );
   }
 
   return { status: response.status, headers: response.headers, body, finalUrl, contentKind };
