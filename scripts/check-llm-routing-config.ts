@@ -179,6 +179,17 @@ export function assertTier0VendorRoles(config: LlmRoutingConfig): void {
  * allowed inside vendor sub-blocks if a future operational metric needs
  * them (e.g. `tier_3.openai.cost_per_1m_tokens` would not trigger this).
  */
+/**
+ * Documented exemplars of tier-canonical KEYS that violate INV-0023-3.
+ *
+ * **Note (PR #93 codex review round 2 P2 — 2026-05-19)**: this Set is
+ * retained for documentation / coverage assertions but is no longer the
+ * primary key-name guard. `assertTiersCapabilityCanonical` now uses the
+ * snake_case-aware word-boundary scan over `FORBIDDEN_CAPABILITY_VALUE_TOKENS`
+ * for both keys and values, which strictly supersedes the exact-match
+ * lookup (any key in this Set is also matched by the regex scan, plus
+ * composite forms like `cost_basis`, `price_axis`, `budget_label`).
+ */
 export const FORBIDDEN_TIER_PRICE_AXIS_KEYS: ReadonlySet<string> = new Set([
   "price",
   "cost",
@@ -216,9 +227,14 @@ export const FORBIDDEN_CAPABILITY_VALUE_TOKENS: readonly string[] = [
 /**
  * Asserts each tier entry has a non-empty `capability` string field
  * (canonical tier criterion per INV-0023-3), contains no top-level
- * key from FORBIDDEN_TIER_PRICE_AXIS_KEYS, AND whose capability VALUE
- * does not include any FORBIDDEN_CAPABILITY_VALUE_TOKENS (with
- * snake_case-aware word boundaries — see token list docstring).
+ * key whose lowercased form matches a `FORBIDDEN_CAPABILITY_VALUE_TOKENS`
+ * token as a snake_case word boundary (PR #93 codex review round 2 P2 —
+ * was previously exact-match on `FORBIDDEN_TIER_PRICE_AXIS_KEYS` only, so
+ * a future catalog edit like `cost_basis`, `price_axis`, or `budget_label`
+ * could silently reintroduce the price axis; now any key containing a
+ * forbidden token as a token-boundary substring is rejected), AND whose
+ * capability VALUE does not include any FORBIDDEN_CAPABILITY_VALUE_TOKENS
+ * (same word-boundary scan).
  *
  * Vendor sub-blocks (tier.openai / tier.anthropic / tier.google) are
  * intentionally exempt from both scans — operational cost metadata MAY
@@ -233,10 +249,14 @@ export function assertTiersCapabilityCanonical(config: LlmRoutingConfig): void {
     }
 
     for (const key of Object.keys(tier)) {
-      if (FORBIDDEN_TIER_PRICE_AXIS_KEYS.has(key.toLowerCase())) {
-        throw new LlmRoutingConfigError(
-          `INV-0023-3: tier '${tierKey}' has forbidden price-axis canonical key '${key}' (price/cost/cheap/budget terms must not be tier-canonical; ADR-0023 INV-0023-3)`,
-        );
+      const keyLower = key.toLowerCase();
+      for (const token of FORBIDDEN_CAPABILITY_VALUE_TOKENS) {
+        const pattern = new RegExp(`(?:^|[^a-z])${token}(?![a-z])`);
+        if (pattern.test(keyLower)) {
+          throw new LlmRoutingConfigError(
+            `INV-0023-3: tier '${tierKey}' has forbidden price-axis canonical key '${key}' containing token '${token}' (price/cost/cheap/budget terms must not appear as tier-canonical keys — including composite forms like cost_basis / price_axis / budget_label; ADR-0023 INV-0023-3)`,
+          );
+        }
       }
     }
 

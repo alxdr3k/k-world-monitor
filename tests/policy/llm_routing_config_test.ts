@@ -350,6 +350,45 @@ describe("assertTiersCapabilityCanonical — INV-0023-3", () => {
   it("FORBIDDEN_CAPABILITY_VALUE_TOKENS exports the documented set", () => {
     expect(FORBIDDEN_CAPABILITY_VALUE_TOKENS).toEqual(["price", "cost", "cheap", "budget"]);
   });
+
+  // PR #93 codex review round 2 P2 — composite key names containing forbidden tokens
+  it("throws on composite tier-canonical key 'cost_basis' (round 2 codex P2)", () => {
+    const config = baseConfig();
+    (config.tiers.tier_2 as unknown as { cost_basis: string }).cost_basis = "per_million_tokens";
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(/forbidden price-axis canonical key 'cost_basis'/);
+  });
+
+  it("throws on composite tier-canonical key 'price_axis' (round 2 codex P2)", () => {
+    const config = baseConfig();
+    (config.tiers.tier_2 as unknown as { price_axis: string }).price_axis = "tier_3";
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(/'price_axis'/);
+  });
+
+  it("throws on composite tier-canonical key 'budget_label' (round 2 codex P2)", () => {
+    const config = baseConfig();
+    (config.tiers.tier_2 as unknown as { budget_label: string }).budget_label = "low";
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(/'budget_label'/);
+  });
+
+  it("throws on composite tier-canonical key 'cheap_indicator' (round 2 codex P2)", () => {
+    const config = baseConfig();
+    (config.tiers.tier_2 as unknown as { cheap_indicator: boolean }).cheap_indicator = true;
+    expect(() => assertTiersCapabilityCanonical(config)).toThrow(LlmRoutingConfigError);
+  });
+
+  it("does NOT false-match legitimate keys with embedded non-token sequences (round 2 codex P2)", () => {
+    const config = baseConfig();
+    // Existing tier-canonical keys (capability, used_in, openai, anthropic, google)
+    // contain no forbidden tokens — baseline should still pass.
+    expect(() => assertTiersCapabilityCanonical(config)).not.toThrow();
+    // Hypothetical additions like 'accost_metadata' / 'costume_class' should
+    // also pass (token regex requires word boundary).
+    (config.tiers.tier_2 as unknown as { accost_metadata: string }).accost_metadata = "x";
+    expect(() => assertTiersCapabilityCanonical(config)).not.toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------
