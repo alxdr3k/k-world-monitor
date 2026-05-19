@@ -72,13 +72,26 @@ export const OPENAI_PRICING_USD_PER_1M_TOKENS: Record<
   string,
   { input: number; output: number; cachedInput?: number }
 > = {
-  // PR #100 codex round 6 F22 — pro-tier placeholder pricing was
-  // 6-8x below documented OpenAI list prices (round 4 added
-  // $2.5/$20 for gpt-5-pro but the actual rate is $15/$120 per 1M).
-  // Silent undercount of Tier 0/1 cost broke AC-019 throttling.
-  // Remove the placeholders entirely: callers using pro SKUs now
-  // get a clear constructor-time error (F23) until the operator
-  // ratifies the verified list prices.
+  // PR #100 codex round 4 F10 + round 6 F22 + Cycle 42 ratification —
+  // OpenAI catalog SKUs with documented per-1M-token pricing
+  // (2026-05). Pro tiers added with verified list rates (codex
+  // citation https://platform.openai.com/docs/pricing): gpt-5-pro
+  // $15/$120, gpt-5.2-pro $21/$168. Cached input billed at ~10%
+  // standard per OpenAI prompt-caching policy.
+  //
+  // Tier 2/3 entries (gpt-5 / gpt-5-mini / gpt-5-nano) reflect
+  // OpenAI list pricing for the GPT-5 family at the time of EXTR-
+  // 1A.2b authoring; verify against catalog when ADR-0023 ratifies
+  // the actual `data/llm_routing.yaml` snapshot for each tier.
+  //
+  // Pro SKUs live alongside Tier 2/3 in this table so a future
+  // Responses API client (which is the only OpenAIClient path
+  // permitted to invoke pro models — see
+  // OPENAI_RESPONSES_API_ONLY_MODELS) can price them without
+  // OpenAIPricingUnknownError. The current /chat/completions
+  // client still rejects them at construction via F25.
+  "gpt-5-pro": { input: 15.0, output: 120.0, cachedInput: 1.5 },
+  "gpt-5.2-pro": { input: 21.0, output: 168.0, cachedInput: 2.1 },
   "gpt-5": { input: 1.25, output: 10.0, cachedInput: 0.125 },
   "gpt-5-mini": { input: 0.25, output: 2.0, cachedInput: 0.025 },
   "gpt-5-nano": { input: 0.05, output: 0.4, cachedInput: 0.005 },
@@ -86,17 +99,17 @@ export const OPENAI_PRICING_USD_PER_1M_TOKENS: Record<
 
 /**
  * OpenAI SKUs that route through the Responses API (not Chat
- * Completions). PR #100 codex round 6 F20 — `OpenAIClient` posts to
- * `/chat/completions`, so accepting these model IDs would fail at
- * the provider after `ArticleExtractor` had already opened a
- * run_ledger row. Reject them at construction with a clear
- * endpoint-mismatch error so the operator hits the failure before
- * the ledger is touched. Extend this set when adopting Responses
- * API support in a follow-up slice.
+ * Completions). PR #100 codex round 6 F20 + Cycle 42 ratification —
+ * curated against verified OpenAI catalog. `gpt-5-pro-extended-
+ * thinking` was dropped because extended thinking is an effort
+ * parameter (`reasoning_effort: high`) on `gpt-5-pro`, not a
+ * separate SKU. The `gpt-5.5-*` entries remain because they
+ * correspond to placeholder names in `data/llm_routing.yaml`
+ * (pending operator ratification of the actual catalog SKU per
+ * ADR-0023 INV-0023-3).
  */
 export const OPENAI_RESPONSES_API_ONLY_MODELS = new Set<string>([
   "gpt-5-pro",
-  "gpt-5-pro-extended-thinking",
   "gpt-5.2-pro",
   "gpt-5.5-pro",
   "gpt-5.5-pro-extended-thinking",
