@@ -190,28 +190,47 @@ export class ArticleExtractor implements Extractor {
     } catch (err) {
       if (runId !== undefined) {
         if (err instanceof LlmIncompleteResultError && err.usage) {
-          // PR #100 codex round 5 F15 — also forward the resolved
-          // model snapshot so the failed billable row keeps the
+          // PR #100 codex round 5 F15 — forward the resolved model
+          // snapshot so the failed billable row keeps the
           // reproducibility anchor (matches completeRun.modelId
           // rewrite for successful rows).
+          // Round 8 F30 — wrap the payload failRun in its own
+          // try/catch. A future vendor client could throw an
+          // LlmIncompleteResultError with a malformed usage
+          // payload (NaN cost, fractional tokens) that failRun's
+          // own validation rejects. Without the wrap, the
+          // validation throw bubbled out before updating the row,
+          // leaving the ledger entry stuck in `running`. Fall back
+          // to `failRun(runId)` without usage so the row reaches a
+          // terminal state even if the vendor payload is bad, then
+          // rethrow the original provider error.
           const startedModelId = this.deps.llmClient.model;
-          failRun(runId, {
-            ...(err.usage.inputTokens !== undefined
-              ? { inputTokens: err.usage.inputTokens }
-              : {}),
-            ...(err.usage.outputTokens !== undefined
-              ? { outputTokens: err.usage.outputTokens }
-              : {}),
-            ...(err.usage.cachedTokens !== undefined
-              ? { cachedTokens: err.usage.cachedTokens }
-              : {}),
-            ...(err.usage.totalCostUsd !== undefined
-              ? { totalCostUsd: err.usage.totalCostUsd }
-              : {}),
-            ...(err.usage.modelId && err.usage.modelId !== startedModelId
-              ? { modelId: err.usage.modelId }
-              : {}),
-          });
+          try {
+            failRun(runId, {
+              ...(err.usage.inputTokens !== undefined
+                ? { inputTokens: err.usage.inputTokens }
+                : {}),
+              ...(err.usage.outputTokens !== undefined
+                ? { outputTokens: err.usage.outputTokens }
+                : {}),
+              ...(err.usage.cachedTokens !== undefined
+                ? { cachedTokens: err.usage.cachedTokens }
+                : {}),
+              ...(err.usage.totalCostUsd !== undefined
+                ? { totalCostUsd: err.usage.totalCostUsd }
+                : {}),
+              ...(err.usage.modelId && err.usage.modelId !== startedModelId
+                ? { modelId: err.usage.modelId }
+                : {}),
+            });
+          } catch {
+            try {
+              failRun(runId);
+            } catch {
+              // best-effort — original provider error is the one
+              // the caller needs to see.
+            }
+          }
         } else {
           failRun(runId);
         }

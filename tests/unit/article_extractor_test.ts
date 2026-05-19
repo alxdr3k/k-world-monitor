@@ -787,6 +787,45 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
     expect(row.total_cost_usd).toBeNull();
   });
 
+  it("malformed LlmIncompleteResultError usage → fallback failRun without usage (PR #100 round 8 F30)", async () => {
+    // Future vendor client throws an incomplete-error whose usage
+    // payload is malformed enough to trip failRun's own validation
+    // (e.g. NaN cost). Without F30's try/catch wrap, this would
+    // leave the ledger row stuck in `running`. With the wrap, the
+    // payload failRun rejects, then a bare failRun(runId) call
+    // marks the row `failed` and the original provider error
+    // propagates.
+    const incompleteErr = new LlmIncompleteResultError(
+      "length",
+      "truncated",
+      {
+        inputTokens: 100,
+        outputTokens: 50,
+        totalCostUsd: Number.NaN, // failRun rejects this
+      },
+    );
+    const llm = new MockLlmClient(defaultMockResponse(), {
+      vendor: "openai",
+      tier: 2,
+      model: "gpt-5-mini",
+      throwOnInvoke: incompleteErr,
+    });
+    const ext = new ArticleExtractor({ llmClient: llm });
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(LlmIncompleteResultError);
+    const row = ledgerRows()[0]!;
+    // Row is in a terminal state, not stuck running.
+    expect(row.status).toBe("failed");
+    // Cost NULL because the malformed payload was rejected and we
+    // fell back to bare failRun.
+    expect(row.total_cost_usd).toBeNull();
+  });
+
   it("completeRun validation throw → row marked failed not stuck running (PR #100 round 4 F11)", async () => {
     // Construct a response whose totalCostUsd is NaN — completeRun
     // rejects it. ArticleExtractor's try/catch around completeRun

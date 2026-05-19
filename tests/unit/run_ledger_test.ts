@@ -129,6 +129,23 @@ describe("startRun sessionId writer-boundary validation (PR #100 round 7 F24)", 
       .get(id) as Record<string, unknown>;
     expect(row.session_id).toBeNull();
   });
+
+  it("trims padded sessionId before INSERT (PR #100 round 8 F28)", () => {
+    const id = startRun({
+      stage: "extract",
+      vendor: "openai",
+      tier: 2,
+      modelId: "gpt-5-mini",
+      sessionId: "  sess_01HXYZ  ",
+    });
+    const { getDb } = require("../../src/storage/sqlite/connection");
+    const row = getDb()
+      .prepare("SELECT session_id FROM run_ledger WHERE run_id = ?")
+      .get(id) as Record<string, unknown>;
+    // Stored value has no surrounding whitespace — matches
+    // research_session.session_id round-trip.
+    expect(row.session_id).toBe("sess_01HXYZ");
+  });
 });
 
 describe("startRun", () => {

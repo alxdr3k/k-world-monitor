@@ -534,10 +534,24 @@ export class OpenAIClient implements LlmClient {
       ? outputTokensRaw
       : undefined;
     const cachedTokens = isCounter(cachedTokensRaw) ? cachedTokensRaw : undefined;
+    // PR #100 codex round 8 F29 — reject impossible accounting where
+    // `cached_tokens > prompt_tokens`. Without this guard, a
+    // malformed provider response would bill cached tokens beyond
+    // the actual input total, inflating cost. Treat the response
+    // as malformed (incomplete usage) so the ledger row goes
+    // through failRun for retry / manual review. The
+    // `usage_inconsistent` reason is distinct from
+    // `missing_usage` so operators can distinguish provider bugs
+    // from missing fields.
+    const usageInconsistent =
+      cachedTokens !== undefined &&
+      inputTokens !== undefined &&
+      cachedTokens > inputTokens;
     const usagePresent =
       usageBlock !== undefined &&
       inputTokens !== undefined &&
-      outputTokens !== undefined;
+      outputTokens !== undefined &&
+      !usageInconsistent;
 
     // PR #100 codex round 3 P2 — reject malformed responses where
     // `choices` is empty or the first choice lacks `message.content`.
@@ -614,11 +628,15 @@ export class OpenAIClient implements LlmClient {
       );
     }
 
-    // Success path requires usage present (F12) — silent zero-cost
-    // success would let billable calls disappear from AC-019.
+    // Success path requires usage present (F12 + round 8 F29) —
+    // silent zero-cost success would let billable calls disappear
+    // from AC-019; inconsistent usage (cached > input) would
+    // inflate cost. Both cases route through failRun without a
+    // usage payload (no half-credible accounting on the failed
+    // row).
     if (!usagePresent) {
       throw new OpenAIIncompleteCompletionError(
-        "missing_usage",
+        usageInconsistent ? "usage_inconsistent" : "missing_usage",
         text,
         undefined,
       );

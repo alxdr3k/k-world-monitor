@@ -810,6 +810,49 @@ describe("OpenAIClient.invoke — null/malformed usage counters (PR #100 round 6
     ).rejects.toThrow(OpenAIIncompleteCompletionError);
   });
 
+  it("rejects cached_tokens > prompt_tokens as usage_inconsistent (PR #100 round 8 F29)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: 100,
+        completion_tokens: 50,
+        prompt_tokens_details: { cached_tokens: 200 },
+      },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      expect(err).toBeInstanceOf(OpenAIIncompleteCompletionError);
+      expect((err as OpenAIIncompleteCompletionError).finishReason).toBe(
+        "usage_inconsistent",
+      );
+      // No usage carried to avoid passing impossible accounting to
+      // failRun.
+      expect((err as OpenAIIncompleteCompletionError).usage).toBeUndefined();
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
+  });
+
+  it("accepts cached_tokens === prompt_tokens (all-cached input is valid)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: 100,
+        completion_tokens: 50,
+        prompt_tokens_details: { cached_tokens: 100 },
+      },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    const result = await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    expect(result.cachedTokens).toBe(100);
+  });
+
   it("incomplete completion with null counter → error.usage is undefined (no failRun validation throw)", async () => {
     const { fetch } = makeFetchMock(200, {
       choices: [

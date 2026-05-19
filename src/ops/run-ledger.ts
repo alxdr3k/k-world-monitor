@@ -82,21 +82,21 @@ export function startRun(input: StartRunInput): string {
     throw new Error(
       `startRun: domainOverrideReason is required for non-openai vendor '${input.vendor}'`
     );
-  // PR #100 codex round 7 F24 — writer-boundary validation for the
-  // research_session FK column. ArticleExtractor (round 4 F14)
-  // already validates its dep, but other future callers
-  // (dossier / scenario / cite_check) write through this same
-  // function. Without a guard here, any direct caller could write
-  // a blank string or a `src_*` typo and permanently corrupt the
-  // per-session cost / audit grouping for the column documented
-  // (v1_schema.sql) as the research_session FK. Reject at the
-  // writer boundary so the FK invariant holds regardless of caller.
+  // PR #100 codex round 7 F24 + round 8 F28 — validate AND
+  // normalize the sessionId. Earlier round validated `trimmed` but
+  // wrote `input.sessionId` raw, so a padded but otherwise valid
+  // ID (e.g. `" sess_01HXYZ "`) was accepted with whitespace
+  // intact, never matching research_session.session_id or the
+  // per-session cost / audit grouping. Round 8 stores the trimmed
+  // value so the FK constraint holds round-trip.
+  let trimmedSessionId: string | undefined;
   if (input.sessionId !== undefined) {
     const trimmed = input.sessionId.trim();
     if (trimmed === "" || !trimmed.startsWith("sess_"))
       throw new Error(
         `startRun: sessionId must be a non-blank \`sess_<ULID>\` (research_session FK), got '${input.sessionId}'`
       );
+    trimmedSessionId = trimmed;
   }
 
   const runId = `run_${ulid()}`;
@@ -127,7 +127,7 @@ export function startRun(input: StartRunInput): string {
       input.datasetVintageId ?? null,
       input.libraryVersionLockSha256 ?? null,
       input.domainOverrideReason ?? null,
-      input.sessionId ?? null,
+      trimmedSessionId ?? null,
       now
     );
   return runId;
