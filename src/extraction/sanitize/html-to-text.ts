@@ -190,9 +190,19 @@ export function htmlToText(html: string): string {
   //    Order matters: dedicated CDATA pattern BEFORE generic decl
   //    strip so that CDATA-internal `>` characters don't truncate
   //    the block at the first `>` (PR #97 codex round 3 P2).
+  //
+  //    CDATA closed blocks UNWRAP rather than delete (PR #97 codex
+  //    round 4 P2 — RSS `description` / `content:encoded` fields
+  //    commonly arrive as `<![CDATA[<p>Safe</p>]]>` and deleting
+  //    them wholesale would discard benign article bodies. The
+  //    inner content flows through the rest of the pipeline so
+  //    DANGEROUS_TAGS / quote-aware tag strip / entity decode all
+  //    apply to it normally — adversarial `<![CDATA[<script>...]]>`
+  //    payloads are still caught by the DANGEROUS_TAGS pass that
+  //    runs after this step). Orphan unclosed CDATA stays fail-closed.
   out = out.replace(/<!--[\s\S]*?-->/g, "");                  // closed comments
   out = out.replace(/<!--[\s\S]*$/g, "");                     // orphan unclosed comment — fail-closed drop to EOF (PR #97 codex round 3 P2)
-  out = out.replace(/<!\[CDATA\[[\s\S]*?\]\]>/gi, "");        // closed CDATA (PR #97 codex round 3 P2)
+  out = out.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, " $1 ");  // unwrap closed CDATA inner content (PR #97 codex round 4 P2)
   out = out.replace(/<!\[CDATA\[[\s\S]*$/gi, "");             // orphan unclosed CDATA — fail-closed drop to EOF
   out = out.replace(/<![^>]*>/g, "");                          // remaining DOCTYPE / declarations
   out = out.replace(/<\?[\s\S]*?\?>/g, "");                    // closed processing instructions (XML / PHP-style)
