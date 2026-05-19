@@ -21,6 +21,8 @@ import {
   OPENAI_TIER_DEFAULT_MODEL,
   OpenAIApiError,
   OpenAIClient,
+  OpenAIIncompleteCompletionError,
+  resolveOpenAIPricingKey,
 } from "../../src/extraction/llm/openai-client";
 import type { LlmClient } from "../../src/extraction/llm/client";
 
@@ -428,9 +430,235 @@ describe("computeTotalCostUsd — pricing math", () => {
     expect(unknown).toBe(known);
   });
 
-  it("pricing table contains all 3 default tier models", () => {
+  it("pricing table contains all 4 default tier models (DEC-010 routing)", () => {
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.5-pro-extended-thinking"]).toBeDefined();
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.5-pro"]).toBeDefined();
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5"]).toBeDefined();
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-mini"]).toBeDefined();
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-nano"]).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 2 — DEC-010 Tier 0/1 routing
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient — Tier 0/1 default routing (PR #100 P2)", () => {
+  it("Tier 0 default = gpt-5.5-pro-extended-thinking (DEC-010 routing)", () => {
+    expect(OPENAI_TIER_DEFAULT_MODEL[0]).toBe("gpt-5.5-pro-extended-thinking");
+    const client = new OpenAIClient({ apiKey: "sk", tier: 0 });
+    expect(client.model).toBe("gpt-5.5-pro-extended-thinking");
+  });
+
+  it("Tier 1 default = gpt-5.5-pro (DEC-010 routing)", () => {
+    expect(OPENAI_TIER_DEFAULT_MODEL[1]).toBe("gpt-5.5-pro");
+    const client = new OpenAIClient({ apiKey: "sk", tier: 1 });
+    expect(client.model).toBe("gpt-5.5-pro");
+  });
+
+  it("Tier 0 and Tier 1 route to DIFFERENT models (no collapse to gpt-5)", () => {
+    expect(OPENAI_TIER_DEFAULT_MODEL[0]).not.toBe(OPENAI_TIER_DEFAULT_MODEL[1]);
+    expect(OPENAI_TIER_DEFAULT_MODEL[0]).not.toBe("gpt-5");
+    expect(OPENAI_TIER_DEFAULT_MODEL[1]).not.toBe("gpt-5");
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 2 — pricing key prefix-match for dated snapshots
+// ---------------------------------------------------------------------
+
+describe("resolveOpenAIPricingKey — dated-snapshot prefix lookup (PR #100 P2)", () => {
+  it("exact alias hit returns the alias", () => {
+    expect(resolveOpenAIPricingKey("gpt-5-mini")).toBe("gpt-5-mini");
+    expect(resolveOpenAIPricingKey("gpt-5")).toBe("gpt-5");
+    expect(resolveOpenAIPricingKey("gpt-5-nano")).toBe("gpt-5-nano");
+    expect(resolveOpenAIPricingKey("gpt-5.5-pro")).toBe("gpt-5.5-pro");
+    expect(resolveOpenAIPricingKey("gpt-5.5-pro-extended-thinking")).toBe(
+      "gpt-5.5-pro-extended-thinking",
+    );
+  });
+
+  it("dated snapshot for gpt-5-mini resolves to gpt-5-mini (not gpt-5 prefix-eat)", () => {
+    expect(resolveOpenAIPricingKey("gpt-5-mini-2025-08-07")).toBe("gpt-5-mini");
+  });
+
+  it("dated snapshot for gpt-5-nano resolves to gpt-5-nano", () => {
+    expect(resolveOpenAIPricingKey("gpt-5-nano-2025-08-07")).toBe("gpt-5-nano");
+  });
+
+  it("dated snapshot for gpt-5 (without -mini/-nano suffix) resolves to gpt-5", () => {
+    expect(resolveOpenAIPricingKey("gpt-5-2025-09-15")).toBe("gpt-5");
+  });
+
+  it("dated snapshot for gpt-5.5-pro-extended-thinking does not collapse to gpt-5.5-pro", () => {
+    expect(
+      resolveOpenAIPricingKey("gpt-5.5-pro-extended-thinking-2026-01-01"),
+    ).toBe("gpt-5.5-pro-extended-thinking");
+  });
+
+  it("dated snapshot for gpt-5.5-pro resolves to gpt-5.5-pro", () => {
+    expect(resolveOpenAIPricingKey("gpt-5.5-pro-2026-01-01")).toBe("gpt-5.5-pro");
+  });
+
+  it("truly unknown model returns null (caller decides fallback)", () => {
+    expect(resolveOpenAIPricingKey("future-model-xyz")).toBeNull();
+    expect(resolveOpenAIPricingKey("claude-sonnet-4-6")).toBeNull();
+  });
+});
+
+describe("computeTotalCostUsd — dated snapshot pricing (PR #100 P2)", () => {
+  it("dated gpt-5-mini snapshot prices at gpt-5-mini rate (not fallback)", () => {
+    const aliasCost = computeTotalCostUsd("gpt-5-mini", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    const datedCost = computeTotalCostUsd("gpt-5-mini-2025-08-07", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    expect(datedCost).toBeCloseTo(aliasCost, 6);
+  });
+
+  it("dated gpt-5 snapshot prices at gpt-5 rate (NOT eaten by gpt-5-mini fallback)", () => {
+    const aliasCost = computeTotalCostUsd("gpt-5", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    const datedCost = computeTotalCostUsd("gpt-5-2025-09-15", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    expect(datedCost).toBeCloseTo(aliasCost, 6);
+    // gpt-5 must be DIFFERENT from gpt-5-mini (round 1 P2 bug — Tier 0/1 was being undercounted).
+    const miniCost = computeTotalCostUsd("gpt-5-mini", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    expect(datedCost).not.toBeCloseTo(miniCost, 2);
+  });
+
+  it("dated gpt-5-nano snapshot prices at gpt-5-nano rate (NOT overcounted by gpt-5-mini fallback)", () => {
+    const aliasCost = computeTotalCostUsd("gpt-5-nano", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    const datedCost = computeTotalCostUsd("gpt-5-nano-2025-08-07", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    expect(datedCost).toBeCloseTo(aliasCost, 6);
+    const miniCost = computeTotalCostUsd("gpt-5-mini", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    expect(datedCost).toBeLessThan(miniCost);
+  });
+
+  it("Tier 0 (gpt-5.5-pro-extended-thinking) prices at premium rate", () => {
+    const t0 = computeTotalCostUsd("gpt-5.5-pro-extended-thinking", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    const t2 = computeTotalCostUsd("gpt-5-mini", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    expect(t0).toBeGreaterThan(t2);
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 2 — finish_reason rejection
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient.invoke — finish_reason rejection (PR #100 P2)", () => {
+  it("throws OpenAIIncompleteCompletionError when finish_reason='length' (truncated)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      model: "gpt-5-mini-2025-08-07",
+      choices: [
+        {
+          message: { content: "partial output cut off" },
+          finish_reason: "length",
+        },
+      ],
+      usage: { prompt_tokens: 100, completion_tokens: 2000 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", tier: 2, fetch });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIIncompleteCompletionError);
+  });
+
+  it("throws OpenAIIncompleteCompletionError when finish_reason='content_filter'", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [
+        {
+          message: { content: "" },
+          finish_reason: "content_filter",
+        },
+      ],
+      usage: { prompt_tokens: 100, completion_tokens: 0 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      expect(err).toBeInstanceOf(OpenAIIncompleteCompletionError);
+      expect((err as OpenAIIncompleteCompletionError).finishReason).toBe(
+        "content_filter",
+      );
+      expect((err as OpenAIIncompleteCompletionError).partialText).toBe("");
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
+  });
+
+  it("throws OpenAIIncompleteCompletionError when finish_reason='tool_calls' (unsupported at this layer)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [
+        {
+          message: { content: "" },
+          finish_reason: "tool_calls",
+        },
+      ],
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIIncompleteCompletionError);
+  });
+
+  it("accepts finish_reason='stop' (natural completion)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [
+        {
+          message: { content: "ok" },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    const result = await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    expect(result.text).toBe("ok");
+  });
+
+  it("accepts response without finish_reason (defensive — older API shape)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "ok" } }],
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    const result = await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    expect(result.text).toBe("ok");
   });
 });

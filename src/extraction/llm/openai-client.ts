@@ -21,19 +21,30 @@ import type {
 } from "./client";
 
 /**
- * Per-tier default model identifiers (ADR-0023 §statement). Operator
- * decision wires these to real OpenAI catalog names. Override at
- * construction time when a specific `model` is required.
+ * Per-tier default model identifiers (DEC-010 §Core lock item 1 +
+ * ADR-0023 §statement). Operator decision wires these to real
+ * OpenAI catalog names. Override at construction time when a
+ * specific `model` is required.
+ *
+ * Mapping per DEC-010 routing table:
+ *   - Tier 0: GPT-5.5 Pro extended thinking (scenario validate
+ *     adversarial / high-stakes thesis)
+ *   - Tier 1: GPT-5.5 Pro standard
+ *   - Tier 2: GPT-5 mini (default extraction)
+ *   - Tier 3: GPT-5 nano (publication preflight + cost-efficient
+ *     structured)
  *
  * **TODO (ADR-0023 ratification)**: the canonical OpenAI model
- * identifiers for GPT-5 family (released August 2025) need
- * verification against the OpenAI catalog at integration time. The
- * tier-2 placeholder `gpt-5-mini` matches the ADR-0023 abstract
- * model name; the dated suffix may differ.
+ * identifiers for GPT-5 / GPT-5.5 family need verification against
+ * the OpenAI catalog at integration time. Placeholders below match
+ * the public OpenAI naming convention as of EXTR-1A.2b authoring
+ * (2026-05); dated suffixes (`-YYYY-MM-DD`) arrive from
+ * `response.model` at runtime and are handled by prefix-matching in
+ * `computeTotalCostUsd` (PR #100 codex round 2 P2).
  */
 export const OPENAI_TIER_DEFAULT_MODEL: Record<LlmTier, string> = {
-  0: "gpt-5",
-  1: "gpt-5",
+  0: "gpt-5.5-pro-extended-thinking",
+  1: "gpt-5.5-pro",
   2: "gpt-5-mini",
   3: "gpt-5-nano",
 };
@@ -45,18 +56,56 @@ export const OPENAI_TIER_DEFAULT_MODEL: Record<LlmTier, string> = {
  *
  * **TODO (ADR-0023 ratification)**: actual OpenAI list prices need
  * verification at integration time. Placeholders below derive from
- * public OpenAI list pricing for the GPT-5 family at the time of
- * EXTR-1A.2b authoring (2026-05). Cached input tokens price at 10%
- * of standard input.
+ * public OpenAI list pricing for the GPT-5 / GPT-5.5 family at the
+ * time of EXTR-1A.2b authoring (2026-05). Cached input tokens price
+ * at 10% of standard input.
+ *
+ * Dated snapshots (e.g. `gpt-5-mini-2025-08-07`) returned in
+ * `response.model` are routed to the matching alias via prefix
+ * lookup in `computeTotalCostUsd` (PR #100 codex round 2 P2). Add
+ * new aliases here for any future SKU; per-snapshot overrides can
+ * be added with the full dated string if pricing diverges from the
+ * undated alias.
  */
 export const OPENAI_PRICING_USD_PER_1M_TOKENS: Record<
   string,
   { input: number; output: number; cachedInput?: number }
 > = {
+  "gpt-5.5-pro-extended-thinking": { input: 5.0, output: 40.0, cachedInput: 0.5 },
+  "gpt-5.5-pro": { input: 2.5, output: 20.0, cachedInput: 0.25 },
   "gpt-5": { input: 1.25, output: 10.0, cachedInput: 0.125 },
   "gpt-5-mini": { input: 0.25, output: 2.0, cachedInput: 0.025 },
   "gpt-5-nano": { input: 0.05, output: 0.4, cachedInput: 0.005 },
 };
+
+/**
+ * Resolve a model identifier to the pricing-table key, handling
+ * dated OpenAI snapshots (PR #100 codex round 2 P2). OpenAI returns
+ * `response.model` as the resolved dated snapshot (e.g.
+ * `gpt-5-mini-2025-08-07`) even when the request used the alias
+ * `gpt-5-mini`. Previously this fell through to the `gpt-5-mini`
+ * fallback for ALL non-default models (including `gpt-5-...` and
+ * `gpt-5-nano-...`), undercounting Tier 0/1 costs and overcounting
+ * Tier 3 costs.
+ *
+ * Resolution order (longest alias wins so `gpt-5-mini-...` is not
+ * eaten by the shorter `gpt-5-` prefix):
+ *   1. Exact match on the input model identifier.
+ *   2. Longest alias whose full string equals the input or is a
+ *      `${alias}-` prefix of the input (matches OpenAI's dated
+ *      suffix naming convention).
+ *   3. `null` — caller decides fallback policy.
+ */
+export function resolveOpenAIPricingKey(model: string): string | null {
+  if (model in OPENAI_PRICING_USD_PER_1M_TOKENS) return model;
+  const aliases = Object.keys(OPENAI_PRICING_USD_PER_1M_TOKENS).sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const alias of aliases) {
+    if (model === alias || model.startsWith(`${alias}-`)) return alias;
+  }
+  return null;
+}
 
 /**
  * Compute total USD cost for an OpenAI invocation. Returns `0` if
@@ -72,9 +121,13 @@ export function computeTotalCostUsd(
     cachedTokens?: number;
   },
 ): number {
-  const pricing =
-    OPENAI_PRICING_USD_PER_1M_TOKENS[model] ??
-    OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-mini"]!;
+  // PR #100 codex round 2 P2 — resolve dated snapshots (e.g.
+  // `gpt-5-mini-2025-08-07`) to their pricing-table alias via
+  // prefix lookup. Falls back to `gpt-5-mini` only for truly
+  // unknown models (no exact + no prefix match), preserving the
+  // operator-safe fail-closed default for forward compatibility.
+  const key = resolveOpenAIPricingKey(model) ?? "gpt-5-mini";
+  const pricing = OPENAI_PRICING_USD_PER_1M_TOKENS[key]!;
   const input = usage.inputTokens ?? 0;
   const output = usage.outputTokens ?? 0;
   const cached = usage.cachedTokens ?? 0;
@@ -130,6 +183,17 @@ interface OpenAIChatResponseShape {
     message?: {
       content?: string | null;
     };
+    /**
+     * OpenAI completion termination reason. Values seen in the
+     * Chat Completions API: `stop` (natural completion), `length`
+     * (max_completion_tokens hit — output truncated), `content_filter`
+     * (provider safety filter omitted output), `tool_calls` /
+     * `function_call` (model wants to call a tool — not supported
+     * at this layer). PR #100 codex round 2 P2 requires us to
+     * reject `length` / `content_filter` instead of silently
+     * marking the run completed with truncated/empty content.
+     */
+    finish_reason?: string | null;
   }>;
   usage?: {
     prompt_tokens?: number;
@@ -138,6 +202,28 @@ interface OpenAIChatResponseShape {
       cached_tokens?: number;
     };
   };
+}
+
+/**
+ * Thrown when OpenAI returns a 200 response whose first choice did
+ * NOT terminate naturally — e.g. `finish_reason: "length"` (token
+ * cap hit, output truncated) or `finish_reason: "content_filter"`
+ * (safety filter omitted output). The extractor caller catches
+ * this and propagates → `failRun` writes a `failed` row to
+ * `run_ledger` so the run is surfaced for retry / manual review
+ * rather than silently published as a `completed` extraction with
+ * empty or partial structured output (PR #100 codex round 2 P2).
+ */
+export class OpenAIIncompleteCompletionError extends Error {
+  constructor(
+    public readonly finishReason: string,
+    public readonly partialText: string,
+  ) {
+    super(
+      `OpenAI completion did not terminate naturally: finish_reason='${finishReason}' (partial text length=${partialText.length})`,
+    );
+    this.name = "OpenAIIncompleteCompletionError";
+  }
 }
 
 /**
@@ -224,7 +310,26 @@ export class OpenAIClient implements LlmClient {
     }
 
     const data = (await response.json()) as OpenAIChatResponseShape;
-    const text = data.choices?.[0]?.message?.content ?? "";
+    const firstChoice = data.choices?.[0];
+    const text = firstChoice?.message?.content ?? "";
+    // PR #100 codex round 2 P2 — reject truncated / filtered
+    // completions instead of silently returning empty / partial
+    // content. ArticleExtractor's try/catch converts this to
+    // `failRun` on the ledger row, so the failure is surfaced for
+    // retry / manual review. `tool_calls` / `function_call` are
+    // also rejected — this layer does not support tool execution,
+    // so a model that requests a tool call is effectively
+    // incomplete for extraction purposes.
+    const finishReason = firstChoice?.finish_reason;
+    const incompleteReasons = new Set([
+      "length",
+      "content_filter",
+      "tool_calls",
+      "function_call",
+    ]);
+    if (finishReason && incompleteReasons.has(finishReason)) {
+      throw new OpenAIIncompleteCompletionError(finishReason, text);
+    }
     // Prefer resolved snapshot from response.model (e.g. dated
     // `gpt-5-mini-2025-08-07`) over the request-time alias
     // `this.model`, so consumers writing to run_ledger.model_id
