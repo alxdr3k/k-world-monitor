@@ -90,8 +90,13 @@ export const OPENAI_PRICING_USD_PER_1M_TOKENS: Record<
   // OPENAI_RESPONSES_API_ONLY_MODELS) can price them without
   // OpenAIPricingUnknownError. The current /chat/completions
   // client still rejects them at construction via F25.
-  "gpt-5-pro": { input: 15.0, output: 120.0, cachedInput: 1.5 },
-  "gpt-5.2-pro": { input: 21.0, output: 168.0, cachedInput: 2.1 },
+  // Pro tier (PR #101 codex round 1 F31) — OpenAI docs list cached
+  // input pricing as "-" for `gpt-5-pro` / `gpt-5.2-pro` (no
+  // discount available). Omit `cachedInput` so `computeTotalCostUsd`
+  // falls back to the standard input rate per cached token (no
+  // discount), matching OpenAI's billing.
+  "gpt-5-pro": { input: 15.0, output: 120.0 },
+  "gpt-5.2-pro": { input: 21.0, output: 168.0 },
   "gpt-5": { input: 1.25, output: 10.0, cachedInput: 0.125 },
   "gpt-5-mini": { input: 0.25, output: 2.0, cachedInput: 0.025 },
   "gpt-5-nano": { input: 0.05, output: 0.4, cachedInput: 0.005 },

@@ -457,15 +457,34 @@ describe("computeTotalCostUsd — pricing math", () => {
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.5-pro"]).toBeUndefined();
   });
 
-  it("pro SKU pricing matches documented OpenAI rates (codex F22 citation)", () => {
-    // gpt-5-pro: $15.0 / $120.0 / $1.5 (input / output / cached) per 1M tokens.
+  it("pro SKU pricing matches documented OpenAI rates with no cached discount (codex F22 + PR #101 F31)", () => {
+    // gpt-5-pro: $15.0 input / $120.0 output per 1M tokens. OpenAI
+    // docs list cached input as "-" (no discount) — cachedInput
+    // intentionally omitted so computeTotalCostUsd falls back to
+    // the standard input rate for cached tokens.
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]!.input).toBe(15.0);
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]!.output).toBe(120.0);
-    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]!.cachedInput).toBe(1.5);
-    // gpt-5.2-pro: $21.0 / $168.0 / $2.1 per 1M tokens.
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5-pro"]!.cachedInput).toBeUndefined();
+    // gpt-5.2-pro: $21.0 input / $168.0 output per 1M tokens.
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.2-pro"]!.input).toBe(21.0);
     expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.2-pro"]!.output).toBe(168.0);
-    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.2-pro"]!.cachedInput).toBe(2.1);
+    expect(OPENAI_PRICING_USD_PER_1M_TOKENS["gpt-5.2-pro"]!.cachedInput).toBeUndefined();
+  });
+
+  it("pro tier cached tokens bill at standard input rate (no discount, PR #101 F31)", () => {
+    // Confirm the fall-back path: 1M cached tokens for gpt-5-pro
+    // costs the same as 1M non-cached input tokens, not a
+    // discounted 10%-style rate.
+    const allCached = computeTotalCostUsd("gpt-5-pro", {
+      inputTokens: 1_000_000,
+      cachedTokens: 1_000_000,
+    });
+    const nonCached = computeTotalCostUsd("gpt-5-pro", {
+      inputTokens: 1_000_000,
+      cachedTokens: 0,
+    });
+    expect(allCached).toBeCloseTo(nonCached, 6);
+    expect(allCached).toBeCloseTo(15.0, 6);
   });
 
   it("Responses-API-only set drops bogus extended-thinking SKU (Cycle 42 ratification)", () => {
