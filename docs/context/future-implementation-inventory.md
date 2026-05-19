@@ -48,7 +48,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 
 ## Inventory
 
-### ADR-0003 — 7-stage pipeline object model with 3-tier source layer
+### Inventory entry — ADR-0003 — 7-stage pipeline object model with 3-tier source layer
 
 - **Invariants**: INV-0003-1, INV-0003-2, INV-0003-3, INV-0003-4, INV-0003-5, INV-0003-6, INV-0003-7
 - **activation_phase**: superseded by ADR-0011 (9-stage) and ADR-0025 (10-stage)
@@ -56,7 +56,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: historical (superseded)
 - **reason**: 7-stage model replaced by 9-stage (ADR-0011) and then by 10-stage (ADR-0025). No new code targets this ADR; invariants preserved as audit trail only.
 
-### ADR-0004 — Storage tiers (Markdown / SQLite+FTS5 / R2 bytes)
+### Inventory entry — ADR-0004 — Storage tiers (Markdown / SQLite+FTS5 / R2 bytes)
 
 - **Invariants**: INV-0004-1, INV-0004-2, INV-0004-3, INV-0004-4
 - **activation_phase**: superseded by ADR-0012 (non-archival storage with R2 as permitted-artifact store, not raw archive)
@@ -64,7 +64,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: historical (superseded)
 - **reason**: ADR-0012 supersedes the "R2 = raw bytes store" framing with "R2 = permitted artifact store" (raw cloud upload prohibited). The 4 invariants here are kept as audit trail.
 
-### ADR-0005 — Confidence decomposition (reliability_tier / extraction_confidence / claim_status / scenario weight)
+### Inventory entry — ADR-0005 — Confidence decomposition (reliability_tier / extraction_confidence / claim_status / scenario weight)
 
 - **Invariants**: INV-0005-1, INV-0005-2, INV-0005-3, INV-0005-4, INV-0005-5, INV-0005-6
 - **activation_phase**: P0-M3 (EXTR-1A.* extraction routing) + P0-M4 (AGG-1A.* claim status + dossier weight) + P0-M5 (scenario weight composition)
@@ -72,7 +72,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: extraction confidence and claim status are computed during extraction (EXTR-1A.*) which has not yet been wired. `reliability_tier` is a Source field (seeded today) but its consumption in confidence math lives in EXTR-1A.* / AGG-1A.* code paths.
 
-### ADR-0007 — Edge ledger (supports / contradicts / qualifies / updates / supersedes)
+### Inventory entry — ADR-0007 — Edge ledger (supports / contradicts / qualifies / updates / supersedes)
 
 - **Invariants**: INV-0007-1, INV-0007-2, INV-0007-3
 - **activation_phase**: superseded by ADR-0013 (Neo4j-native edge ledger)
@@ -80,7 +80,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: historical (superseded)
 - **reason**: ADR-0013 INV-0013-6 explicitly supersedes ADR-0007 INV-0007-1 (SQLite edges table replaced by Neo4j typed relationships). The 3 invariants here are kept as audit trail.
 
-### ADR-0013 — Edge ledger via Neo4j (supersedes ADR-0007)
+### Inventory entry — ADR-0013 — Edge ledger via Neo4j (supersedes ADR-0007)
 
 - **Invariants**: INV-0013-1, INV-0013-2, INV-0013-3, INV-0013-4, INV-0013-5, INV-0013-6
 - **activation_phase**: P0-M3 (EXTR-1A.4 edge writer) + P0-M4 (AGG-1A.* edge consumers — dossier composer / counterclaim aggregation)
@@ -88,7 +88,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: Neo4j schema for edges is defined (INFRA-1A.2 migration), but the edge WRITER (`MERGE (a)-[:SUPPORTS]->(b)` etc.) lives in EXTR-1A.4+ and AGG-1A.*. No production code yet creates edges.
 
-### ADR-0014 — Neo4j-native feature adoption (APOC + GDS + native vector + native FTS)
+### Inventory entry — ADR-0014 — Neo4j-native feature adoption (APOC + GDS + native vector + native FTS)
 
 - **Invariants**: INV-0014-1, INV-0014-2, INV-0014-3, INV-0014-4, INV-0014-5, INV-0014-6, INV-0014-7
 - **activation_phase**: P0-M3 (EXTR-1A.* vector + FTS) + P0-M4 (AGG-1A.* APOC + GDS for dossier composition / scenario composer)
@@ -96,7 +96,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: Neo4j Community Edition is required (INV-0012-1 covered, PR #88 cross_ref). Native vector / FTS / APOC / GDS usage is wired in EXTR-1A.* and AGG-1A.* slices, none of which have landed.
 
-### ADR-0015 — Evidence (nullable quote + quote_reason + storage_level) + cite check 5+1 (supersedes ADR-0008)
+### Inventory entry — ADR-0015 — Evidence (nullable quote + quote_reason + storage_level) + cite check 5+1 (supersedes ADR-0008)
 
 - **Invariants**: INV-0015-1, INV-0015-2, INV-0015-3, INV-0015-4, INV-0015-5, INV-0015-6, INV-0015-7, INV-0015-8
 - **activation_phase**: P0-M3 (EXTR-1A.* evidence extraction with quote + quote_reason + storage_level) + P0-M6 (PUB-1A.2 cite check 5+1)
@@ -104,7 +104,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: `quote_reason` enum is in SQLite schema (INFRA-1A.5 landed) but cite check 5+1 (stale / retracted / horizon / unit / overclaim + intervention) and evidence storage_level wiring are PUB-1A.2 / EXTR-1A.* — not yet implemented.
 
-### ADR-0018 — Manual feedback inbound (manual_claim_entries + CLI)
+### Inventory entry — ADR-0018 — Manual feedback inbound (manual_claim_entries + CLI)
 
 - **Invariants**: INV-0018-1, INV-0018-2, INV-0018-3, INV-0018-4, INV-0018-5, INV-0018-6
 - **activation_phase**: INFRA-1B.6 (CLI landed, P0-M3 cross-milestone early)
@@ -112,7 +112,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: partially-activated
 - **reason**: `pipeline feedback` + `pipeline intervention review` CLI landed via PR #22 (INFRA-1B.6). manual_claim_entries SQLite table + Neo4j ManualClaimEntry node implemented. cross_ref_code for landed invariants can be backfilled in a future slice; remaining invariants (intervention review flow + claim-tier deduplication) are EXTR-1A.* / AGG-1A.* phase.
 
-### ADR-0019 — Bidirectional framing (scenario.impact_targets[] / impact_direction_by_target / thesis.stance + market_stance / EvidencePack multi-layer)
+### Inventory entry — ADR-0019 — Bidirectional framing (scenario.impact_targets[] / impact_direction_by_target / thesis.stance + market_stance / EvidencePack multi-layer)
 
 - **Invariants**: INV-0019-1, INV-0019-2, INV-0019-3, INV-0019-4, INV-0019-5, INV-0019-6, INV-0019-7, INV-0019-8, INV-0019-9
 - **activation_phase**: P0-M3 (EXTR-1A.5 evidence_role classification) + P0-M4 (AGG-1A.3 scenario composer with bidirectional framing) + P0-M5 (AGG-1A.4 thesis composer with stance + market_stance) + P0-M6 (PUB-1A.2 cite check one-sided thesis warning v1+)
@@ -120,7 +120,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: Scenario / Thesis schema fields (impact_targets[], stance, market_stance, source_perspective) landed via INFRA-1A.7. Consumer code (composer + cite check) is AGG-1A.* / PUB-1A.* — not yet wired.
 
-### ADR-0020 — System metrics framework (6 categories + evaluation harness)
+### Inventory entry — ADR-0020 — System metrics framework (6 categories + evaluation harness)
 
 - **Invariants**: INV-0020-1, INV-0020-2, INV-0020-3, INV-0020-4, INV-0020-5, INV-0020-6
 - **activation_phase**: OPS-1A.2+ (metrics_run / metrics_daily / metrics_alerts tables already in INFRA-1A.2 v1 schema) + P1-M1+ evaluation harness
@@ -128,7 +128,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: metrics tables exist in SQLite v1 schema, but the WRITER (metrics computation + alert evaluation) lives in OPS-1A.2+. Evaluation harness (evaluation_runs / evaluation_cases) is P1+.
 
-### ADR-0021 — Policy learning framework (rule-based, auto-tighten allowed, auto-relax prohibited)
+### Inventory entry — ADR-0021 — Policy learning framework (rule-based, auto-tighten allowed, auto-relax prohibited)
 
 - **Invariants**: INV-0021-1, INV-0021-2, INV-0021-3, INV-0021-4, INV-0021-5, INV-0021-6
 - **activation_phase**: P1+ (staged v0 → v1 → v2 → v3 patterns)
@@ -136,7 +136,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: policy_learning_events SQLite table exists (INFRA-1A.2 landed) but the policy learning engine (rule evaluation + auto-tighten gate) is staged at P1+ per ADR-0021.
 
-### ADR-0022 — Publishing site (Astro 5.0 + Cloudflare Pages + vault publications/ as source)
+### Inventory entry — ADR-0022 — Publishing site (Astro 5.0 + Cloudflare Pages + vault publications/ as source)
 
 - **Invariants**: INV-0022-1, INV-0022-2, INV-0022-3, INV-0022-4, INV-0022-5, INV-0022-6, INV-0022-7
 - **activation_phase**: P0-M6 (PUB-1A.4 Astro skeleton + PUB-1A.5 첫 publication)
@@ -144,7 +144,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated (partial scope guard via `scripts/check-vault-jsonl-policy.ts` from PR #94, covering vault content kinds + JSONL canonical-store guard only — the Astro Content Collection + Zod schema + 6-field build-fail policy belongs to PUB-1A.*)
 - **reason**: Astro repo is not yet scaffolded. PUB-1A.4 is the activating slice.
 
-### ADR-0024 — Data Science Module (deterministic dataset processing)
+### Inventory entry — ADR-0024 — Data Science Module (deterministic dataset processing)
 
 - **Invariants**: INV-0024-1, INV-0024-2, INV-0024-3, INV-0024-4, INV-0024-5
 - **activation_phase**: P0-M4 (AGG-1A.* dossier_composer dataset_input + extraction_layer derived_metric_computer)
@@ -152,7 +152,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: Data Science Module is not yet implemented. INV-0023-6 (large dataset → DSM mandatory) is enforced at the LLM call boundary in AGG-1A.* — not yet wired.
 
-### ADR-0025 — Editorial Intent layer (10-stage object model)
+### Inventory entry — ADR-0025 — Editorial Intent layer (10-stage object model)
 
 - **Invariants**: INV-0025-1, INV-0025-2, INV-0025-3, INV-0025-4, INV-0025-5, INV-0025-6, INV-0025-7, INV-0025-8
 - **activation_phase**: P0-M6 (AGG-1A.5 EditorialIntent Composer + PUB-1A.1 ContentDraft uses EditorialIntent + PUB-1A.5 첫 publication with operator-locked EditorialIntent)
@@ -160,7 +160,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated (vault content kind allowed via `scripts/check-vault-jsonl-policy.ts:PERMITTED_VAULT_KINDS` from PR #94 — preparation, not enforcement of INV-0025-* statements)
 - **reason**: EditorialIntent composer + `:HAS_INTENT` / `:USES_INTENT` Neo4j relationships + `vault/editorial_intents/<eit_id>.md` writer are P0-M6 slices, not yet landed.
 
-### ADR-0026 — Active source subset vs Tier A seed universe
+### Inventory entry — ADR-0026 — Active source subset vs Tier A seed universe
 
 - **Invariants**: INV-0026-1, INV-0026-2, INV-0026-3, INV-0026-4, INV-0026-5, INV-0026-6
 - **activation_phase**: P0-M6 (PUB-1A.5 첫 publication — active source scope 정의 + manual activation flag)
@@ -168,7 +168,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: 72-source Tier A seed exists (data/sources_seed.yaml, INFRA-1A.6 landed), but the active subset designation (operator-flagged) + activation flag schema is P0-M6 scope.
 
-### ADR-0027 — Claim-level evidence_role classification
+### Inventory entry — ADR-0027 — Claim-level evidence_role classification
 
 - **Invariants**: INV-0027-1, INV-0027-2, INV-0027-3, INV-0027-4, INV-0027-5, INV-0027-6
 - **activation_phase**: P0-M3 (EXTR-1A.5 evidence_role extraction) + P0-M4 (AGG-1A.3 dossier composer evidence_role minimum coverage) + P0-M6 (PUB-1A.2 EvidencePack v0 4-section grouping AC-044 (c))
@@ -176,7 +176,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: evidence_role is a claim-layer classification computed in EXTR-1A.5; dossier composer + EvidencePack consume it in AGG-1A.3 / PUB-1A.2.
 
-### ADR-0029 — LLM Prompt Injection containment (untrusted source content quarantine)
+### Inventory entry — ADR-0029 — LLM Prompt Injection containment (untrusted source content quarantine)
 
 - **Invariants**: INV-0029-1, INV-0029-2, INV-0029-3, INV-0029-4, INV-0029-5
 - **activation_phase**: EXTR-1A.* (LLM call boundary at extraction layer) + AGG-1A.* (dossier / scenario / thesis composers) + PUB-1A.* (publication preflight)
@@ -184,7 +184,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: not-yet-activated
 - **reason**: LLM call boundary is not yet wired. Prompt injection containment (system / tool / user role separation + untrusted-source quoting) belongs to LLM caller modules in EXTR-1A.* and later.
 
-### ADR-0030 — Discovery Worker concurrency model (bounded pool / host rate limit / SQLite serialization / Neo4j pool)
+### Inventory entry — ADR-0030 — Discovery Worker concurrency model (bounded pool / host rate limit / SQLite serialization / Neo4j pool)
 
 - **Invariants**: INV-0030-1, INV-0030-2, INV-0030-3, INV-0030-4, INV-0030-5
 - **activation_phase**: INFRA-1B.2b (semaphore + pool landed, P0-M2)
@@ -192,7 +192,7 @@ same engineering PR (per AGENTS.md "engineering slice PR sync" rule).
 - **enforcement_status**: partially-activated
 - **reason**: INFRA-1B.2b (PR #17, 0eec962) landed bounded semaphore (global 8 / per-host 1) + Neo4j pool env vars + crawl_state backoff. Discovery worker still has remaining hardening slices (INFRA-1B.2.h1 / INFRA-1B.2.h2 — planned). Backfill of `cross_ref_code` for landed invariants (INV-0030-1, INV-0030-2) is eligible in a future slice if operator promotes.
 
-### ADR-0031 — Research App /ops UI stack (Astro shell + React 18 island + Tailwind + shadcn/ui + Radix + TanStack Query v5 + SSE)
+### Inventory entry — ADR-0031 — Research App /ops UI stack (Astro shell + React 18 island + Tailwind + shadcn/ui + Radix + TanStack Query v5 + SSE)
 
 - **Invariants**: INV-0031-1, INV-0031-2, INV-0031-3, INV-0031-4, INV-0031-5, INV-0031-6, INV-0031-7
 - **activation_phase**: P0-M6 (RESEARCH-1A.0 read-only /ops mobile minimum, RESEARCH-1A.1+ full UX)
