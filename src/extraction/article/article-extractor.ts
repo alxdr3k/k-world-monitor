@@ -81,8 +81,18 @@ export interface ArticleExtractorDeps {
    */
   readonly tier?: LlmTier;
   /**
-   * Override the default INV-0029-1 caller-warning system prompt.
-   * Defaults to `ARTICLE_EXTRACTION_SYSTEM_PROMPT`.
+   * Additional task-specific system instructions APPENDED to the
+   * mandatory INV-0029-1 caller-warning prompt (PR #99 codex round
+   * 2 P2 — caller override cannot drop the warning; previous
+   * "replace-default" semantics let a custom prompt strip the
+   * untrusted-block-is-data warning and weaken the prompt-injection
+   * containment contract).
+   *
+   * If omitted, only `ARTICLE_EXTRACTION_SYSTEM_PROMPT` is sent. If
+   * supplied, the final system prompt is
+   * `${ARTICLE_EXTRACTION_SYSTEM_PROMPT}\n\n${this.deps.systemPrompt}`
+   * — the warning always appears, with task-specific instructions
+   * extending it.
    */
   readonly systemPrompt?: string;
   /**
@@ -115,8 +125,16 @@ export class ArticleExtractor implements Extractor {
     //    client (OpenAI / Anthropic) is provided at wiring time —
     //    EXTR-1A.2a uses a mock for tests, EXTR-1A.2b ships the
     //    real OpenAI Responses API client.
-    const systemPrompt =
-      this.deps.systemPrompt ?? ARTICLE_EXTRACTION_SYSTEM_PROMPT;
+    // INV-0029-1 caller-warning is MANDATORY. PR #99 codex round 2
+    // P2 — previous behavior allowed `this.deps.systemPrompt` to
+    // REPLACE the default warning, letting a caller-supplied
+    // task-specific prompt strip the untrusted-block-is-data warning
+    // and weaken prompt-injection containment. New semantics: always
+    // emit `ARTICLE_EXTRACTION_SYSTEM_PROMPT`; optional override is
+    // APPENDED as task-specific extension.
+    const systemPrompt = this.deps.systemPrompt
+      ? `${ARTICLE_EXTRACTION_SYSTEM_PROMPT}\n\n${this.deps.systemPrompt}`
+      : ARTICLE_EXTRACTION_SYSTEM_PROMPT;
     const llmResult: LlmInvokeResult = await this.deps.llmClient.invoke({
       systemPrompt,
       userPrompt: wrapped,
