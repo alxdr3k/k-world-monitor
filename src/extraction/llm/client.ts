@@ -68,8 +68,28 @@ export interface LlmInvokeResult {
    * caching). Optional — not all vendors expose this.
    */
   readonly cachedTokens?: number;
+  /**
+   * Total cost in USD for this invocation. Required by the OPS-1A.1
+   * run_ledger (AC-019 — `completeRun` rejects null cost to prevent
+   * silent SUM aggregation loss). Concrete clients compute this from
+   * per-token pricing × token counts (PR #99 codex round 2 + EXTR-
+   * 1A.2b).
+   */
+  readonly totalCostUsd?: number;
 }
 
+/**
+ * LLM client contract. Vendor-agnostic. Concrete clients (OpenAI
+ * Responses API, Anthropic Messages, etc.) declare their canonical
+ * `vendor` + `tier` + `model` at construction time so the calling
+ * extractor can issue `startRun` ledger rows BEFORE invoke completes
+ * (EXTR-1A.2b run_ledger integration — the ledger row needs vendor +
+ * tier + modelId up front; the per-call counters arrive via
+ * `LlmInvokeResult` post-invoke).
+ */
 export interface LlmClient {
+  readonly vendor: LlmVendor | "mock";
+  readonly tier: LlmTier;
+  readonly model: string;
   invoke(params: LlmInvokeParams): Promise<LlmInvokeResult>;
 }
