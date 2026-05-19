@@ -273,6 +273,20 @@ export class OpenAIClient implements LlmClient {
     }
     this.apiKey = apiKey;
     this.tier = opts.tier ?? 2;
+    // PR #100 codex round 3 P1 — Tier 0/1 default IDs in
+    // OPENAI_TIER_DEFAULT_MODEL are placeholders pending DEC-010 /
+    // ADR-0023 ratification and the actual OpenAI pro SKUs
+    // (`gpt-5-pro` / `gpt-5.2-pro` per OpenAI catalog) are
+    // Responses-API-only — this client posts to `/chat/completions`,
+    // so silently shipping a default for those tiers would
+    // unconditionally fail at runtime. Require callers to supply
+    // `model` explicitly when picking Tier 0/1 until the routing +
+    // endpoint pairing is ratified.
+    if ((this.tier === 0 || this.tier === 1) && opts.model === undefined) {
+      throw new Error(
+        `OpenAIClient: tier=${this.tier} (DEC-010 pro tier) requires an explicit \`model\` option — defaults are placeholders pending ADR-0023 ratification, and OpenAI pro SKUs use the Responses API which this client does not yet target. Pass \`model\` explicitly or use a Tier 2/3 default.`,
+      );
+    }
     this.model = opts.model ?? OPENAI_TIER_DEFAULT_MODEL[this.tier];
     this.fetchImpl = opts.fetch ?? globalThis.fetch;
     this.baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
@@ -310,8 +324,24 @@ export class OpenAIClient implements LlmClient {
     }
 
     const data = (await response.json()) as OpenAIChatResponseShape;
+    // PR #100 codex round 3 P2 — reject malformed responses where
+    // `choices` is empty or the first choice lacks `message.content`
+    // (string). Without this, `choices: []` or a missing content
+    // field would surface as a successful "" extraction that
+    // `ArticleExtractor` happily marks `completed` on the ledger —
+    // indistinguishable from a legitimate empty article result and
+    // bypassing retry / manual review. A legitimate empty result
+    // still surfaces normally via `finish_reason: "stop"` with
+    // `content: ""`.
     const firstChoice = data.choices?.[0];
-    const text = firstChoice?.message?.content ?? "";
+    if (firstChoice === undefined) {
+      throw new OpenAIIncompleteCompletionError("missing_choice", "");
+    }
+    const rawContent = firstChoice.message?.content;
+    if (rawContent === undefined || rawContent === null) {
+      throw new OpenAIIncompleteCompletionError("missing_content", "");
+    }
+    const text = rawContent;
     // PR #100 codex round 2 P2 — reject truncated / filtered
     // completions instead of silently returning empty / partial
     // content. ArticleExtractor's try/catch converts this to
@@ -320,7 +350,7 @@ export class OpenAIClient implements LlmClient {
     // also rejected — this layer does not support tool execution,
     // so a model that requests a tool call is effectively
     // incomplete for extraction purposes.
-    const finishReason = firstChoice?.finish_reason;
+    const finishReason = firstChoice.finish_reason;
     const incompleteReasons = new Set([
       "length",
       "content_filter",

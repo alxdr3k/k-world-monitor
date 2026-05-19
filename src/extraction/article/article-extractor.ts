@@ -174,6 +174,25 @@ export class ArticleExtractor implements Extractor {
       throw err;
     }
     if (runId !== undefined) {
+      // PR #100 codex round 3 P2 — when a real-vendor client
+      // returns `LlmInvokeResult.totalCostUsd === undefined` the
+      // previous wiring coalesced to `0`, bypassing completeRun's
+      // required-cost guard and making the billable API call vanish
+      // from AC-019 daily cost / throttling aggregation. Treat
+      // missing cost as a failed run instead: the run is surfaced
+      // for retry / manual review, the API call is still billed by
+      // the vendor, but the ledger correctly records that we lost
+      // visibility into the cost. OpenAIClient always computes a
+      // finite cost via `computeTotalCostUsd`, so this guard only
+      // fires for misbehaving vendor clients (e.g. a future
+      // Anthropic client whose usage parsing fails, or an
+      // OpenAI-compatible response with malformed `usage`).
+      if (llmResult.totalCostUsd === undefined) {
+        failRun(runId);
+        throw new Error(
+          `ArticleExtractor: LlmInvokeResult.totalCostUsd missing for vendor='${llmResult.vendor}' model='${llmResult.model}' — refusing to record a free run for a billable API call (AC-019). Fix the LlmClient implementation to compute totalCostUsd.`,
+        );
+      }
       // PR #100 codex P2 — pass the resolved-snapshot `model` from
       // LlmInvokeResult so completeRun rewrites `run_ledger.model_id`
       // from the request-time alias (e.g. `gpt-5-mini`) to the dated
@@ -186,7 +205,7 @@ export class ArticleExtractor implements Extractor {
         inputTokens: llmResult.inputTokens,
         outputTokens: llmResult.outputTokens,
         cachedTokens: llmResult.cachedTokens,
-        totalCostUsd: llmResult.totalCostUsd ?? 0,
+        totalCostUsd: llmResult.totalCostUsd,
         ...(llmResult.model && llmResult.model !== startedModelId
           ? { modelId: llmResult.model }
           : {}),

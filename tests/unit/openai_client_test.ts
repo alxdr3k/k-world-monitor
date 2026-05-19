@@ -110,13 +110,18 @@ describe("OpenAIClient — constructor + config", () => {
     expect(client.model).toBe(OPENAI_TIER_DEFAULT_MODEL[2]);
   });
 
-  it("Tier override picks per-tier default model", () => {
-    expect(new OpenAIClient({ apiKey: "sk", tier: 1 }).model).toBe(
-      OPENAI_TIER_DEFAULT_MODEL[1],
-    );
+  it("Tier override picks per-tier default model (Tier 2/3 callable; Tier 0/1 placeholder asserted via constant)", () => {
+    // Tier 2/3 defaults are callable Chat Completions IDs.
     expect(new OpenAIClient({ apiKey: "sk", tier: 3 }).model).toBe(
       OPENAI_TIER_DEFAULT_MODEL[3],
     );
+    expect(new OpenAIClient({ apiKey: "sk", tier: 2 }).model).toBe(
+      OPENAI_TIER_DEFAULT_MODEL[2],
+    );
+    // Tier 0/1 defaults are placeholders that require explicit
+    // `model` at construction — covered by the dedicated Tier 0/1
+    // routing describe block.
+    expect(OPENAI_TIER_DEFAULT_MODEL[1]).toBe("gpt-5.5-pro");
   });
 
   it("explicit model override wins over tier default", () => {
@@ -238,19 +243,32 @@ describe("OpenAIClient.invoke — request shape", () => {
   });
 
   it("per-tier default max_completion_tokens varies by tier", async () => {
-    for (const tier of [0, 1, 2, 3] as const) {
+    // Tier 0/1 require explicit `model` (round 3 P1) — pass a
+    // placeholder so the cap default behavior is still exercised.
+    const tierCases: Array<{ tier: 0 | 1 | 2 | 3; model?: string }> = [
+      { tier: 0, model: "gpt-5.5-pro-extended-thinking" },
+      { tier: 1, model: "gpt-5.5-pro" },
+      { tier: 2 },
+      { tier: 3 },
+    ];
+    for (const tc of tierCases) {
       const { fetch, calls } = makeFetchMock(200, STANDARD_OPENAI_RESPONSE);
-      const client = new OpenAIClient({ apiKey: "sk", tier, fetch });
+      const client = new OpenAIClient({
+        apiKey: "sk",
+        tier: tc.tier,
+        fetch,
+        ...(tc.model ? { model: tc.model } : {}),
+      });
       await client.invoke({
         systemPrompt: "s",
         userPrompt: "u",
-        tier,
+        tier: tc.tier,
       });
       const body = JSON.parse((calls[0]!.init?.body as string) ?? "{}") as {
         max_completion_tokens?: number;
       };
       expect(body.max_completion_tokens).toBe(
-        OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS[tier],
+        OPENAI_TIER_DEFAULT_MAX_OUTPUT_TOKENS[tc.tier],
       );
     }
   });
@@ -299,16 +317,9 @@ describe("OpenAIClient.invoke — response parsing", () => {
     expect(result.cachedTokens).toBeUndefined();
   });
 
-  it("handles response with empty choices safely (no NPE)", async () => {
-    const { fetch } = makeFetchMock(200, { choices: [], usage: {} });
-    const client = new OpenAIClient({ apiKey: "sk", fetch });
-    const result = await client.invoke({
-      systemPrompt: "s",
-      userPrompt: "u",
-      tier: 2,
-    });
-    expect(result.text).toBe("");
-  });
+  // Empty `choices` is malformed per PR #100 round 3 P2 — see the
+  // dedicated rejection describe below. No "returns empty string"
+  // fallback any more.
 
   it("prefers response.model resolved snapshot over request-time alias (PR #100 P2)", async () => {
     const { fetch } = makeFetchMock(200, {
@@ -444,22 +455,125 @@ describe("computeTotalCostUsd — pricing math", () => {
 // ---------------------------------------------------------------------
 
 describe("OpenAIClient — Tier 0/1 default routing (PR #100 P2)", () => {
-  it("Tier 0 default = gpt-5.5-pro-extended-thinking (DEC-010 routing)", () => {
+  it("Tier 0 default = gpt-5.5-pro-extended-thinking placeholder (DEC-010 routing)", () => {
     expect(OPENAI_TIER_DEFAULT_MODEL[0]).toBe("gpt-5.5-pro-extended-thinking");
-    const client = new OpenAIClient({ apiKey: "sk", tier: 0 });
+    // Construction with explicit override (round 3 P1 — Tier 0
+    // requires explicit `model` because default placeholder is not
+    // a callable Chat Completions ID).
+    const client = new OpenAIClient({
+      apiKey: "sk",
+      tier: 0,
+      model: "gpt-5.5-pro-extended-thinking",
+    });
     expect(client.model).toBe("gpt-5.5-pro-extended-thinking");
   });
 
-  it("Tier 1 default = gpt-5.5-pro (DEC-010 routing)", () => {
+  it("Tier 1 default = gpt-5.5-pro placeholder (DEC-010 routing)", () => {
     expect(OPENAI_TIER_DEFAULT_MODEL[1]).toBe("gpt-5.5-pro");
-    const client = new OpenAIClient({ apiKey: "sk", tier: 1 });
+    const client = new OpenAIClient({
+      apiKey: "sk",
+      tier: 1,
+      model: "gpt-5.5-pro",
+    });
     expect(client.model).toBe("gpt-5.5-pro");
   });
 
-  it("Tier 0 and Tier 1 route to DIFFERENT models (no collapse to gpt-5)", () => {
+  it("Tier 0 and Tier 1 placeholders are DIFFERENT (no collapse to gpt-5)", () => {
     expect(OPENAI_TIER_DEFAULT_MODEL[0]).not.toBe(OPENAI_TIER_DEFAULT_MODEL[1]);
     expect(OPENAI_TIER_DEFAULT_MODEL[0]).not.toBe("gpt-5");
     expect(OPENAI_TIER_DEFAULT_MODEL[1]).not.toBe("gpt-5");
+  });
+
+  it("Tier 0 constructor REQUIRES explicit model option (PR #100 round 3 P1)", () => {
+    expect(() => new OpenAIClient({ apiKey: "sk", tier: 0 })).toThrow(
+      /tier=0.*requires an explicit `model` option/,
+    );
+  });
+
+  it("Tier 1 constructor REQUIRES explicit model option (PR #100 round 3 P1)", () => {
+    expect(() => new OpenAIClient({ apiKey: "sk", tier: 1 })).toThrow(
+      /tier=1.*requires an explicit `model` option/,
+    );
+  });
+
+  it("Tier 2 / Tier 3 construct without model (defaults remain callable)", () => {
+    expect(() => new OpenAIClient({ apiKey: "sk", tier: 2 })).not.toThrow();
+    expect(() => new OpenAIClient({ apiKey: "sk", tier: 3 })).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------
+// PR #100 codex round 3 — empty / malformed OpenAI response rejection
+// ---------------------------------------------------------------------
+
+describe("OpenAIClient.invoke — empty/malformed response rejection (PR #100 round 3 P2)", () => {
+  it("throws OpenAIIncompleteCompletionError when choices is empty array", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [],
+      usage: { prompt_tokens: 100, completion_tokens: 0 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      expect(err).toBeInstanceOf(OpenAIIncompleteCompletionError);
+      expect((err as OpenAIIncompleteCompletionError).finishReason).toBe(
+        "missing_choice",
+      );
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
+  });
+
+  it("throws OpenAIIncompleteCompletionError when choices is missing entirely", async () => {
+    const { fetch } = makeFetchMock(200, {
+      usage: { prompt_tokens: 100 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIIncompleteCompletionError);
+  });
+
+  it("throws when first choice has no message field", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ finish_reason: "stop" }],
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    try {
+      await client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 });
+    } catch (err) {
+      expect(err).toBeInstanceOf(OpenAIIncompleteCompletionError);
+      expect((err as OpenAIIncompleteCompletionError).finishReason).toBe(
+        "missing_content",
+      );
+      return;
+    }
+    throw new Error("expected OpenAIIncompleteCompletionError");
+  });
+
+  it("throws when message.content is null", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: null }, finish_reason: "stop" }],
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    await expect(
+      client.invoke({ systemPrompt: "s", userPrompt: "u", tier: 2 }),
+    ).rejects.toThrow(OpenAIIncompleteCompletionError);
+  });
+
+  it("accepts content='' with finish_reason='stop' (valid empty extraction)", async () => {
+    const { fetch } = makeFetchMock(200, {
+      choices: [{ message: { content: "" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 100, completion_tokens: 0 },
+    });
+    const client = new OpenAIClient({ apiKey: "sk", fetch });
+    const result = await client.invoke({
+      systemPrompt: "s",
+      userPrompt: "u",
+      tier: 2,
+    });
+    expect(result.text).toBe("");
   });
 });
 

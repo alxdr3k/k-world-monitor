@@ -777,7 +777,11 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
     expect(ledgerRows().length).toBe(0);
   });
 
-  it("treats undefined totalCostUsd from LlmInvokeResult as 0 (AC-019 — null cost rejected)", async () => {
+  it("real-vendor + undefined totalCostUsd → failRun + throw (PR #100 round 3 P2 — no free billable runs)", async () => {
+    // Round 3 P2 fix: previous behavior coalesced undefined cost
+    // to 0 and silently completed the row, hiding billable calls
+    // from AC-019 daily aggregation. New behavior: fail the run
+    // and surface the misbehaving vendor client.
     const response: LlmInvokeResult = {
       text: "extracted",
       vendor: "openai",
@@ -793,12 +797,18 @@ describe("ArticleExtractor — OPS-1A.1 run_ledger integration (EXTR-1A.2b)", ()
       model: "gpt-5-mini",
     });
     const ext = new ArticleExtractor({ llmClient: llm });
-    await ext.extract({
-      sourceType: "article",
-      sourceId: "src_ok",
-      rawContent: "<p>Body</p>",
-    });
-    const row = ledgerRows()[0]!;
-    expect(row.total_cost_usd).toBe(0);
+    await expect(
+      ext.extract({
+        sourceType: "article",
+        sourceId: "src_ok",
+        rawContent: "<p>Body</p>",
+      }),
+    ).rejects.toThrow(
+      /totalCostUsd missing for vendor='openai'.*refusing to record a free run/,
+    );
+    const rows = ledgerRows();
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.status).toBe("failed");
+    expect(rows[0]!.total_cost_usd).toBeNull();
   });
 });
