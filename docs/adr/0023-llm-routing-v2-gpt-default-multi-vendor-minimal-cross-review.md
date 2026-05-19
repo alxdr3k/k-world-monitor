@@ -32,15 +32,21 @@ invariants:
   - id: INV-0023-2
     statement: Tier 0 (frontier reasoning, judgment / validation) = **OpenAI frontier reasoning model with extended thinking** (default) + **Anthropic frontier reasoning model with high effort** (cross-vendor review only). Google (Gemini) 사용 절대 금지. 두 모델은 성능/특성 기준으로 동 tier (Anthropic frontier = source-grounded reasoning + agentic long-task 우위, OpenAI extended thinking = 일반 frontier reasoning 우위). 가격 단독 매핑 금지. 실제 model snapshot 은 `data/llm_routing.yaml` operational config — ADR 본문은 capability tier 만 lock.
     status: active
+    cross_ref_code:
+      - scripts/check-llm-routing-config.ts:assertTier0VendorRoles
   - id: INV-0023-3
     statement: Tier 매핑 기준 = **capability (성능 / 분야 우위 / 특성)** (가격 단독 매핑 금지, INV-0023-5 강화). vendor 별 동 tier 모델은 quality benchmark + domain advantage 로 매핑되며 cost 는 보조 지표. **실제 model snapshot (정확한 model name / version / effort level) 은 `data/llm_routing.yaml` operational config 가 관리** — ADR 본문은 stable invariant (capability tier + vendor role), config 는 운영 catalog change 시 갱신. ADR 본문에 사용되는 model name 은 example snapshot (2026-05-11 시점, OpenAI API catalog 변경 시 config 만 update — ADR 본문 stable).
     status: active
+    cross_ref_code:
+      - scripts/check-llm-routing-config.ts:assertTiersCapabilityCanonical
   - id: INV-0023-4
     statement: "Cross-vendor review **강제 단계는 3 종으로 한정**: (1) publication preflight cite check overclaim LLM judge (Tier 3 cross-vendor — GPT-5 nano 생성 시 Claude Haiku 4.5 review), (2) scenario validate adversarial pass (Tier 0 cross-vendor — GPT-5.5 Pro xthink 생성 시 Opus 4.7 xhigh review), (3) 운영자 명시 high-stakes thesis (Tier 0 cross-vendor). 그 외 단계 (article extract / dossier 합성 / EvidencePack / 일반 thesis) 는 cross-vendor 의무 X — manual review + deterministic 검증 (quote substring 등) 만 적용."
     status: active
   - id: INV-0023-5
     statement: "Google (Gemini API) 사용 scope = **Tier 3 + 탐색(Google Search grounding) 보조 + 동일 tier 비용효율 우위 시만**. 메인 generator (extract / dossier / scenario / thesis / publication) 의 default 또는 reviewer 로 사용 금지 (INV-0023-2 와 정합). 사용 가능한 경우: discovery layer 의 검색 grounding (Gemini Search grounding 기능) / 단순 structured 추출에서 GPT-5 nano 대비 비용효율 우위 입증 시 fallback."
     status: active
+    cross_ref_code:
+      - scripts/check-llm-routing-config.ts:assertGoogleScopeIsTier3Only
   - id: INV-0023-6
     statement: 대형 dataset (1000+ rows 또는 50KB+ raw payload) 는 **ADR-0024 Data Science Module 을 통과 후 derived metric 으로만 LLM 입력**. dataset raw → LLM 직접 금지. LLM 호출에 raw dataset 발견 시 assertion fail.
     status: active
